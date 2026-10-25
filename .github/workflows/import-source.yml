@@ -3,7 +3,7 @@ name: Import Living Villages source
 on:
   push:
     paths:
-      - living-villages-mod.source-ready
+      - living-villages-mod-0.15.0-handoff.zip
 
 permissions:
   contents: write
@@ -27,14 +27,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat living-villages-mod.source-part-* > /tmp/living-villages-mod.zip.b64
-          base64 --decode /tmp/living-villages-mod.zip.b64 > /tmp/living-villages-mod.zip
           mkdir -p /tmp/living-villages-import
-          unzip -q /tmp/living-villages-mod.zip -d /tmp/living-villages-import
+          unzip -q living-villages-mod-0.15.0-handoff.zip -d /tmp/living-villages-import
           source_dir=/tmp/living-villages-import/living-villages-mod-0.15.0
           test -f "$source_dir/build.gradle"
           cp -a "$source_dir/." .
-          rm -f living-villages-mod.source-part-* living-villages-mod.source-ready .github/workflows/import-source.yml
+          rm -f living-villages-mod-0.15.0-handoff.zip .github/workflows/import-source.yml
           cp README_RU.md README.md
           python3 - <<'PY'
           from pathlib import Path
