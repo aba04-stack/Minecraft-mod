@@ -3,7 +3,7 @@ name: Import Living Villages source
 on:
   push:
     paths:
-      - living-villages-mod-0.15.0-handoff.zip
+      - '*.zip'
 
 permissions:
   contents: write
@@ -27,24 +27,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          archive_path="$(find . -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$archive_path"
           mkdir -p /tmp/living-villages-import
-          unzip -q living-villages-mod-0.15.0-handoff.zip -d /tmp/living-villages-import
-          source_dir=/tmp/living-villages-import/living-villages-mod-0.15.0
+          unzip -q "$archive_path" -d /tmp/living-villages-import
+          source_dir="$(find /tmp/living-villages-import -mindepth 1 -maxdepth 1 -type d -print -quit)"
           test -f "$source_dir/build.gradle"
           cp -a "$source_dir/." .
-          rm -f living-villages-mod-0.15.0-handoff.zip .github/workflows/import-source.yml
-          cp README_RU.md README.md
+          rm -f "$archive_path" .github/workflows/import-source.yml
+          test -f README.md || cp README_RU.md README.md
           python3 - <<'PY'
           from pathlib import Path
           p = Path(".github/workflows/build.yml")
           s = p.read_text(encoding="utf-8")
-          old = "      - name: Run static project checks\n        run: python3 tools/validate_project.py\n"
-          new = old + "      - name: Run regression and syntax checks\n        run: |\n          java tools/JavaSyntaxCheck.java src/main/java\n          for test_file in tools/test_*.py; do python3 \"$test_file\"; done\n          sh -n gradlew BUILD_LOCAL.sh\n"
-          if old not in s:
-              raise SystemExit("Could not find the expected validation step in build.yml")
-          p.write_text(s.replace(old, new, 1), encoding="utf-8")
+          if "Run regression and syntax checks" not in s:
+              old = "      - name: Run static project checks\n        run: python3 tools/validate_project.py\n"
+              new = old + "      - name: Run regression and syntax checks\n        run: |\n          java tools/JavaSyntaxCheck.java src/main/java\n          for test_file in tools/test_*.py; do python3 \"$test_file\"; done\n          sh -n gradlew BUILD_LOCAL.sh\n"
+              if old not in s:
+                  raise SystemExit("Could not find the expected validation step in build.yml")
+              s = s.replace(old, new, 1)
+              p.write_text(s, encoding="utf-8")
           PY
-          test -f README.md
 
       - name: Run project checks
         run: |
@@ -58,7 +61,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Import Living Villages 0.15.0 source and checks"
+          git commit -m "Import Living Villages source and checks"
           git push
 
       - name: Build Minecraft mod
@@ -68,6 +71,6 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: livingvillages-0.15.0
+          name: livingvillages-${{ github.sha }}
           path: build/libs/livingvillages-0.15.0.jar
           if-no-files-found: error
