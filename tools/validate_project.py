@@ -151,7 +151,7 @@ def main() -> int:
         "incremental farm builder": "class VillageFarmBuilder",
         "farm crop completion check": "current.is(cropBlock)",
         "validated vanilla crop/seed mapping": "isSupportedCrop(Item seedItem, Block cropBlock)",
-        "hungriest breeding recipient first": "Comparator.comparingInt(VillagePopulation::foodPoints)\n                .thenComparing",
+        "hungriest breeding recipient first": "Comparator.comparingInt((Villager v) -> foodPoints(v))\n                .thenComparing",
         "role reconciliation": "roleDisabled",
         "builder config toggle": "ENABLE_VILLAGE_BUILDER",
         "construction reach check": "withinPlacementReach",
