@@ -65,3 +65,13 @@ assert farm_suitability.index(composter_guard) < farm_suitability.index("level.g
     "farm site must check composter chunk availability before querying its heightmap"
 )
 
+# Guard patrol-point selection must check chunk availability before querying the heightmap.
+defense_source = (ROOT / "src/main/java/com/abs/livingvillages/VillageDefense.java").read_text(encoding="utf-8")
+start = defense_source.index("private static BlockPos choosePatrolPoint")
+end = defense_source.index("private static BlockPos getOrCreateHome", start)
+patrol_method = defense_source[start:end]
+patrol_guard = "if (!level.hasChunkAt(new BlockPos(x, center.getY(), z)))"
+assert patrol_guard in patrol_method, "patrol selection must check the destination chunk before querying heightmaps"
+assert patrol_method.index(patrol_guard) < patrol_method.index("level.getHeight("), (
+    "patrol selection must not query the heightmap before checking chunk availability"
+)

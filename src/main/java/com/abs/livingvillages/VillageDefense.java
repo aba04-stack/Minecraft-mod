@@ -260,6 +260,10 @@ public final class VillageDefense {
         int[][] offsets = {{4, 0}, {3, 3}, {0, 4}, {-3, 3}, {-4, 0}, {-3, -3}, {0, -4}, {3, -3}};
         int x = center.getX() + offsets[phase][0];
         int z = center.getZ() + offsets[phase][1];
+        // Patrols must not query heightmaps in an unloaded chunk.
+        if (!level.hasChunkAt(new BlockPos(x, center.getY(), z))) {
+            return isSafeStand(level, center) ? center : null;
+        }
         int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
         BlockPos target = new BlockPos(x, y, z);
         if (isSafeStand(level, target)) return target;

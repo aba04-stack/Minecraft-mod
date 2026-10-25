@@ -4,7 +4,7 @@
 - [x] POSIX/Windows Gradle bootstrap pins version 9.2.1 and verifies distribution SHA-256.
 - [x] Run `python3 tools/validate_project.py`; this validates source structure but does not resolve Minecraft/NeoForge symbols.
 - [x] `./gradlew build` passed in GitHub Actions on Java 21 with Minecraft 1.21.1 / NeoForge 21.1.264.
-- [x] Active-area safety regression: population query filters dead villagers; farmland/bed scans and house/farm site searches skip unloaded chunks.
+- [x] Active-area safety regression: population query filters dead villagers; farmland/bed scans, house/farm site searches, and guard patrol-point selection skip unloaded chunks.
 - [ ] Run `runClient` and manually verify farm project initialization and food courier behavior.
 - [ ] Builder: 96 same-type planks, matching door, red bed; 96 planks remain after crafting door.
 - [ ] Farm: 24 seed items, water bucket, composter, hoe; worker makes each block placement in sequence.
@@ -24,7 +24,7 @@
 - [x] Назначение новых шахтёров/стражников требует инструмента, доступного лично или в местном складе.
 - [x] Добавлена поддержка естественного размножения без ручного создания детей: курьер доставляет настоящую еду, а рождение/рост контролирует ванильная механика.
 - [x] Курьер не начинает рейс без двух взрослых, потенциально свободной подходящей кровати и реального запаса еды сверх резерва.
-- [x] Сканирование грядок/кроватей и поиск площадок для дома/фермы проверяют загрузку чанка до доступа к блокам/heightmap; запросы деревни исключают мёртвых жителей.
+- [x] Сканирование грядок/кроватей, поиск площадок дома/фермы и выбор патрульной точки проверяют загрузку чанка до доступа к блокам/heightmap; запросы деревни исключают мёртвых жителей.
 - [x] При сбое возврата контейнера невмещённые реальные предметы выбрасываются рядом с курьером, а не удаляются молча.
 - [x] Полная Gradle-компиляция на Java 21 с Minecraft 1.21.1 / NeoForge 21.1.264 подтверждена в GitHub Actions.
 - [ ] Запуск `runClient` и тест поведения на игровом клиенте.
