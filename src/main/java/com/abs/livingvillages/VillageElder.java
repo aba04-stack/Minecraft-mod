@@ -31,7 +31,6 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.fml.DistExecutor;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -269,8 +268,7 @@ public final class VillageElder {
     }
 
     private static void handlePanelOnClient(ElderPanelData data, IPayloadContext context) {
-        DistExecutor.unsafeRunWhenOn(net.neoforged.api.distmarker.Dist.CLIENT,
-            () -> () -> LivingVillagesClient.openElderPanel(data));
+        context.enqueueWork(() -> LivingVillagesClient.openElderPanel(data));
     }
 
     private static void handleActionOnServer(ElderAction action, IPayloadContext context) {
