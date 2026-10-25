@@ -28,22 +28,40 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p run/server
+          mkdir -p run/server build
           printf 'eula=true\n' > run/server/eula.txt
-          set +e
-          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer 2>&1 | tee build/server-smoke.log
-          status=${PIPESTATUS[0]}
-          set -e
-          if ! grep -Eq 'Done \([0-9.]+s\)! For help, type "help"' build/server-smoke.log; then
-            echo "Dedicated server did not reach the ready state."
-            if [ -f run/server/logs/latest.log ]; then tail -n 200 run/server/logs/latest.log; fi
-            exit 1
-          fi
-          if [ "$status" -ne 0 ] && [ "$status" -ne 124 ] && [ "$status" -ne 130 ] && [ "$status" -ne 143 ]; then
-            echo "Dedicated server smoke test exited unexpectedly with status $status."
-            exit "$status"
-          fi
-          echo "Dedicated server reached the ready state; timed shutdown was expected."
+          log_file=build/server-smoke.log
+
+          # Run in a separate process group so timeout cleanup also stops the Java server child.
+          setsid ./gradlew runServer > "$log_file" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill -TERM -- "-$server_pid" 2>/dev/null || true
+            sleep 2
+            kill -KILL -- "-$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          deadline=$((SECONDS + 150))
+          while (( SECONDS < deadline )); do
+            if grep -Eq 'Done \([0-9.]+s\)! For help, type "help"' "$log_file"; then
+              echo "Dedicated server reached the ready state."
+              exit 0
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo "Dedicated server exited before becoming ready."
+              tail -n 200 "$log_file" || true
+              if [ -f run/server/logs/latest.log ]; then tail -n 200 run/server/logs/latest.log; fi
+              exit 1
+            fi
+            sleep 2
+          done
+
+          echo "Dedicated server did not reach the ready state within 150 seconds."
+          tail -n 200 "$log_file" || true
+          if [ -f run/server/logs/latest.log ]; then tail -n 200 run/server/logs/latest.log; fi
+          exit 1
       - name: Upload mod JAR
         uses: actions/upload-artifact@v4
         with:
