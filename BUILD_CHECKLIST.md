@@ -3,7 +3,7 @@
 - [x] Food courier selects the hungriest eligible adult first, with deterministic tie-break.
 - [x] POSIX/Windows Gradle bootstrap pins version 9.2.1 and verifies distribution SHA-256.
 - [x] Run `python3 tools/validate_project.py`; this validates source structure but does not resolve Minecraft/NeoForge symbols.
-- [ ] Run `./gradlew build` on a machine with network access to Gradle/Minecraft/NeoForge repositories.
+- [x] `./gradlew build` passed in GitHub Actions on Java 21 with Minecraft 1.21.1 / NeoForge 21.1.264.
 - [ ] Run `runClient` and manually verify farm project initialization and food courier behavior.
 - [ ] Builder: 96 same-type planks, matching door, red bed; 96 planks remain after crafting door.
 - [ ] Farm: 24 seed items, water bucket, composter, hoe; worker makes each block placement in sequence.
@@ -24,7 +24,7 @@
 - [x] Добавлена поддержка естественного размножения без ручного создания детей: курьер доставляет настоящую еду, а рождение/рост контролирует ванильная механика.
 - [x] Курьер не начинает рейс без двух взрослых, потенциально свободной подходящей кровати и реального запаса еды сверх резерва.
 - [x] При сбое возврата контейнера невмещённые реальные предметы выбрасываются рядом с курьером, а не удаляются молча.
-- [ ] Полная Gradle compilation на Java 21 с Minecraft 1.21.1 / NeoForge 21.1.264 (загрузка Gradle доступна через checksum-проверяемый bootstrap).
+- [x] Полная Gradle-компиляция на Java 21 с Minecraft 1.21.1 / NeoForge 21.1.264 подтверждена в GitHub Actions.
 - [ ] Запуск `runClient` и тест поведения на игровом клиенте.
 
 - [x] Добавлен конечный автомат физического ремесленника с фазами сбора входов, работы у верстака и доставки результата.
@@ -57,13 +57,13 @@
 
 ## Текущий статус
 
-Полная компиляция и запуск не завершены в этой среде: Gradle и зависимости Minecraft/NeoForge требуют скачивания. Не распространять как проверенный JAR до выполнения тестов выше.
+Компиляция и старт dedicated server подтверждены GitHub Actions; игровой клиент и функциональные сценарии по чек-листу ещё не проверены. Не считать текущий артефакт релизом для основного мира до выполнения игровых тестов.
 
 - [x] Добавлен строитель, который забирает реальные материалы и возводит хижину по блокам.
 - [x] Материалы и проект строителя сохраняются в persistent data жителя.
 - [x] Строитель проверяет досягаемость, прямую видимость, загруженность чанка и `mobGriefing`.
 - [x] Параллельная физическая работа ремесленника приостанавливается на время стройки.
-- [ ] Полная Gradle compile с Minecraft/NeoForge dependency classpath.
+- [x] Полная Gradle-компиляция с Minecraft/NeoForge dependency classpath — успешно на GitHub Actions.
 - [ ] Тест `runClient`: наблюдать подход к складу, сбор 96 досок + двери + кровати, постановку блоков/двух частей двери и сохранение проекта после перезахода.
 - [ ] Тест `runClient`: ферма строится по одному действию; при исчезновении ресурса проект ждёт, не создаёт предметы и не перезаписывает блоки игрока.
 - [ ] Тест отключения ролей: отключение шахтёра, защитника, ремесленника или строителя должно освобождать роль/маршрут без зависшего `WALK_TARGET`.
@@ -88,4 +88,4 @@
 - [ ] Проверить обычный ПКМ пустой рукой, Shift+ПКМ и ПКМ с предметом в руке.
 - [ ] Нажать все кнопки, проверить ответ сервера, появление/отмену запросов и изменение приоритетов.
 - [ ] Убедиться, что после перезахода староста и его состояние остаются согласованными, а повторного старосты не появляется.
-- [ ] Пройти отдельный тест на dedicated server, где клиентские классы не загружаются на серверной стороне.
+- [x] Smoke-test dedicated server: сервер стартует с модом и достигает состояния готовности без загрузки GUI-клиента.

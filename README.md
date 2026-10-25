@@ -7,7 +7,7 @@
 
 Living Villages expands village life through autonomous villager roles, resource logistics, crafting work orders, mining and tree work, village construction, farming, defense, and population support.
 
-This is an experimental hobby project. The repository contains source code and static checks, but a successful full Gradle build and in-game behavior must be confirmed by CI and play-testing before treating this version as a working release.
+This is an experimental hobby project. On 2026-10-25, GitHub Actions completed `./gradlew build` successfully and confirmed that the dedicated server reached its ready state for the mod source. The client UI and in-world villager behaviors still need play-testing before treating this version as a release.
 
 ## Build
 
@@ -17,7 +17,7 @@ On a system with Java 21 and internet access:
 ./gradlew build
 ```
 
-The build workflow also runs the project's static validation, Java syntax parsing, regression checks, and shell syntax checks.
+The build workflow runs static validation and Gradle compilation, then performs a dedicated-server startup smoke test on pull requests. [Latest successful server smoke test and JAR artifact](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40197573229).
 
 ## Local checks
 
