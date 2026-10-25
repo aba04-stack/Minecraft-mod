@@ -58,8 +58,7 @@ public final class VillageIndustry {
             || !LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()) return;
 
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
+        List<Villager> villagers = VillageArea.findVillagers(level, center);
         if (villagers.isEmpty()) return;
         if (VillageFarmBuilder.hasActiveProjectNear(level, center)
             || VillageBuilder.hasActiveProjectNear(level, center)) return;
@@ -219,9 +218,7 @@ public final class VillageIndustry {
                 if (predicate.test(stack)) total += stack.getCount();
             }
         }
-        AABB area = new AABB(center).inflate(LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get(), 12.0D,
-            LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
-        for (Villager villager : level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)) {
+        for (Villager villager : VillageArea.findVillagers(level, center)) {
             // A tool in an unrelated worker's pockets is not a village-wide tool supply.
             if (!workerCanUseTool.test(villager)) continue;
             if (predicate.test(villager.getMainHandItem())) total += villager.getMainHandItem().getCount();
@@ -530,9 +527,8 @@ public final class VillageIndustry {
     }
 
     private static boolean hasWorkerNearStorage(ServerLevel level, BlockPos center, List<StorageRef> storages) {
-        AABB area = new AABB(center).inflate(LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get(), 12.0D,
-            LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, v -> v.isAlive() && !v.isBaby());
+        List<Villager> villagers = VillageArea.findVillagers(level, center).stream()
+            .filter(v -> !v.isBaby()).toList();
         for (StorageRef storage : storages) if (hasWorkerNear(villagers, storage.pos(), 5.0D)) return true;
         return false;
     }

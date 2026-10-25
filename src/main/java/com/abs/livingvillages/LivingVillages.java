@@ -448,9 +448,7 @@ public final class LivingVillages {
     }
 
     private List<Villager> findVillagers(ServerLevel level, BlockPos center) {
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
+        return VillageArea.findVillagers(level, center);
     }
 
     private BlockPos averageVillagerPosition(List<Villager> villagers, BlockPos fallback) {

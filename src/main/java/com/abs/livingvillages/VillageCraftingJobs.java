@@ -159,9 +159,7 @@ public final class VillageCraftingJobs {
             data.putLong(NEXT_JOB, now + RETRY_TICKS);
             return;
         }
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class,
-            new AABB(origin).inflate(LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get(), 12.0D,
-                LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()), Villager::isAlive);
+        List<Villager> villagers = VillageArea.findVillagers(level, origin);
         Recipe recipe = chooseRecipe(level, origin, villager, storages, villagers);
         if (recipe == null || !canFitCraftResult(villager.getInventory(), recipe)) {
             // An idle craftsman should not rescan thousands of blocks every few ticks while stock is low.

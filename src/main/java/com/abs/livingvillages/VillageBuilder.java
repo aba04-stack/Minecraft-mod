@@ -86,10 +86,7 @@ public final class VillageBuilder {
     public static boolean hasActiveProjectNear(ServerLevel level, BlockPos center) {
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) return false;
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return !level.getEntitiesOfClass(Villager.class, area,
-            v -> v.isAlive() && isProjectActive(v)).isEmpty();
+        return VillageArea.findVillagers(level, center).stream().anyMatch(VillageBuilder::isProjectActive);
     }
 
     /** Used by role assignment to keep a suitable spare bed available for natural population growth. */
@@ -177,12 +174,10 @@ public final class VillageBuilder {
     }
 
     private static Villager findAvailableBuilder(ServerLevel level, BlockPos center) {
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return level.getEntitiesOfClass(Villager.class, area,
-                v -> v.isAlive() && !v.isBaby() && isBuilder(v) && !isProjectActive(v)
-                    && !hasOtherActiveTask(v.getPersistentData()))
-            .stream().min(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))))
+        return VillageArea.findVillagers(level, center).stream()
+            .filter(v -> v.isAlive() && !v.isBaby() && isBuilder(v) && !isProjectActive(v)
+                && !hasOtherActiveTask(v.getPersistentData()))
+            .min(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))))
             .orElse(null);
     }
 
