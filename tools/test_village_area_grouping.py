@@ -26,7 +26,7 @@ checks = {
     "VillagerRoles.java": "List<Villager> all = VillageArea.findVillagers(level, center);",
     "VillageIndustry.java": "List<Villager> villagers = VillageArea.findVillagers(level, center);",
     "VillageBuilder.java": "VillageArea.findVillagers(level, center).stream()",
-    "VillageFarmBuilder.java": "VillageArea.findVillagers(level, center).stream()",
+    "VillageFarmBuilder.java": "new ArrayList<>(VillageArea.findVillagers(level, center).stream()",
     "VillageCraftingJobs.java": "List<Villager> villagers = VillageArea.findVillagers(level, origin);",
     "VillageElder.java": "List<Villager> villagers = VillageArea.findVillagers(level, origin);",
     "VillagePopulation.java": "VillageArea.findVillagers(level, center).stream()",

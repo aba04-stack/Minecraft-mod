@@ -120,11 +120,11 @@ public final class VillageFarmBuilder {
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
             || !isSupportedCrop(seedItem, cropBlock)) return false;
 
-        List<Villager> candidates = VillageArea.findVillagers(level, center).stream().filter(v -> v.isAlive()
+        List<Villager> candidates = new ArrayList<>(VillageArea.findVillagers(level, center).stream().filter(v -> v.isAlive()
             && VillagerRoles.isUnemployedAdult(v) && !v.isSleeping()
             && v.getPersistentData().getString(VillagerRoles.ROLE_KEY).isEmpty()
             && !hasOtherTask(v.getPersistentData())
-            && !v.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)).toList();
+            && !v.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)).toList());
         candidates.sort(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))));
         List<Container> storages = findStorages(level, center);
         Item hoeItem = firstHoeInStorage(storages);
