@@ -1,0 +1,26 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="ABS"
+description='''
+Villagers develop persistent personalities, moods, memories, and relationships. The village can build housing and farms only when real materials are available. Workers collect and transport actual dropped items to physical storage. The production chain converts logs to planks, crafts tools from consumed ingredients, builds workstations from stored blocks, and uses real fuel and ore in vanilla furnaces. Logging is followed only by planting real saplings; no free saplings or tools are generated. Mining and defense use real tools and equipment. Settings are available in the Mods menu.
+'''
+
+[[dependencies.${mod_id}]]
+modId="neoforge"
+type="required"
+versionRange="[${neo_version},)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.${mod_id}]]
+modId="minecraft"
+type="required"
+versionRange="${minecraft_version_range}"
+ordering="NONE"
+side="BOTH"
