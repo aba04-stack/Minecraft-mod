@@ -102,16 +102,11 @@ public final class LivingVillages {
             ServerLevel level = player.serverLevel();
             BlockPos center = player.blockPosition();
 
-            // Ignore nearby players only when they are in the same dimension.
-            boolean duplicateArea = alreadyChecked.stream()
-                .anyMatch(previous -> previous.level() == level
-                    && previous.position().distSqr(center) < 64.0D * 64.0D);
-            if (duplicateArea) {
+            List<Villager> villagers = findVillagers(level, center);
+            if (isDuplicateArea(alreadyChecked, level, villagers)) {
                 continue;
             }
-            alreadyChecked.add(new ActiveArea(level, center.immutable()));
-
-            List<Villager> villagers = findVillagers(level, center);
+            rememberActiveArea(alreadyChecked, level, villagers);
             if (villagers.size() < LivingVillagesConfig.MINIMUM_VILLAGERS.get()) {
                 continue;
             }
@@ -187,13 +182,9 @@ public final class LivingVillages {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             ServerLevel level = player.serverLevel();
             BlockPos center = player.blockPosition();
-            boolean duplicateArea = alreadyChecked.stream()
-                .anyMatch(previous -> previous.level() == level
-                    && previous.position().distSqr(center) < 48.0D * 48.0D);
-            if (duplicateArea) continue;
-            alreadyChecked.add(new ActiveArea(level, center.immutable()));
             List<Villager> villagers = findVillagers(level, center);
-            if (villagers.isEmpty()) continue;
+            if (villagers.isEmpty() || isDuplicateArea(alreadyChecked, level, villagers)) continue;
+            rememberActiveArea(alreadyChecked, level, villagers);
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers)) {
@@ -210,13 +201,9 @@ public final class LivingVillages {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             ServerLevel level = player.serverLevel();
             BlockPos playerPos = player.blockPosition();
-            boolean duplicateArea = alreadyChecked.stream()
-                .anyMatch(previous -> previous.level() == level
-                    && previous.position().distSqr(playerPos) < 48.0D * 48.0D);
-            if (duplicateArea) continue;
-            alreadyChecked.add(new ActiveArea(level, playerPos.immutable()));
             List<Villager> villagers = findVillagers(level, playerPos);
-            if (villagers.isEmpty()) continue;
+            if (villagers.isEmpty() || isDuplicateArea(alreadyChecked, level, villagers)) continue;
+            rememberActiveArea(alreadyChecked, level, villagers);
             BlockPos villageCenter = averageVillagerPosition(villagers, playerPos);
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (!VillageElder.isAutomationEnabled(villagers) && !VillageElder.hasPendingRequest(villagers)) continue;
@@ -232,10 +219,9 @@ public final class LivingVillages {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             ServerLevel level = player.serverLevel();
             BlockPos pos = player.blockPosition();
-            if (checked.stream().anyMatch(area -> area.level() == level
-                && area.position().distSqr(pos) < 48.0D * 48.0D)) continue;
-            checked.add(new ActiveArea(level, pos.immutable()));
             List<Villager> villagers = findVillagers(level, pos);
+            if (villagers.isEmpty() || isDuplicateArea(checked, level, villagers)) continue;
+            rememberActiveArea(checked, level, villagers);
             int request = VillageElder.pendingRequest(villagers);
             if (request == VillageElder.REQUEST_HOUSE && LivingVillagesConfig.ENABLE_HOUSING_PROJECTS.get()
                 && LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) return true;
@@ -594,7 +580,20 @@ public final class LivingVillages {
         return true;
     }
 
-    private record ActiveArea(ServerLevel level, BlockPos position) {
+    private static boolean isDuplicateArea(List<ActiveArea> checked, ServerLevel level, List<Villager> villagers) {
+        if (villagers.isEmpty()) return false;
+        return checked.stream().anyMatch(previous -> previous.level() == level && previous.overlaps(villagers));
+    }
+
+    private static void rememberActiveArea(List<ActiveArea> checked, ServerLevel level, List<Villager> villagers) {
+        if (villagers.isEmpty()) return;
+        checked.add(new ActiveArea(level, villagers.stream().map(v -> v.getUUID().toString()).toList()));
+    }
+
+    private record ActiveArea(ServerLevel level, List<String> residentIds) {
+        private boolean overlaps(List<Villager> villagers) {
+            return villagers.stream().anyMatch(v -> residentIds.contains(v.getUUID().toString()));
+        }
     }
 
     private record CropPlan(net.minecraft.world.item.Item seedItem, Block cropBlock, int available) {
