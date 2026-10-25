@@ -16,6 +16,7 @@ assert "HOME_CLUSTER_LINK_BLOCKS = 20" in area, "home-based groups need a bounde
 assert "FALLBACK_CLUSTER_LINK_BLOCKS = 20" in area, "residents without HOME memories need a bounded fallback"
 assert "clusters.get(nearestCluster).add(resident)" in area, "homeless residents must attach to one nearest cluster, not bridge clusters"
 assert "selectNearestCluster(clusters, center)" in area, "active work must choose the group nearest its requested center"
+assert "resident.homePosition() == null" in area, "group selection should prefer stable HOME anchors over workers' temporary positions"
 main = (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
 assert "previous.overlaps(villagers)" in main, "player-area deduplication must compare selected residents, not just distance"
 assert "previous.position().distSqr" not in main, "nearby independent settlements must not be suppressed by a distance-only deduplication rule"

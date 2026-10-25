@@ -130,7 +130,9 @@ public final class VillageArea {
             long distance = Long.MAX_VALUE;
             String firstId = null;
             for (Resident resident : cluster) {
-                distance = Math.min(distance, horizontalDistanceSquared(resident.villager().blockPosition(), center));
+                BlockPos reference = resident.homePosition() == null
+                    ? resident.villager().blockPosition() : resident.homePosition();
+                distance = Math.min(distance, horizontalDistanceSquared(reference, center));
                 String id = resident.villager().getUUID().toString();
                 if (firstId == null || id.compareTo(firstId) < 0) firstId = id;
             }
