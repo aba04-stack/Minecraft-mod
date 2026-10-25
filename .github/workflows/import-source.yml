@@ -42,12 +42,12 @@ jobs:
                 run: python3 tools/validate_project.py
           """
           new = """      - name: Run static project checks
-                run: python3 tools/validate_project.py
-              - name: Run regression and syntax checks
-                run: |
-                  java tools/JavaSyntaxCheck.java src/main/java
-                  for test_file in tools/test_*.py; do python3 "$test_file"; done
-                  sh -n gradlew BUILD_LOCAL.sh
+        run: python3 tools/validate_project.py
+      - name: Run regression and syntax checks
+        run: |
+          java tools/JavaSyntaxCheck.java src/main/java
+          for test_file in tools/test_*.py; do python3 "$test_file"; done
+          sh -n gradlew BUILD_LOCAL.sh
           """
           if old not in s:
               raise SystemExit("Could not find the expected validation step in build.yml")
