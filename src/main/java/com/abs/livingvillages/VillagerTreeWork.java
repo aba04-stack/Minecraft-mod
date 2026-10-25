@@ -15,6 +15,7 @@ import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.block.Block;
@@ -742,9 +743,6 @@ public final class VillagerTreeWork {
         return allowAnySpecies ? any : -1;
     }
 
-    private static boolean isStorageBlock(BlockState state) {
-        return state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.BARREL);
-    }
 
     private static void clearSaplingFetch(CompoundTag data) {
         data.putBoolean(REPLANT_FETCH_ACTIVE, false);
