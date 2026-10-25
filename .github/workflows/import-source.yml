@@ -38,17 +38,8 @@ jobs:
           from pathlib import Path
           p = Path(".github/workflows/build.yml")
           s = p.read_text(encoding="utf-8")
-          old = """      - name: Run static project checks
-                run: python3 tools/validate_project.py
-          """
-          new = """      - name: Run static project checks
-        run: python3 tools/validate_project.py
-      - name: Run regression and syntax checks
-        run: |
-          java tools/JavaSyntaxCheck.java src/main/java
-          for test_file in tools/test_*.py; do python3 "$test_file"; done
-          sh -n gradlew BUILD_LOCAL.sh
-          """
+          old = "      - name: Run static project checks\n        run: python3 tools/validate_project.py\n"
+          new = old + "      - name: Run regression and syntax checks\n        run: |\n          java tools/JavaSyntaxCheck.java src/main/java\n          for test_file in tools/test_*.py; do python3 \"$test_file\"; done\n          sh -n gradlew BUILD_LOCAL.sh\n"
           if old not in s:
               raise SystemExit("Could not find the expected validation step in build.yml")
           p.write_text(s.replace(old, new, 1), encoding="utf-8")
