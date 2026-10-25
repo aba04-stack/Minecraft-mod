@@ -329,7 +329,7 @@ public final class VillagePopulation {
         AABB area = new AABB(center).inflate(radius, 12.0D, radius);
         return level.getEntitiesOfClass(Villager.class, area, v -> v != courier && v.isAlive() && !v.isBaby()
                 && foodPoints(v) < BREEDING_FOOD_POINTS && firstPackageItemThatFits(courier, v, courierData) != null)
-            .stream().min(Comparator.comparingInt(VillagePopulation::foodPoints)
+            .stream().min(Comparator.comparingInt((Villager v) -> foodPoints(v))
                 .thenComparing(v -> v.getUUID().toString())).orElse(null);
     }
 
