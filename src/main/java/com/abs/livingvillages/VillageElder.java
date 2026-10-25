@@ -338,8 +338,7 @@ public final class VillageElder {
         ServerLevel level = player.serverLevel();
         BlockPos origin = elder.blockPosition();
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(origin).inflate(radius, 12.0D, radius);
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
+        List<Villager> villagers = VillageArea.findVillagers(level, origin);
         int adults = (int) villagers.stream().filter(v -> !v.isBaby()).count();
         int children = villagers.size() - adults;
         int beds = countBeds(level, origin, radius);

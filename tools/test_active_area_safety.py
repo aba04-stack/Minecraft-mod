@@ -8,8 +8,12 @@ source = (ROOT / "src/main/java/com/abs/livingvillages/LivingVillages.java").rea
 start = source.index("private List<Villager> findVillagers")
 end = source.index("private BlockPos averageVillagerPosition", start)
 find_method = source[start:end]
-assert "level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)" in find_method, (
-    "village population queries must not count dead villagers"
+assert "return VillageArea.findVillagers(level, center);" in find_method, (
+    "the active-area planner must use the shared village group selector"
+)
+area_source = (ROOT / "src/main/java/com/abs/livingvillages/VillageArea.java").read_text(encoding="utf-8")
+assert "level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)" in area_source, (
+    "the shared village selector must filter out dead villagers"
 )
 
 start = source.index("private int countFarmland")

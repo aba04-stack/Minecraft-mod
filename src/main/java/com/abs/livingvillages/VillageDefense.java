@@ -274,8 +274,8 @@ public final class VillageDefense {
         BlockPos home = VillagerRoles.getHome(guard);
         if (home != null) return home;
 
-        AABB area = new AABB(guard.blockPosition()).inflate(radius, 8.0D, radius);
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, v -> v.isAlive() && !v.isBaby());
+        List<Villager> villagers = VillageArea.findVillagers(level, guard.blockPosition(), radius, 8).stream()
+            .filter(v -> !v.isBaby()).toList();
         double x = 0.0D, y = 0.0D, z = 0.0D;
         for (Villager villager : villagers) {
             x += villager.getX(); y += villager.getY(); z += villager.getZ();

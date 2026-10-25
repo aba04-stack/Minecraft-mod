@@ -325,19 +325,16 @@ public final class VillagePopulation {
     }
 
     private static Villager findHungryRecipient(ServerLevel level, BlockPos center, Villager courier, CompoundTag courierData) {
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return level.getEntitiesOfClass(Villager.class, area, v -> v != courier && v.isAlive() && !v.isBaby()
+        return VillageArea.findVillagers(level, center).stream()
+            .filter(v -> v != courier && v.isAlive() && !v.isBaby()
                 && foodPoints(v) < BREEDING_FOOD_POINTS && firstPackageItemThatFits(courier, v, courierData) != null)
-            .stream().min(Comparator.comparingInt((Villager v) -> foodPoints(v))
+            .min(Comparator.comparingInt((Villager v) -> foodPoints(v))
                 .thenComparing(v -> v.getUUID().toString())).orElse(null);
     }
 
     private static Villager findVillager(ServerLevel level, BlockPos center, String uuid) {
         if (uuid == null || uuid.isBlank()) return null;
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        for (Villager villager : level.getEntitiesOfClass(Villager.class, area)) {
+        for (Villager villager : VillageArea.findVillagers(level, center)) {
             if (villager.isAlive() && villager.getUUID().toString().equals(uuid)) return villager;
         }
         return null;

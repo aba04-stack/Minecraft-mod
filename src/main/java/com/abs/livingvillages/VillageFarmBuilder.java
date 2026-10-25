@@ -87,10 +87,7 @@ public final class VillageFarmBuilder {
     public static boolean hasActiveProjectNear(ServerLevel level, BlockPos center) {
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) return false;
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return !level.getEntitiesOfClass(Villager.class, area,
-            v -> v.isAlive() && isProjectActive(v)).isEmpty();
+        return VillageArea.findVillagers(level, center).stream().anyMatch(VillageFarmBuilder::isProjectActive);
     }
 
     public static boolean hasHoe(List<Container> containers) {
@@ -123,13 +120,11 @@ public final class VillageFarmBuilder {
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
             || !isSupportedCrop(seedItem, cropBlock)) return false;
 
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        List<Villager> candidates = level.getEntitiesOfClass(Villager.class, area, v -> v.isAlive()
+        List<Villager> candidates = VillageArea.findVillagers(level, center).stream().filter(v -> v.isAlive()
             && VillagerRoles.isUnemployedAdult(v) && !v.isSleeping()
             && v.getPersistentData().getString(VillagerRoles.ROLE_KEY).isEmpty()
             && !hasOtherTask(v.getPersistentData())
-            && !v.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET));
+            && !v.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)).toList();
         candidates.sort(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))));
         List<Container> storages = findStorages(level, center);
         Item hoeItem = firstHoeInStorage(storages);
