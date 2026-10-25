@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Safety regression checks for active-village scans."""
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+source = (ROOT / "src/main/java/com/abs/livingvillages/LivingVillages.java").read_text(encoding="utf-8")
+
+start = source.index("private List<Villager> findVillagers")
+end = source.index("private BlockPos averageVillagerPosition", start)
+find_method = source[start:end]
+assert "level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)" in find_method, (
+    "village population queries must not count dead villagers"
+)
+
+start = source.index("private int countFarmland")
+end = source.index("private BlockPos findFarmSite", start)
+farmland_method = source[start:end]
+guard = "if (!level.hasChunkAt(pos)) continue;"
+get_state = "level.getBlockState(pos)"
+assert guard in farmland_method, "farmland scan must skip unloaded chunks before reading block states"
+assert farmland_method.index(guard) < farmland_method.index(get_state), (
+    "chunk-loaded guard must run before accessing the block state"
+)
+
+start = source.index("private int countBeds")
+end = source.index("private List<Container> findResourceContainers", start)
+beds_method = source[start:end]
+assert "if (!level.hasChunkAt(pos)) continue;" in beds_method, (
+    "bed scan must avoid touching unloaded chunks"
+)
+print("ACTIVE AREA SAFETY PASSED: only living villagers are counted; farmland/bed scans skip unloaded chunks")

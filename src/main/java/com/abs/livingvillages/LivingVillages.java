@@ -350,6 +350,8 @@ public final class LivingVillages {
         BlockPos min = center.offset(-radius, -8, -radius);
         BlockPos max = center.offset(radius, 8, radius);
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            // Never force-load distant chunks just to count farmland for an active village.
+            if (!level.hasChunkAt(pos)) continue;
             if (level.getBlockState(pos).is(Blocks.FARMLAND)) {
                 count++;
             }
@@ -444,7 +446,7 @@ public final class LivingVillages {
     private List<Villager> findVillagers(ServerLevel level, BlockPos center) {
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
         AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return level.getEntitiesOfClass(Villager.class, area);
+        return level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
     }
 
     private BlockPos averageVillagerPosition(List<Villager> villagers, BlockPos fallback) {

@@ -200,6 +200,12 @@ def main() -> int:
         errors.append(f"elder management regression check failed: {exc}")
 
     try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_active_area_safety.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"active-area safety regression check failed: {exc}")
+
+    try:
         subprocess.run(["java", str(ROOT / "tools/JavaSyntaxCheck.java"), str(ROOT / "src/main/java")],
                        check=True, capture_output=True, text=True)
     except Exception as exc:
@@ -229,6 +235,7 @@ def main() -> int:
     print("- breeding food recipient order checked (hungriest first, deterministic tie-break)")
     print("- breeding support uses real stored food, a physical courier, valid bed space and vanilla reproduction")
     print("- elder panel actions, role election, configuration checks and 1.21.1 screen signature checked")
+    print("- active-area queries ignore dead villagers and farmland scans skip unloaded chunks")
     print("- resource-ledger feature markers present")
     print("- shell scripts pass sh -n")
     print("NOTE: This does not compile the Minecraft/NeoForge source or test behavior in game.")

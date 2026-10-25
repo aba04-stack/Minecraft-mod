@@ -17,7 +17,7 @@ On a system with Java 21 and internet access:
 ./gradlew build
 ```
 
-The build workflow runs static validation and Gradle compilation, then performs a dedicated-server startup smoke test on pull requests. [Latest successful server smoke test and JAR artifact](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40197573229).
+The build workflow runs static validation and Gradle compilation, checks that active-area scans avoid counting dead villagers or touching unloaded chunks, then performs a dedicated-server startup smoke test on pull requests. [Latest successful server smoke test and JAR artifact](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40197573229).
 
 ## Local checks
 
