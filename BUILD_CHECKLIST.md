@@ -5,7 +5,11 @@
 - [x] Run `python3 tools/validate_project.py`; this validates source structure but does not resolve Minecraft/NeoForge symbols.
 - [x] `./gradlew build` passed in GitHub Actions on Java 21 with Minecraft 1.21.1 / NeoForge 21.1.264.
 - [x] Active-area safety regression: population query filters dead villagers; farmland/bed scans, house/farm site searches, and guard patrol-point selection skip unloaded chunks.
-- [ ] Run `runClient` and manually verify farm project initialization and food courier behavior.
+- [x] Shared HOME-anchored village-group selector is used by planner, roles, home/farm projects, crafting, industry, food courier and elder population display.
+- [x] Active-area deduplication compares selected villager UUID overlap instead of suppressing areas only by player distance.
+- [ ] Run `runClient` and manually verify farm project initialization, food courier behavior and the elder panel.
+- [ ] In a test world, place two nearby villages and confirm that elder, population counts, roles and work orders remain independent.
+- [ ] Verify physical chests, beds, workstations and building sites are not mistakenly treated as shared resources between neighboring villages.
 - [ ] Builder: 96 same-type planks, matching door, red bed; 96 planks remain after crafting door.
 - [ ] Farm: 24 seed items, water bucket, composter, hoe; worker makes each block placement in sequence.
 - [ ] Config toggles: pausing a project does not block unrelated village work when its feature is disabled.
