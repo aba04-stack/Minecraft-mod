@@ -196,9 +196,9 @@ public final class VillageCraftingJobs {
             }
         }
 
-        int sticks = accessibleCount(storages, crafter, Items.STICK);
-        int cobble = accessibleCount(storages, crafter, Items.COBBLESTONE);
-        int iron = accessibleCount(storages, crafter, Items.IRON_INGOT);
+        int sticks = availableCount(storages, crafter, Items.STICK);
+        int cobble = availableCount(storages, crafter, Items.COBBLESTONE);
+        int iron = availableCount(storages, crafter, Items.IRON_INGOT);
         int pickaxes = countTools(storages, villagers, VillageCraftingJobs::isPickaxe, ToolUse.MINER);
         int stoneOrBetter = countTools(storages, villagers, VillageCraftingJobs::isStoneOrBetterPickaxe, ToolUse.MINER);
         int ironOrBetter = countTools(storages, villagers, VillageCraftingJobs::isIronOrBetterPickaxe, ToolUse.MINER);
@@ -216,7 +216,7 @@ public final class VillageCraftingJobs {
         }
         if (pickaxeGoal != null) {
             if (sticks < 2) {
-                int plankReserve = pickaxeGoal.output().is(Items.WOODEN_PICKAXE) ? 5 : 2;
+                int plankReserve = pickaxeGoal.output() == Items.WOODEN_PICKAXE ? 5 : 2;
                 Item plankForSticks = bestPlanks(storages, crafter, plankReserve);
                 return plankForSticks == null ? null : sticksRecipe(plankForSticks);
             }
@@ -235,7 +235,7 @@ public final class VillageCraftingJobs {
             }
             if (axe != null) {
                 if (sticks < 2) {
-                    int plankReserve = axe.output().is(Items.WOODEN_AXE) ? 5 : 2;
+                    int plankReserve = axe.output() == Items.WOODEN_AXE ? 5 : 2;
                     Item plankForSticks = bestPlanks(storages, crafter, plankReserve);
                     return plankForSticks == null ? null : sticksRecipe(plankForSticks);
                 }
@@ -260,7 +260,7 @@ public final class VillageCraftingJobs {
             if (sword != null) {
                 int neededSticks = 1;
                 if (sticks < neededSticks) {
-                    int plankReserve = sword.output().is(Items.WOODEN_SWORD) ? 4 : 2;
+                    int plankReserve = sword.output() == Items.WOODEN_SWORD ? 4 : 2;
                     Item plankForSticks = bestPlanks(storages, crafter, plankReserve);
                     return plankForSticks == null ? null : sticksRecipe(plankForSticks);
                 }
