@@ -23,6 +23,27 @@ jobs:
         run: python3 tools/validate_project.py
       - name: Build with checksum-pinned Gradle bootstrap
         run: ./gradlew build
+      - name: Smoke-test dedicated server startup
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p run/server
+          printf 'eula=true\n' > run/server/eula.txt
+          set +e
+          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer 2>&1 | tee build/server-smoke.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if ! grep -Eq 'Done \([0-9.]+s\)! For help, type "help"' build/server-smoke.log; then
+            echo "Dedicated server did not reach the ready state."
+            if [ -f run/server/logs/latest.log ]; then tail -n 200 run/server/logs/latest.log; fi
+            exit 1
+          fi
+          if [ "$status" -ne 0 ] && [ "$status" -ne 124 ] && [ "$status" -ne 130 ] && [ "$status" -ne 143 ]; then
+            echo "Dedicated server smoke test exited unexpectedly with status $status."
+            exit "$status"
+          fi
+          echo "Dedicated server reached the ready state; timed shutdown was expected."
       - name: Upload mod JAR
         uses: actions/upload-artifact@v4
         with:
