@@ -7,7 +7,7 @@
 - `python3 tools/validate_project.py` — успешно.
 - `java tools/JavaSyntaxCheck.java src/main/java` — успешно; 16 Java-файлов.
 - Регрессионные статические тесты, JSON и shell syntax checks — успешно.
-- `tools/test_active_area_safety.py` — успешно: запрос жителей фильтрует мёртвых сущностей; сканирование грядок и кроватей не читает блоки в незагруженных чанках.
+- `tools/test_active_area_safety.py` — успешно: запрос жителей фильтрует мёртвых сущностей; сканирование грядок/кроватей и поиск площадок для дома/фермы пропускают незагруженные чанки перед чтением блоков или heightmap.
 - `./gradlew build` — **BUILD SUCCESSFUL** на Java 21 с classpath Minecraft 1.21.1 / NeoForge 21.1.264.
 - Dedicated-server smoke-test — **успешно**: сервер достиг состояния готовности и загрузил пространство имён мода `livingvillages`.
 - JAR создан: `build/libs/livingvillages-0.15.0.jar`, 217 923 байта.

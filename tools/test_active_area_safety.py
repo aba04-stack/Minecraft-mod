@@ -29,3 +29,39 @@ assert "if (!level.hasChunkAt(pos)) continue;" in beds_method, (
     "bed scan must avoid touching unloaded chunks"
 )
 print("ACTIVE AREA SAFETY PASSED: only living villagers are counted; farmland/bed scans skip unloaded chunks")
+# Site-finding loops must check chunk availability before heightmap/block access.
+for method_name, next_method in (
+    ("private BlockPos findFarmSite", "private boolean isSuitableFarmSite"),
+    ("private BlockPos findBuildSite", "private boolean isSuitableSite"),
+):
+    start = source.index(method_name)
+    end = source.index(next_method, start)
+    finder = source[start:end]
+    guard = "if (!level.hasChunkAt(new BlockPos(x, center.getY(), z))) continue;"
+    assert guard in finder, f"{method_name} must skip unloaded candidate columns"
+    assert finder.index(guard) < finder.index("level.getHeight("), (
+        f"{method_name} must check chunk availability before querying heightmaps"
+    )
+
+for method_name, next_method in (
+    ("private boolean isSuitableFarmSite", "private boolean isFarmableGround"),
+    ("private boolean isSuitableSite", "private record ActiveArea"),
+):
+    start = source.index(method_name)
+    end = source.index(next_method, start)
+    suitability = source[start:end]
+    guard = "if (!level.hasChunkAt(new BlockPos(x, baseY, z))) return false;"
+    assert guard in suitability, f"{method_name} must reject sites spanning unloaded chunks"
+    assert suitability.index(guard) < suitability.index("level.getHeight("), (
+        f"{method_name} must check chunk availability before querying heightmaps"
+    )
+
+farm_start = source.index("private boolean isSuitableFarmSite")
+farm_end = source.index("private boolean isFarmableGround", farm_start)
+farm_suitability = source[farm_start:farm_end]
+composter_guard = "if (!level.hasChunkAt(new BlockPos(composterX, baseY, composterZ))) return false;"
+assert composter_guard in farm_suitability, "farm site must reject an unloaded composter column"
+assert farm_suitability.index(composter_guard) < farm_suitability.index("level.getHeight(", farm_suitability.index("int composterX")), (
+    "farm site must check composter chunk availability before querying its heightmap"
+)
+

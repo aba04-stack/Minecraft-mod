@@ -368,6 +368,8 @@ public final class LivingVillages {
                     }
                     int x = center.getX() + dx;
                     int z = center.getZ() + dz;
+                    // Heightmap queries may access chunk data; skip columns that are not loaded.
+                    if (!level.hasChunkAt(new BlockPos(x, center.getY(), z))) continue;
                     int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                     BlockPos base = new BlockPos(x, y, z);
                     if (isSuitableFarmSite(level, base)) {
@@ -386,6 +388,7 @@ public final class LivingVillages {
             for (int dz = 0; dz < FARM_SIZE; dz++) {
                 int x = base.getX() + dx;
                 int z = base.getZ() + dz;
+                if (!level.hasChunkAt(new BlockPos(x, baseY, z))) return false;
                 if (level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) != baseY) {
                     return false;
                 }
@@ -399,6 +402,7 @@ public final class LivingVillages {
         }
         int composterX = base.getX() + 2;
         int composterZ = base.getZ() - 1;
+        if (!level.hasChunkAt(new BlockPos(composterX, baseY, composterZ))) return false;
         if (level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, composterX, composterZ) != baseY) {
             return false;
         }
@@ -551,6 +555,8 @@ public final class LivingVillages {
                     }
                     int x = center.getX() + dx;
                     int z = center.getZ() + dz;
+                    // Do not load a new chunk just to probe a possible house location.
+                    if (!level.hasChunkAt(new BlockPos(x, center.getY(), z))) continue;
                     int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                     BlockPos base = new BlockPos(x, y, z);
                     if (isSuitableSite(level, base)) {
@@ -568,6 +574,7 @@ public final class LivingVillages {
             for (int dz = 0; dz < 5; dz++) {
                 int x = base.getX() + dx;
                 int z = base.getZ() + dz;
+                if (!level.hasChunkAt(new BlockPos(x, baseY, z))) return false;
                 int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                 if (surfaceY != baseY) {
                     return false;
