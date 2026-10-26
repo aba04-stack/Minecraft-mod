@@ -7,7 +7,13 @@
 - [x] Active-area safety regression: population query filters dead villagers; farmland/bed scans, house/farm site searches, and guard patrol-point selection skip unloaded chunks.
 - [x] Shared HOME-anchored village-group selector is used by planner, roles, home/farm projects, crafting, industry, food courier and elder population display.
 - [x] Active-area deduplication compares selected villager UUID overlap instead of suppressing areas only by player distance.
+- [x] Persistent storage reservation contract test: claims are saved on worker data, checked for conflicts, and released with a task-kind guard.
+- [x] House, farm, crafting, food courier, logistics, farmer stockpiling, miner/tool and guard storage paths check reservations.
+- [x] Newly discovered source/destination chests are claimed before worker routing.
 - [ ] Run `runClient` and manually verify farm project initialization, food courier behavior and the elder panel.
+- [ ] Run two competing resource tasks and verify one task cannot take from a chest claimed by the other.
+- [ ] Check that cancelling/disabling logistics does not release a house/farm/crafting claim on the same worker.
+- [ ] Check resource reservations when a chest is broken or a worker dies; task recovery is not implemented yet.
 - [ ] In a test world, place two nearby villages and confirm that elder, population counts, roles and work orders remain independent.
 - [ ] Verify physical chests, beds, workstations and building sites are not mistakenly treated as shared resources between neighboring villages.
 - [ ] Builder: 96 same-type planks, matching door, red bed; 96 planks remain after crafting door.
