@@ -554,7 +554,7 @@ public final class VillageFarmBuilder {
 
     private static void clearProject(Villager worker, CompoundTag data) {
         clearOwnedRoute(worker, data);
-        VillageReservations.release(data);
+        VillageReservations.release(data, "farm");
         data.putBoolean(ACTIVE_KEY, false);
         data.remove(PHASE); data.remove(SEED_ITEM); data.remove(CROP_BLOCK);
         data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);

@@ -487,7 +487,7 @@ public final class VillageBuilder {
 
     private static void clearProject(Villager villager, CompoundTag data) {
         clearOwnedRoute(villager, data);
-        VillageReservations.release(data);
+        VillageReservations.release(data, "house");
         data.putBoolean(ACTIVE_KEY, false);
         data.remove(PHASE); data.remove(PLANK_ITEM); data.remove(DOOR_ITEM); data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);
         data.remove(STEP_INDEX); data.remove(STARTED); data.remove(NEXT_ACTION);

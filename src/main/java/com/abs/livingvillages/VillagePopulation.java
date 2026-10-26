@@ -580,7 +580,7 @@ public final class VillagePopulation {
 
     private static void finishTrip(Villager courier, CompoundTag data, long now) {
         clearOwnedRoute(courier, data);
-        VillageReservations.release(data);
+        VillageReservations.release(data, "food_delivery");
         data.putBoolean(ACTIVE_KEY, false);
         data.putLong(NEXT_TRIP, now + RETRY_DELAY_TICKS);
         for (String key : new String[] {PHASE, TARGET_UUID, CENTER_X, CENTER_Y, CENTER_Z,

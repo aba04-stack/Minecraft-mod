@@ -21,10 +21,11 @@ for marker in (
     assert marker in reservations, f"reservation manager missing {marker}"
 
 checks = {
-    "VillageBuilder.java": ("reserveNearbyStorages(level, center, builder, \"house\")", "tryAddStorageReservation(level, villager, storage, \"house\")", "VillageReservations.release(data)"),
-    "VillageFarmBuilder.java": ("reserveNearbyStorages(level, center, worker, \"farm\")", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", "VillageReservations.release(data)"),
-    "VillageCraftingJobs.java": ("tryReserveStoragePositions(level, villager", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", "VillageReservations.release(data)"),
+    "VillageBuilder.java": ("reserveNearbyStorages(level, center, builder, \"house\")", "tryAddStorageReservation(level, villager, storage, \"house\")", 'VillageReservations.release(data, "house")'),
+    "VillageFarmBuilder.java": ("reserveNearbyStorages(level, center, worker, \"farm\")", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", 'VillageReservations.release(data, "farm")'),
+    "VillageCraftingJobs.java": ("tryReserveStoragePositions(level, villager", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", 'VillageReservations.release(data, "crafting")'),
     "LivingVillages.java": ("VillageReservations.isStorageAvailable(level, pos, null)",),
+    "VillagePopulation.java": ('VillageReservations.release(data, "food_delivery")',),
     "VillageLogistics.java": ('VillageReservations.release(data, "logistics_delivery")',),
     "VillagerAutonomy.java": ('VillageReservations.release(data, "food_stockpiling")',),
 }

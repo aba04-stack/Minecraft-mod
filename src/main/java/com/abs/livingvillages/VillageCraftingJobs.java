@@ -501,7 +501,7 @@ public final class VillageCraftingJobs {
     }
 
     private static void clearJob(CompoundTag data) {
-        VillageReservations.release(data);
+        VillageReservations.release(data, "crafting");
         data.putBoolean(ACTIVE_KEY, false);
         data.remove(STAGE); data.remove(RECIPE); data.remove(STARTED); data.remove(RETRY_AT);
         data.remove(TABLE_X); data.remove(TABLE_Y); data.remove(TABLE_Z); data.remove(CRAFT_STARTED);
