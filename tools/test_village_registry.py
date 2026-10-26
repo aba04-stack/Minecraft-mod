@@ -13,7 +13,7 @@ for marker in (
     "villageAnchors",
     "knownHomes",
     "knownResidents",
-    "resident UUIDs provide a fallback when all known HOME anchors move or disappear.",
+    "Resident UUIDs provide a fallback when all known HOME anchors move or disappear.",
     "currentResidentIds",
     "bestOverlap",
     "tag.put(\"knownHomes\", knownHomeTags)",
