@@ -39,6 +39,11 @@ for marker in (
 assert "public static boolean isStorageForVillage(" in registry
 assert "public static boolean isBedForVillage(" in registry
 assert "public static boolean isWorkBlockForVillage(" in registry
+assert "public static boolean isWorkBlockState(BlockState state)" in registry
+industry = (JAVA / "VillageIndustry.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isWorkBlockForVillage(level, center, pos)" in industry, "industry must only use village-owned furnaces/tables"
+crafting = (JAVA / "VillageCraftingJobs.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isWorkBlockForVillage(level, center, pos)" in crafting, "crafting jobs must use village-owned tables"
 assert "cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())" in (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
 assert "VillageRegistry.isBedForVillage(level, center, pos)" in (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
 assert "VillageRegistry.isBedForVillage(level, center, pos)" in (JAVA / "VillageBuilder.java").read_text(encoding="utf-8")

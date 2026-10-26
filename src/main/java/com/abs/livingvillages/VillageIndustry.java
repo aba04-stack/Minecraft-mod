@@ -567,7 +567,11 @@ public final class VillageIndustry {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -8; dy <= 8; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !level.getBlockState(pos).is(block)) continue;
+                    if (!level.hasChunkAt(pos)) continue;
+                    net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
+                    if (!state.is(block)) continue;
+                    if (VillageRegistry.isWorkBlockState(state)
+                        && !VillageRegistry.isWorkBlockForVillage(level, center, pos)) continue;
                     double distance = pos.distSqr(center);
                     if (distance < bestDistance) { bestDistance = distance; best = pos.immutable(); }
                 }
@@ -582,7 +586,12 @@ public final class VillageIndustry {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (level.hasChunkAt(pos) && level.getBlockState(pos).is(block)) found.add(pos.immutable());
+                    if (!level.hasChunkAt(pos)) continue;
+                    net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
+                    if (!state.is(block)) continue;
+                    if (VillageRegistry.isWorkBlockState(state)
+                        && !VillageRegistry.isWorkBlockForVillage(level, center, pos)) continue;
+                    found.add(pos.immutable());
                 }
             }
         }

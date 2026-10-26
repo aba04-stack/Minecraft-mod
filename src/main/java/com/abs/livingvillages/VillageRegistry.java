@@ -203,6 +203,10 @@ public final class VillageRegistry extends SavedData {
         return state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.BARREL);
     }
 
+    public static boolean isWorkBlockState(BlockState state) {
+        return state != null && isWorkBlock(state);
+    }
+
     private static boolean isWorkBlock(BlockState state) {
         return state.is(Blocks.CRAFTING_TABLE) || state.is(Blocks.FURNACE) || state.is(Blocks.BLAST_FURNACE)
             || state.is(Blocks.SMOKER) || state.is(Blocks.COMPOSTER) || state.is(Blocks.LOOM)

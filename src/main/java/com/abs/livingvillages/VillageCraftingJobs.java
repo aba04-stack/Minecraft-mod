@@ -894,7 +894,11 @@ public final class VillageCraftingJobs {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -6; dy <= 6; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !level.getBlockState(pos).is(block)) continue;
+                    if (!level.hasChunkAt(pos)) continue;
+                    net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
+                    if (!state.is(block)) continue;
+                    if (VillageRegistry.isWorkBlockState(state)
+                        && !VillageRegistry.isWorkBlockForVillage(level, center, pos)) continue;
                     double distance = pos.distSqr(center);
                     if (distance < bestDistance) { bestDistance = distance; best = pos.immutable(); }
                 }
