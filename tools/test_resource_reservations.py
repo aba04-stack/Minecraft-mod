@@ -18,6 +18,7 @@ for marker in (
     "remaining.put(item, need - amount)",
     "if (selected.isEmpty() || remaining.values().stream().anyMatch(amount -> amount > 0)) return false;",
     "private record StorageStock(BlockPos pos, Map<Item, Integer> items)",
+    "Comparator.comparingDouble(stock -> stock.pos().distSqr(center))",
     "center.offset(-radius, -6, -radius)",
     "tryAddStorageReservation",
     "isStorageAvailable",
