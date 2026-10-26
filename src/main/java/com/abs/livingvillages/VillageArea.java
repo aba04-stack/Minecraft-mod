@@ -92,6 +92,39 @@ public final class VillageArea {
         return selected.stream().map(Resident::villager).toList();
     }
 
+    /**
+     * Best-effort storage ownership heuristic: a physical container belongs to the resident
+     * cluster selected around it. The wider query includes villagers currently away from home.
+     * This is not a permanent settlement registry, but avoids using a neighboring cluster's stock
+     * just because its chest happens to fall inside a broad radius.
+     */
+    public static boolean isStorageInResidentGroup(ServerLevel level, Villager owner, BlockPos storage) {
+        if (owner == null || storage == null || !owner.isAlive()) return false;
+        int radius = storageGroupLookupRadius();
+        return findVillagers(level, storage, radius, 32).stream()
+            .anyMatch(resident -> resident.getUUID().equals(owner.getUUID()));
+    }
+
+    /** Checks that a storage block's nearest selected resident cluster overlaps the requested group. */
+    public static boolean isStorageInResidentGroup(ServerLevel level, BlockPos groupCenter, BlockPos storage) {
+        if (groupCenter == null || storage == null) return false;
+        int radius = storageGroupLookupRadius();
+        List<Villager> requestedGroup = findVillagers(level, groupCenter, radius, 32);
+        if (requestedGroup.isEmpty()) return false;
+        List<Villager> storageGroup = findVillagers(level, storage, radius, 32);
+        for (Villager resident : storageGroup) {
+            for (Villager requested : requestedGroup) {
+                if (resident.getUUID().equals(requested.getUUID())) return true;
+            }
+        }
+        return false;
+    }
+
+    private static int storageGroupLookupRadius() {
+        return Math.min(128, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()
+            + LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get() + 32);
+    }
+
     private static List<List<Resident>> connectedComponents(List<Resident> source,
                                                               boolean useHomeAnchors,
                                                               int linkDistanceBlocks) {

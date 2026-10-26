@@ -378,6 +378,7 @@ public final class VillageElder {
             if (!level.getBlockState(pos).is(Blocks.CHEST)
                 && !level.getBlockState(pos).is(Blocks.TRAPPED_CHEST)
                 && !level.getBlockState(pos).is(Blocks.BARREL)) continue;
+            if (!VillageArea.isStorageInResidentGroup(level, center, pos)) continue;
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (!(blockEntity instanceof Container container)) continue;
             for (int slot = 0; slot < container.getContainerSize(); slot++) {

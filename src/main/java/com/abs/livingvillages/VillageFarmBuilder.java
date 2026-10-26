@@ -618,7 +618,8 @@ public final class VillageFarmBuilder {
                 for (int dy = -6; dy <= 6; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
-                        || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
+                        || !VillageReservations.isStorageAvailable(level, pos, owner)
+                        || (owner == null && !VillageArea.isStorageInResidentGroup(level, center, pos))) continue;
                     if (level.getBlockEntity(pos) instanceof Container container) found.add(container);
                 }
             }

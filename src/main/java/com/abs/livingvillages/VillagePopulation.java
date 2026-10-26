@@ -685,7 +685,8 @@ public final class VillagePopulation {
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -8, -radius), center.offset(radius, 8, radius))) {
             if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
-                || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
+                || !VillageReservations.isStorageAvailable(level, pos, owner)
+                || (owner == null && !VillageArea.isStorageInResidentGroup(level, center, pos))) continue;
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (blockEntity instanceof Container container) containers.add(container);
         }

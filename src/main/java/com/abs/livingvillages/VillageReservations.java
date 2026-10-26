@@ -171,6 +171,7 @@ public final class VillageReservations {
 
     public static boolean isStorageAvailable(ServerLevel level, BlockPos storage, Villager owner) {
         if (storage == null) return false;
+        if (owner != null && !VillageArea.isStorageInResidentGroup(level, owner, storage)) return false;
         AABB search = new AABB(storage).inflate(LOOKUP_RADIUS, 24.0D, LOOKUP_RADIUS);
         for (Villager candidate : level.getEntitiesOfClass(Villager.class, search, Villager::isAlive)) {
             if (candidate == owner) continue;
