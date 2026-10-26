@@ -169,6 +169,9 @@ public final class VillageReservations {
             if (!data.getBoolean(ACTIVE)) continue;
             for (long packed : data.getLongArray(POSITIONS)) {
                 BlockPos pos = BlockPos.of(packed);
+                // A broken or unloaded chest is not an accessible reservation target and must not
+                // stall unrelated background production while a task looks for a replacement.
+                if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
                 if (pos.getX() >= minX && pos.getX() <= maxX
                     && pos.getY() >= minY && pos.getY() <= maxY
                     && pos.getZ() >= minZ && pos.getZ() <= maxZ) return true;

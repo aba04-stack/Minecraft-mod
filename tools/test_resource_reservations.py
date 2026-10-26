@@ -15,6 +15,7 @@ for marker in (
     "tryReserveStoragePositions",
     "reserveStoragesForItems",
     "available.getOrDefault(requirement.getKey(), 0) < requirement.getValue()",
+    "if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;",
     "remaining.put(item, need - amount)",
     "if (selected.isEmpty() || remaining.values().stream().anyMatch(amount -> amount > 0)) return false;",
     "private record StorageStock(BlockPos pos, Map<Item, Integer> items)",
