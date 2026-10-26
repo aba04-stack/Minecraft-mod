@@ -17,6 +17,8 @@ for marker in (
     "oneTaskExcludesCompetingTaskUntilItEnds",
     "removedChestDoesNotKeepAStaleReservation",
     "VillageReservations.tryReserveStoragePositions",
+    "VillageRegistry.isStorageForVillage",
+    "Removing a chest must also clear its persisted village-ownership claim.",
     "A claim must be released when its owning task ends.",
     "A removed container must not retain its reservation.",
 ):

@@ -31,6 +31,9 @@ public final class VillageReservationGameTests {
         Villager challenger = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
         owner.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, true);
         challenger.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, true);
+        helper.assertTrue(VillageRegistry.isStorageForVillage(
+            helper.getLevel(), owner.blockPosition(), chest),
+            "The test chest must first be assigned to the owner's village.");
 
         helper.assertTrue(VillageReservations.tryReserveStoragePositions(
             helper.getLevel(), owner, List.of(chest), "house"),
@@ -62,6 +65,9 @@ public final class VillageReservationGameTests {
 
         Villager owner = helper.spawn(EntityType.VILLAGER, 0, 1, 1);
         owner.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, true);
+        helper.assertTrue(VillageRegistry.isStorageForVillage(
+            helper.getLevel(), owner.blockPosition(), chest),
+            "The test chest must first be assigned to the owner's village.");
         helper.assertTrue(VillageReservations.tryReserveStoragePositions(
             helper.getLevel(), owner, List.of(chest), "house"),
             "The task must initially reserve the chest.");
@@ -72,7 +78,13 @@ public final class VillageReservationGameTests {
         helper.assertTrue(VillageReservations.isStorageAvailable(
             helper.getLevel(), chest, null),
             "A removed container must not retain its reservation.");
+        helper.assertTrue(!VillageRegistry.isStorageForVillage(
+            helper.getLevel(), owner.blockPosition(), chest),
+            "Removing a chest must also clear its persisted village-ownership claim.");
         helper.setBlock(relativeChest, Blocks.CHEST);
+        helper.assertTrue(VillageRegistry.isStorageForVillage(
+            helper.getLevel(), owner.blockPosition(), chest),
+            "A replacement chest may be re-registered to the current village.");
         helper.assertTrue(VillageReservations.tryReserveStoragePositions(
             helper.getLevel(), owner, List.of(chest), "house"),
             "A replacement chest at the old position must be reservable.");
