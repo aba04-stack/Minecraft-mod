@@ -7,7 +7,7 @@
 
 Living Villages expands village life through autonomous villager roles, resource logistics, crafting work orders, mining and tree work, village construction, farming, defense, and population support.
 
-This is an experimental hobby project. On 2026-10-26, GitHub Actions passed static validation, `./gradlew build`, and dedicated-server startup for commit `327bd5346c278dfd433d4d6e67bae1e41efb3707`. A shared HOME-anchored resident-group selector scopes major village subsystems. Persistent, coarse-grained storage claims prevent active jobs from competing for the same physical chest; storage searches compare the resident group around the village with the group nearest the chest; and active house/farm sites are checked to reduce overlapping construction. This remains a heuristic, not a global village registry or per-item ledger. The client UI, two-village behavior, and worker-death recovery still need play-testing before treating the mod as a release.
+This is an experimental hobby project. On 2026-10-26, GitHub Actions passed static validation, `./gradlew build`, dedicated-server startup, and JAR artifact upload for commit `be5e5128bec31dcb3fc749e020e3f7cc7dbfaf91`. The mod now stores village IDs and ownership of chests/barrels, beds, and workstations through Minecraft `SavedData`; main storage scans, housing counts, food logistics, industry, and physical crafting consult that ownership. Temporary task reservations separately prevent simultaneous jobs from using the same physical chest. Village IDs are still matched heuristically through HOME anchors rather than a full census of unloaded villagers. The client UI, two-village behavior, and worker-death recovery still need play-testing before treating the mod as a release.
 
 ## Build
 
@@ -17,7 +17,7 @@ On a system with Java 21 and internet access:
 ./gradlew build
 ```
 
-The build workflow runs static validation, regression tests, Gradle compilation, and a dedicated-server startup smoke test on pull requests. [Latest successful checks](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40284992624) · [Download the built JAR artifact](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40284992624/artifacts/12633587362).
+The build workflow runs static validation, regression tests, Gradle compilation, and a dedicated-server startup smoke test on pull requests. [Latest successful checks](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40305622309) · [Download the built JAR artifact](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40305622309/artifacts/12642915688).
 
 ## Local checks
 
