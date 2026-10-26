@@ -26,13 +26,16 @@ for marker in (
     "hasReservationInArea",
     "public static void release(CompoundTag data)",
     "isProjectSiteAvailable",
-    "isStorageInResidentGroup(ServerLevel level, Villager owner, BlockPos storage)",
-    "isStorageInResidentGroup(ServerLevel level, BlockPos groupCenter, BlockPos storage)",
     "private static boolean sitesConflict(BlockPos first, BlockPos second, int separation)",
     "VillageBuilder.activeProjectSite(candidate)",
     "VillageFarmBuilder.activeProjectSite(candidate)",
 ):
     assert marker in reservations, f"reservation manager missing {marker}"
+
+area = (JAVA / "VillageArea.java").read_text(encoding="utf-8")
+assert "isStorageInResidentGroup(ServerLevel level, Villager owner, BlockPos storage)" in area
+assert "isStorageInResidentGroup(ServerLevel level, BlockPos groupCenter, BlockPos storage)" in area
+assert "storageGroupLookupRadius()" in area
 
 checks = {
     "VillageBuilder.java": ("reserveStoragesForItems(level, builder.blockPosition(), builder, \"house\"", "VillageReservations.isProjectSiteAvailable(level, site, 8, null)", "tryAddStorageReservation(level, villager, storage, \"house\")", 'VillageReservations.release(data, "house")'),
