@@ -218,6 +218,12 @@ def main() -> int:
         errors.append(f"resource reservation regression check failed: {exc}")
 
     try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_reservation_gametests.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"reservation GameTest contract check failed: {exc}")
+
+    try:
         subprocess.run([sys.executable, str(ROOT / "tools/test_village_registry.py")],
                        check=True, capture_output=True, text=True)
     except Exception as exc:
@@ -263,6 +269,7 @@ def main() -> int:
     print("- resident counts/roles/projects/industry/crafting/food routes use the selected group")
     print("- farmland/bed/site/patrol scans skip unloaded chunks")
     print("- persistent storage reservations are conflict-checked and released on completion")
+    print("- Minecraft GameTests cover competing claims and removed-chest cleanup")
     print("- resource-ledger feature markers present")
     print("- shell scripts pass sh -n")
     print("NOTE: This does not compile the Minecraft/NeoForge source or test behavior in game.")

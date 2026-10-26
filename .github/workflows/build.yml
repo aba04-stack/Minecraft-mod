@@ -29,6 +29,8 @@ jobs:
         run: python3 tools/validate_project.py
       - name: Build with checksum-pinned Gradle bootstrap
         run: ./gradlew build
+      - name: Run in-world reservation GameTests
+        run: ./gradlew runGameTestServer
       - name: Smoke-test dedicated server startup
         if: github.event_name == 'pull_request'
         shell: bash
