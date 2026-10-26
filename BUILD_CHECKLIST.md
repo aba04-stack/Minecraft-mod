@@ -10,7 +10,9 @@
 - [x] Persistent storage reservation contract test: claims are saved on worker data, checked for conflicts, and released with a task-kind guard.
 - [x] House, farm, crafting, food courier, logistics, farmer stockpiling, miner/tool and guard storage paths check reservations.
 - [x] Newly discovered source/destination chests are claimed before worker routing.
+- [x] House/farm site searches and project start guard against nearby active build sites, including projects owned by a different resident group.
 - [ ] Run `runClient` and manually verify farm project initialization, food courier behavior and the elder panel.
+- [ ] In a test world, start a house and farm project from neighboring settlements and verify the projects do not overlap.
 - [ ] Run two competing resource tasks and verify one task cannot take from a chest claimed by the other.
 - [ ] Check that cancelling/disabling logistics does not release a house/farm/crafting claim on the same worker.
 - [ ] Check resource reservations when a chest is broken or a worker dies; task recovery is not implemented yet.
