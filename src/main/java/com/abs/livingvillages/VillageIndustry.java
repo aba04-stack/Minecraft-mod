@@ -58,6 +58,7 @@ public final class VillageIndustry {
             || !LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()) return;
 
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
+        if (VillageReservations.hasReservationInArea(level, center, radius, 8)) return;
         List<Villager> villagers = VillageArea.findVillagers(level, center);
         if (villagers.isEmpty()) return;
         if (VillageFarmBuilder.hasActiveProjectNear(level, center)
@@ -600,7 +601,8 @@ public final class VillageIndustry {
             for (int dz = -scanRadius; dz <= scanRadius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
                     BlockEntity entity = level.getBlockEntity(pos);
                     if (entity instanceof Container container) refs.add(new StorageRef(pos.immutable(), container));
                 }
