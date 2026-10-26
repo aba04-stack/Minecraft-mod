@@ -124,6 +124,7 @@ public final class VillageBuilder {
         Item plankItem = plankBlock.asItem();
         if (!canFitProjectMaterials(builder.getInventory(), plankItem, PLANKS_REQUIRED, Items.RED_BED, doorItem)) return false;
 
+        if (!VillageReservations.reserveNearbyStorages(level, center, builder, "house")) return false;
         CompoundTag data = builder.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
         data.putInt(PHASE, FETCH_PLANKS);
@@ -200,6 +201,7 @@ public final class VillageBuilder {
             BlockPos storagePos = routeStorage(data);
             BlockPos standPos = routeStand(data);
             if (!level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
+                || !VillageReservations.isStorageAvailable(level, storagePos, villager)
                 || !(level.getBlockEntity(storagePos) instanceof Container storage)) {
                 clearOwnedRoute(villager, data);
                 data.putLong(NEXT_ACTION, now + WORK_RETRY_TICKS);
@@ -391,7 +393,8 @@ public final class VillageBuilder {
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
         for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-radius, -6, -radius), origin.offset(radius, 6, radius))) {
-            if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+            if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                || !VillageReservations.isStorageAvailable(level, pos, villager)) continue;
             if (!(level.getBlockEntity(pos) instanceof Container container) || countItem(container, item) <= 0) continue;
             candidates.add(pos.immutable());
         }
@@ -482,6 +485,7 @@ public final class VillageBuilder {
 
     private static void clearProject(Villager villager, CompoundTag data) {
         clearOwnedRoute(villager, data);
+        VillageReservations.release(data);
         data.putBoolean(ACTIVE_KEY, false);
         data.remove(PHASE); data.remove(PLANK_ITEM); data.remove(DOOR_ITEM); data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);
         data.remove(STEP_INDEX); data.remove(STARTED); data.remove(NEXT_ACTION);

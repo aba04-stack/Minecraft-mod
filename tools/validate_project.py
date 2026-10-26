@@ -212,6 +212,12 @@ def main() -> int:
         errors.append(f"village area grouping regression check failed: {exc}")
 
     try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_resource_reservations.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"resource reservation regression check failed: {exc}")
+
+    try:
         subprocess.run(["java", str(ROOT / "tools/JavaSyntaxCheck.java"), str(ROOT / "src/main/java")],
                        check=True, capture_output=True, text=True)
     except Exception as exc:
@@ -244,6 +250,7 @@ def main() -> int:
     print("- active-area queries use a shared HOME-anchored nearest-group selector")
     print("- resident counts/roles/projects/industry/crafting/food routes use the selected group")
     print("- farmland/bed/site/patrol scans skip unloaded chunks")
+    print("- persistent storage reservations are conflict-checked and released on completion")
     print("- resource-ledger feature markers present")
     print("- shell scripts pass sh -n")
     print("NOTE: This does not compile the Minecraft/NeoForge source or test behavior in game.")

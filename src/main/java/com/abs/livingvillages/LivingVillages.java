@@ -492,6 +492,7 @@ public final class LivingVillages {
             if (!state.is(Blocks.CHEST) && !state.is(Blocks.TRAPPED_CHEST) && !state.is(Blocks.BARREL)) {
                 continue;
             }
+            if (!VillageReservations.isStorageAvailable(level, pos, null)) continue;
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (blockEntity instanceof Container container) {
                 containers.add(container);

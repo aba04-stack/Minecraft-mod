@@ -154,7 +154,7 @@ public final class VillageCraftingJobs {
             return;
         }
 
-        List<StorageRef> storages = findStorages(level, origin, Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()));
+        List<StorageRef> storages = findStorages(level, origin, Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()), villager);
         if (storages.isEmpty()) {
             data.putLong(NEXT_JOB, now + RETRY_TICKS);
             return;
@@ -163,6 +163,11 @@ public final class VillageCraftingJobs {
         Recipe recipe = chooseRecipe(level, origin, villager, storages, villagers);
         if (recipe == null || !canFitCraftResult(villager.getInventory(), recipe)) {
             // An idle craftsman should not rescan thousands of blocks every few ticks while stock is low.
+            data.putLong(NEXT_JOB, now + RETRY_TICKS);
+            return;
+        }
+        if (!VillageReservations.tryReserveStoragePositions(level, villager,
+            storages.stream().map(StorageRef::pos).toList(), "crafting")) {
             data.putLong(NEXT_JOB, now + RETRY_TICKS);
             return;
         }
@@ -296,7 +301,8 @@ public final class VillageCraftingJobs {
         if (!atRouteTarget(villager, level, data, now)) return;
 
         BlockPos storagePos = routeStorage(data);
-        if (!level.hasChunkAt(storagePos) || !(level.getBlockEntity(storagePos) instanceof Container container)) {
+        if (!level.hasChunkAt(storagePos) || !VillageReservations.isStorageAvailable(level, storagePos, villager)
+            || !(level.getBlockEntity(storagePos) instanceof Container container)) {
             clearOwnedRoute(villager, data);
             return;
         }
@@ -412,7 +418,8 @@ public final class VillageCraftingJobs {
         if (!atRouteTarget(villager, level, data, now)) return;
 
         BlockPos storagePos = routeStorage(data);
-        if (!level.hasChunkAt(storagePos) || !(level.getBlockEntity(storagePos) instanceof Container container)
+        if (!level.hasChunkAt(storagePos) || !VillageReservations.isStorageAvailable(level, storagePos, villager)
+            || !(level.getBlockEntity(storagePos) instanceof Container container)
             || !canInsert(container, new ItemStack(recipe.output(), recipe.outputCount()))) {
             clearOwnedRoute(villager, data);
             return;
@@ -494,6 +501,7 @@ public final class VillageCraftingJobs {
     }
 
     private static void clearJob(CompoundTag data) {
+        VillageReservations.release(data);
         data.putBoolean(ACTIVE_KEY, false);
         data.remove(STAGE); data.remove(RECIPE); data.remove(STARTED); data.remove(RETRY_AT);
         data.remove(TABLE_X); data.remove(TABLE_Y); data.remove(TABLE_Z); data.remove(CRAFT_STARTED);
@@ -818,7 +826,7 @@ public final class VillageCraftingJobs {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = VillagerRoles.getHome(villager);
         if (origin == null) origin = villager.blockPosition();
-        List<StorageRef> storages = findStorages(level, origin, radius);
+        List<StorageRef> storages = findStorages(level, origin, radius, villager);
         return storages.stream().filter(ref -> countItem(ref.container(), item) > 0)
             .sorted(Comparator.comparingDouble(ref -> villager.distanceToSqr(Vec3.atCenterOf(ref.pos()))))
             .map(ref -> makeTarget(level, villager, ref.pos()))
@@ -829,7 +837,7 @@ public final class VillageCraftingJobs {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = VillagerRoles.getHome(villager);
         if (origin == null) origin = villager.blockPosition();
-        List<StorageRef> storages = findStorages(level, origin, radius);
+        List<StorageRef> storages = findStorages(level, origin, radius, villager);
         return storages.stream().filter(ref -> canInsert(ref.container(), output))
             .sorted(Comparator.comparingDouble(ref -> villager.distanceToSqr(Vec3.atCenterOf(ref.pos()))))
             .map(ref -> makeTarget(level, villager, ref.pos()))
@@ -846,13 +854,14 @@ public final class VillageCraftingJobs {
         return stands.isEmpty() ? null : new StorageTarget(storage.immutable(), stands.get(0));
     }
 
-    private static List<StorageRef> findStorages(ServerLevel level, BlockPos center, int radius) {
+    private static List<StorageRef> findStorages(ServerLevel level, BlockPos center, int radius, Villager owner) {
         List<StorageRef> found = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -6; dy <= 6; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
                     BlockEntity entity = level.getBlockEntity(pos);
                     if (entity instanceof Container container) found.add(new StorageRef(pos.immutable(), container));
                 }
