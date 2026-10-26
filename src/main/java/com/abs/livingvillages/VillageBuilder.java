@@ -126,7 +126,7 @@ public final class VillageBuilder {
 
         java.util.Map<Item, Integer> materialBill = java.util.Map.of(
             plankItem, PLANKS_REQUIRED, Items.RED_BED, 1, doorItem, 1);
-        if (!VillageReservations.reserveStoragesForItems(level, center, builder, "house",
+        if (!VillageReservations.reserveStoragesForItems(level, builder.blockPosition(), builder, "house",
             materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) return false;
         CompoundTag data = builder.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);

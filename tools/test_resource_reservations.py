@@ -15,7 +15,10 @@ for marker in (
     "tryReserveStoragePositions",
     "reserveStoragesForItems",
     "available.getOrDefault(requirement.getKey(), 0) < requirement.getValue()",
-    "relevantStorages.add(pos.immutable())",
+    "remaining.put(item, need - amount)",
+    "if (selected.isEmpty() || remaining.values().stream().anyMatch(amount -> amount > 0)) return false;",
+    "private record StorageStock(BlockPos pos, Map<Item, Integer> items)",
+    "center.offset(-radius, -6, -radius)",
     "tryAddStorageReservation",
     "isStorageAvailable",
     "hasReservationInArea",
@@ -24,9 +27,9 @@ for marker in (
     assert marker in reservations, f"reservation manager missing {marker}"
 
 checks = {
-    "VillageBuilder.java": ("reserveStoragesForItems(level, center, builder, \"house\"", "tryAddStorageReservation(level, villager, storage, \"house\")", 'VillageReservations.release(data, "house")'),
-    "VillageFarmBuilder.java": ("reserveStoragesForItems(level, center, worker, \"farm\"", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", 'VillageReservations.release(data, "farm")'),
-    "VillageCraftingJobs.java": ("reserveStoragesForItems(level, origin, villager", "missingInputs.merge(ingredient.item(), missing, Integer::sum)", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", 'VillageReservations.release(data, "crafting")'),
+    "VillageBuilder.java": ("reserveStoragesForItems(level, builder.blockPosition(), builder, \"house\"", "tryAddStorageReservation(level, villager, storage, \"house\")", 'VillageReservations.release(data, "house")'),
+    "VillageFarmBuilder.java": ("reserveStoragesForItems(level, storageOrigin, worker, \"farm\"", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", 'VillageReservations.release(data, "farm")'),
+    "VillageCraftingJobs.java": ("reserveStoragesForItems(level, origin, villager", "totalInputs.merge(ingredient.item(), ingredient.count(), Integer::sum)", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", 'VillageReservations.release(data, "crafting")'),
     "LivingVillages.java": ("VillageReservations.isStorageAvailable(level, pos, null)",),
     "VillagePopulation.java": ('VillageReservations.release(data, "food_delivery")',),
     "VillageLogistics.java": ('VillageReservations.release(data, "logistics_delivery")',),

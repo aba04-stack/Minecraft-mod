@@ -136,7 +136,9 @@ public final class VillageFarmBuilder {
         if (worker == null) return false;
         java.util.Map<Item, Integer> materialBill = java.util.Map.of(
             seedItem, CROP_COUNT, Items.WATER_BUCKET, 1, Items.COMPOSTER, 1, hoeItem, 1);
-        if (!VillageReservations.reserveStoragesForItems(level, center, worker, "farm",
+        BlockPos storageOrigin = VillagerRoles.getHome(worker);
+        if (storageOrigin == null) storageOrigin = worker.blockPosition();
+        if (!VillageReservations.reserveStoragesForItems(level, storageOrigin, worker, "farm",
             materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) return false;
 
         CompoundTag data = worker.getPersistentData();

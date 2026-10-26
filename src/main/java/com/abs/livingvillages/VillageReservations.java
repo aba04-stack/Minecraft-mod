@@ -62,30 +62,50 @@ public final class VillageReservations {
             || owner.getPersistentData().getBoolean(ACTIVE)) return false;
         int radius = Math.max(0, Math.min(requestedRadius, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()));
         Map<Item, Integer> available = new HashMap<>();
-        List<BlockPos> relevantStorages = new ArrayList<>();
+        List<StorageStock> storages = new ArrayList<>();
 
+        for (Map.Entry<Item, Integer> requirement : requirements.entrySet()) {
+            if (requirement.getValue() <= 0) return false;
+        }
         for (BlockPos pos : BlockPos.betweenClosed(
-            center.offset(-radius, -8, -radius), center.offset(radius, 8, radius))) {
+            center.offset(-radius, -6, -radius), center.offset(radius, 6, radius))) {
             if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
                 || !isStorageAvailable(level, pos, owner)) continue;
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (!(blockEntity instanceof Container container)) continue;
 
-            boolean relevant = false;
+            Map<Item, Integer> stock = new HashMap<>();
             for (int slot = 0; slot < container.getContainerSize(); slot++) {
                 ItemStack stack = container.getItem(slot);
                 if (stack.isEmpty() || !requirements.containsKey(stack.getItem())) continue;
+                stock.merge(stack.getItem(), stack.getCount(), Integer::sum);
                 available.merge(stack.getItem(), stack.getCount(), Integer::sum);
-                relevant = true;
             }
-            if (relevant) relevantStorages.add(pos.immutable());
+            if (!stock.isEmpty()) storages.add(new StorageStock(pos.immutable(), stock));
         }
 
         for (Map.Entry<Item, Integer> requirement : requirements.entrySet()) {
-            if (requirement.getValue() <= 0
-                || available.getOrDefault(requirement.getKey(), 0) < requirement.getValue()) return false;
+            if (available.getOrDefault(requirement.getKey(), 0) < requirement.getValue()) return false;
         }
-        return tryReserveStoragePositions(level, owner, relevantStorages, kind);
+
+        // Reserve nearest matching containers only until the complete bill is covered.
+        storages.sort(Comparator.comparingDouble(stock -> stock.pos().distSqr(center)));
+        Map<Item, Integer> remaining = new HashMap<>(requirements);
+        List<BlockPos> selected = new ArrayList<>();
+        for (StorageStock storage : storages) {
+            boolean contributes = false;
+            for (Item item : requirements.keySet()) {
+                int need = remaining.getOrDefault(item, 0);
+                int amount = Math.min(need, storage.items().getOrDefault(item, 0));
+                if (amount <= 0) continue;
+                remaining.put(item, need - amount);
+                contributes = true;
+            }
+            if (contributes) selected.add(storage.pos());
+            if (remaining.values().stream().allMatch(amount -> amount <= 0)) break;
+        }
+        if (selected.isEmpty() || remaining.values().stream().anyMatch(amount -> amount > 0)) return false;
+        return tryReserveStoragePositions(level, owner, selected, kind);
     }
 
     public static boolean tryReserveStoragePositions(ServerLevel level, Villager owner,
@@ -200,4 +220,6 @@ public final class VillageReservations {
     private static boolean isStorage(BlockState state) {
         return state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.BARREL);
     }
+
+    private record StorageStock(BlockPos pos, Map<Item, Integer> items) {}
 }

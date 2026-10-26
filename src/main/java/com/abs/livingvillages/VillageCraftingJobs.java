@@ -166,10 +166,14 @@ public final class VillageCraftingJobs {
             data.putLong(NEXT_JOB, now + RETRY_TICKS);
             return;
         }
-        Map<Item, Integer> missingInputs = new LinkedHashMap<>();
+        Map<Item, Integer> totalInputs = new LinkedHashMap<>();
         for (Ingredient ingredient : recipe.inputs()) {
-            int missing = Math.max(0, ingredient.count() - inventoryCount(villager.getInventory(), ingredient.item()));
-            if (missing > 0) missingInputs.merge(ingredient.item(), missing, Integer::sum);
+            totalInputs.merge(ingredient.item(), ingredient.count(), Integer::sum);
+        }
+        Map<Item, Integer> missingInputs = new LinkedHashMap<>();
+        for (Map.Entry<Item, Integer> input : totalInputs.entrySet()) {
+            int missing = Math.max(0, input.getValue() - inventoryCount(villager.getInventory(), input.getKey()));
+            if (missing > 0) missingInputs.put(input.getKey(), missing);
         }
         if (!missingInputs.isEmpty() && !VillageReservations.reserveStoragesForItems(level, origin, villager,
             "crafting", missingInputs, Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()))) {
