@@ -81,8 +81,8 @@ public final class VillageRegistry extends SavedData {
                 if (!homes.contains(pos)) homes.add(pos);
             }
         }
-        homes.sort(Comparator.comparingInt(BlockPos::getX)
-            .thenComparingInt(BlockPos::getZ).thenComparingInt(BlockPos::getY));
+        homes.sort(Comparator.<BlockPos>comparingInt(pos -> pos.getX())
+            .thenComparingInt(pos -> pos.getZ()).thenComparingInt(pos -> pos.getY()));
         BlockPos candidateAnchor = homes.isEmpty()
             ? residents.stream().min(Comparator.comparing(v -> v.getUUID().toString()))
                 .map(v -> v.blockPosition().immutable()).orElse(center.immutable())
