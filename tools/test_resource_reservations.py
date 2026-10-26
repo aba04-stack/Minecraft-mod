@@ -29,7 +29,7 @@ for marker in (
 
 checks = {
     "VillageBuilder.java": ("reserveStoragesForItems(level, builder.blockPosition(), builder, \"house\"", "tryAddStorageReservation(level, villager, storage, \"house\")", 'VillageReservations.release(data, "house")'),
-    "VillageFarmBuilder.java": ("reserveStoragesForItems(level, storageOrigin, worker, \"farm\"", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", 'VillageReservations.release(data, "farm")'),
+    "VillageFarmBuilder.java": ("findStorages(level, candidateOrigin, null)", "firstHoeInStorage(candidateStorages)", "reserveStoragesForItems(level, candidateOrigin, candidate, \"farm\"", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", 'VillageReservations.release(data, "farm")'),
     "VillageCraftingJobs.java": ("reserveStoragesForItems(level, origin, villager", "totalInputs.merge(ingredient.item(), ingredient.count(), Integer::sum)", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", 'VillageReservations.release(data, "crafting")'),
     "LivingVillages.java": ("VillageReservations.isStorageAvailable(level, pos, null)",),
     "VillagePopulation.java": ('VillageReservations.release(data, "food_delivery")',),

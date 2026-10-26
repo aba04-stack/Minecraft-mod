@@ -126,20 +126,27 @@ public final class VillageFarmBuilder {
             && !hasOtherTask(v.getPersistentData())
             && !v.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)).toList());
         candidates.sort(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))));
-        List<Container> storages = findStorages(level, center, null);
-        Item hoeItem = firstHoeInStorage(storages);
-        if (hoeItem == Items.AIR) return false;
+        Villager worker = null;
+        Item hoeItem = Items.AIR;
+        BlockPos storageOrigin = null;
+        for (Villager candidate : candidates) {
+            BlockPos candidateOrigin = VillagerRoles.getHome(candidate);
+            if (candidateOrigin == null) candidateOrigin = candidate.blockPosition();
+            List<Container> candidateStorages = findStorages(level, candidateOrigin, null);
+            Item candidateHoe = firstHoeInStorage(candidateStorages);
+            if (candidateHoe == Items.AIR || !canFitRequiredItems(candidate.getInventory(), seedItem, candidateHoe)) continue;
 
-        Villager worker = candidates.stream()
-            .filter(v -> canFitRequiredItems(v.getInventory(), seedItem, hoeItem))
-            .findFirst().orElse(null);
-        if (worker == null) return false;
-        java.util.Map<Item, Integer> materialBill = java.util.Map.of(
-            seedItem, CROP_COUNT, Items.WATER_BUCKET, 1, Items.COMPOSTER, 1, hoeItem, 1);
-        BlockPos storageOrigin = VillagerRoles.getHome(worker);
-        if (storageOrigin == null) storageOrigin = worker.blockPosition();
-        if (!VillageReservations.reserveStoragesForItems(level, storageOrigin, worker, "farm",
-            materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) return false;
+            java.util.Map<Item, Integer> materialBill = java.util.Map.of(
+                seedItem, CROP_COUNT, Items.WATER_BUCKET, 1, Items.COMPOSTER, 1, candidateHoe, 1);
+            if (!VillageReservations.reserveStoragesForItems(level, candidateOrigin, candidate, "farm",
+                materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) continue;
+
+            worker = candidate;
+            hoeItem = candidateHoe;
+            storageOrigin = candidateOrigin;
+            break;
+        }
+        if (worker == null || hoeItem == Items.AIR || storageOrigin == null) return false;
 
         CompoundTag data = worker.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
