@@ -358,7 +358,8 @@ public final class VillageElder {
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
             if (!level.hasChunkAt(pos)) continue;
             BlockState state = level.getBlockState(pos);
-            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT) continue;
+            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT
+                || !VillageRegistry.isBedForVillage(level, center, pos)) continue;
             BlockPos head = pos.relative(state.getValue(HorizontalDirectionalBlock.FACING));
             if (level.hasChunkAt(head) && level.getBlockState(pos.above()).isAir()
                 && level.getBlockState(pos.above(2)).isAir()
@@ -378,7 +379,8 @@ public final class VillageElder {
             if (!level.getBlockState(pos).is(Blocks.CHEST)
                 && !level.getBlockState(pos).is(Blocks.TRAPPED_CHEST)
                 && !level.getBlockState(pos).is(Blocks.BARREL)) continue;
-            if (!VillageArea.isStorageInResidentGroup(level, center, pos)) continue;
+            if (!VillageRegistry.isStorageForVillage(level, center, pos)
+                || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (!(blockEntity instanceof Container container)) continue;
             for (int slot = 0; slot < container.getContainerSize(); slot++) {

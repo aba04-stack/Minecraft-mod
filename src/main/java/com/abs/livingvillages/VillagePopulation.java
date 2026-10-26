@@ -355,6 +355,7 @@ public final class VillagePopulation {
                 for (int dy = -8; dy <= 8; dy++) {
                     BlockPos chest = center.offset(dx, dy, dz);
                     if (!level.hasChunkAt(chest) || !isStorage(level.getBlockState(chest))
+                        || !VillageRegistry.isStorageForVillage(level, center, chest)
                         || !VillageReservations.isStorageAvailable(level, chest, courier)) continue;
                     if (!(level.getBlockEntity(chest) instanceof Container container)) continue;
                     Map<Item, Integer> plan = planFood(container, gap, globalPoints);
@@ -375,6 +376,7 @@ public final class VillagePopulation {
     private static StorageTarget findReturnStorage(ServerLevel level, BlockPos center, BlockPos origin,
                                                    BlockPos preferred, Villager courier) {
         if (level.hasChunkAt(preferred) && isStorage(level.getBlockState(preferred))
+            && VillageRegistry.isStorageForVillage(level, center, preferred)
             && VillageReservations.isStorageAvailable(level, preferred, courier)) {
             BlockPos stand = findStandNear(level, preferred, origin);
             if (stand != null && VillageReservations.tryAddStorageReservation(level, courier, preferred, "food_delivery")) {
@@ -389,6 +391,7 @@ public final class VillagePopulation {
                 for (int dy = -8; dy <= 8; dy++) {
                     BlockPos chest = center.offset(dx, dy, dz);
                     if (!level.hasChunkAt(chest) || !isStorage(level.getBlockState(chest))
+                        || !VillageRegistry.isStorageForVillage(level, center, chest)
                         || !VillageReservations.isStorageAvailable(level, chest, courier)
                         || !(level.getBlockEntity(chest) instanceof Container)) continue;
                     BlockPos stand = findStandNear(level, chest, origin);
@@ -685,8 +688,8 @@ public final class VillagePopulation {
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -8, -radius), center.offset(radius, 8, radius))) {
             if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
-                || !VillageReservations.isStorageAvailable(level, pos, owner)
-                || (owner == null && !VillageArea.isStorageInResidentGroup(level, center, pos))) continue;
+                || !VillageRegistry.isStorageForVillage(level, center, pos)
+                || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (blockEntity instanceof Container container) containers.add(container);
         }

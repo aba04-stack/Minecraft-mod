@@ -618,8 +618,8 @@ public final class VillageFarmBuilder {
                 for (int dy = -6; dy <= 6; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
-                        || !VillageReservations.isStorageAvailable(level, pos, owner)
-                        || (owner == null && !VillageArea.isStorageInResidentGroup(level, center, pos))) continue;
+                        || !VillageRegistry.isStorageForVillage(level, center, pos)
+                        || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
                     if (level.getBlockEntity(pos) instanceof Container container) found.add(container);
                 }
             }
@@ -669,6 +669,7 @@ public final class VillageFarmBuilder {
                 for (int dy = -6; dy <= 6; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, center, pos)
                         || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
                     if (level.getBlockEntity(pos) instanceof Container container) found.add(new StorageRef(pos.immutable(), container));
                 }

@@ -33,9 +33,16 @@ assert "public static boolean isStorageForVillage(" in registry
 assert "public static boolean isBedForVillage(" in registry
 assert "public static boolean isWorkBlockForVillage(" in registry
 
-for filename in ("LivingVillages.java", "VillageIndustry.java"):
+for filename in ("LivingVillages.java", "VillageIndustry.java", "VillageFarmBuilder.java",
+                 "VillageCraftingJobs.java", "VillageElder.java"):
     source = (JAVA / filename).read_text(encoding="utf-8")
     assert "VillageRegistry.isStorageForVillage(level, center, pos)" in source, f"{filename} must use stable store ownership"
+
+population = (JAVA / "VillagePopulation.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isStorageForVillage(level, center, pos)" in population
+assert "VillageRegistry.isStorageForVillage(level, center, chest)" in population
+elder = (JAVA / "VillageElder.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isBedForVillage(level, center, pos)" in elder
 
 reservations = (JAVA / "VillageReservations.java").read_text(encoding="utf-8")
 assert "VillageRegistry.isStorageForVillage(level, center, pos)" in reservations

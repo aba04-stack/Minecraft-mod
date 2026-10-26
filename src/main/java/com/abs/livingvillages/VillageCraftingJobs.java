@@ -876,6 +876,7 @@ public final class VillageCraftingJobs {
                 for (int dy = -6; dy <= 6; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, center, pos)
                         || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
                     BlockEntity entity = level.getBlockEntity(pos);
                     if (entity instanceof Container container) found.add(new StorageRef(pos.immutable(), container));
