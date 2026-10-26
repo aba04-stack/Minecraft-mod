@@ -16,6 +16,8 @@ for marker in (
     "Resident UUIDs provide a fallback when all known HOME anchors move or disappear.",
     "currentResidentIds",
     "bestOverlap",
+    "minimumOverlap = currentResidentIds.size() / 2 + 1",
+    "if (overlap < minimumOverlap) continue;",
     "tag.put(\"knownHomes\", knownHomeTags)",
     "tag.put(\"knownResidents\", knownResidentTags)",
     'tag.getList("knownHomes", Tag.TAG_COMPOUND)',

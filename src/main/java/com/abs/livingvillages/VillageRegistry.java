@@ -124,12 +124,18 @@ public final class VillageRegistry extends SavedData {
         // a fallback. HOME-based matches take precedence, so one villager wandering into another
         // town cannot override that town's well-established home anchors.
         if (bestId == null) {
+            // Avoid adopting a different village's identity because just one wandering resident
+            // happens to be inside the query area. HOME anchors already match first; the UUID
+            // fallback therefore requires a strict majority of the selected residents.
+            int minimumOverlap = currentResidentIds.isEmpty()
+                ? Integer.MAX_VALUE : currentResidentIds.size() / 2 + 1;
             int bestOverlap = 0;
             for (Map.Entry<UUID, Set<UUID>> entry : registry.knownResidents.entrySet()) {
                 int overlap = 0;
                 for (UUID residentId : currentResidentIds) {
                     if (entry.getValue().contains(residentId)) overlap++;
                 }
+                if (overlap < minimumOverlap) continue;
                 if (overlap > bestOverlap || (overlap == bestOverlap && overlap > 0 && bestId != null
                     && entry.getKey().toString().compareTo(bestId.toString()) < 0)) {
                     bestOverlap = overlap;
