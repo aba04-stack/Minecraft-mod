@@ -58,18 +58,14 @@ public final class VillageIndustry {
             || !LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()) return;
 
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        if (VillageReservations.hasReservationInArea(level, center, radius, 8)) return;
         List<Villager> villagers = VillageArea.findVillagers(level, center);
         if (villagers.isEmpty()) return;
-        if (VillageFarmBuilder.hasActiveProjectNear(level, center)
-            || VillageBuilder.hasActiveProjectNear(level, center)) return;
-        // A physical work order reserves stock while ingredients are being carried to the bench.
-        // Pause this planner until the order is complete, so no other recipe spends the same inputs.
-        if (LivingVillagesConfig.ENABLE_PHYSICAL_CRAFTING.get()
-            && villagers.stream().anyMatch(v -> v.getPersistentData().getBoolean(VillageCraftingJobs.ACTIVE_KEY))) return;
 
         List<StorageRef> storages = findStorages(level, center, radius);
         if (storages.isEmpty()) {
+            // If physical chests exist but are reserved by active projects, do not mistake them
+            // for a brand-new settlement and attempt duplicate storage bootstrap from inventory.
+            if (hasStorageBlock(level, center, radius)) return;
             // Bootstrap is itself a real recipe: two matching logs -> eight planks -> one chest.
             // All ingredients must be in a villager's own inventory; nothing is created for free.
             bootstrapStorage(level, center, villagers);
@@ -592,6 +588,19 @@ public final class VillageIndustry {
         }
         found.sort(Comparator.comparingDouble(pos -> pos.distSqr(center)));
         return found;
+    }
+
+    private static boolean hasStorageBlock(ServerLevel level, BlockPos center, int radius) {
+        int scanRadius = Math.min(radius, 24);
+        for (int dx = -scanRadius; dx <= scanRadius; dx++) {
+            for (int dz = -scanRadius; dz <= scanRadius; dz++) {
+                for (int dy = -4; dy <= 4; dy++) {
+                    BlockPos pos = center.offset(dx, dy, dz);
+                    if (level.hasChunkAt(pos) && isStorage(level.getBlockState(pos))) return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static List<StorageRef> findStorages(ServerLevel level, BlockPos center, int radius) {

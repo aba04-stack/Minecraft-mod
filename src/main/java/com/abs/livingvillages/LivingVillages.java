@@ -208,8 +208,7 @@ public final class LivingVillages {
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (!VillageElder.isAutomationEnabled(villagers) && !VillageElder.hasPendingRequest(villagers)) continue;
             VillagePopulation.tickArea(level, villageCenter, villagers);
-            if (villagers.stream().anyMatch(v -> (LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get() && VillageBuilder.isProjectActive(v))
-                || (LivingVillagesConfig.ENABLE_FARM_PROJECTS.get() && VillageFarmBuilder.isProjectActive(v)))) continue;
+            // Industry scans only unreserved containers, so it can continue with separate stock.
             VillageIndustry.tickArea(level, villageCenter);
         }
     }

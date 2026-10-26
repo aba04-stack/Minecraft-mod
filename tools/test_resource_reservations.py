@@ -42,6 +42,14 @@ for filename, markers in checks.items():
     for marker in markers:
         assert marker in source, f"{filename} must include {marker}"
 
+industry = (JAVA / "VillageIndustry.java").read_text(encoding="utf-8")
+assert "VillageReservations.isStorageAvailable(level, pos, null)" in industry
+assert "hasStorageBlock(level, center, radius)" in industry
+assert "VillageReservations.hasReservationInArea(level, center, radius, 8)) return;" not in industry
+scheduler = (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
+assert "VillageIndustry.tickArea(level, villageCenter);" in scheduler
+assert "VillagePopulation.tickArea(level, villageCenter, villagers);\n            if (villagers.stream().anyMatch" not in scheduler
+
 assert "VillageReservations.isStorageAvailable(level, storagePos, villager)" in (JAVA / "VillageBuilder.java").read_text(encoding="utf-8")
 assert "VillageReservations.isStorageAvailable(level, storagePos, worker)" in (JAVA / "VillageFarmBuilder.java").read_text(encoding="utf-8")
 assert "VillageReservations.isStorageAvailable(level, storagePos, villager)" in (JAVA / "VillageCraftingJobs.java").read_text(encoding="utf-8")
