@@ -42,8 +42,6 @@ neoForge {
         gameTestServer {
             type = 'gameTestServer'
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
-            // Let Gradle collect GameTest results instead of terminating its own process.
-            setForceExit false
         }
     }
 
