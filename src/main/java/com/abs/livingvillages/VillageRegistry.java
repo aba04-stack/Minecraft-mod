@@ -5,6 +5,7 @@ import net.minecraft.core.GlobalPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
@@ -17,8 +18,10 @@ import net.minecraft.world.level.saveddata.SavedData;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
 
@@ -42,6 +45,10 @@ public final class VillageRegistry extends SavedData {
     private static final Map<ServerLevel, IdentityCache> ID_CACHE = new WeakHashMap<>();
 
     private final Map<UUID, BlockPos> villageAnchors = new HashMap<>();
+    /** All observed HOME anchors are aliases; keep the primary anchor for old-save compatibility. */
+    private final Map<UUID, Set<Long>> knownHomes = new HashMap<>();
+    /** Resident UUIDs provide a fallback when all known HOME anchors move or disappear. */
+    private final Map<UUID, Set<UUID>> knownResidents = new HashMap<>();
     private final Map<Long, UUID> storageOwners = new HashMap<>();
     private final Map<Long, UUID> bedOwners = new HashMap<>();
     private final Map<Long, UUID> workBlockOwners = new HashMap<>();
@@ -74,7 +81,9 @@ public final class VillageRegistry extends SavedData {
 
     private static UUID resolveOrCreateId(ServerLevel level, BlockPos center, List<Villager> residents) {
         List<BlockPos> homes = new ArrayList<>();
+        Set<UUID> currentResidentIds = new HashSet<>();
         for (Villager villager : residents) {
+            currentResidentIds.add(villager.getUUID());
             GlobalPos home = villager.getBrain().getMemory(MemoryModuleType.HOME).orElse(null);
             if (home != null && home.dimension().equals(level.dimension())) {
                 BlockPos pos = home.pos().immutable();
@@ -91,23 +100,64 @@ public final class VillageRegistry extends SavedData {
         VillageRegistry registry = get(level);
         UUID bestId = null;
         long bestDistance = Long.MAX_VALUE;
-        List<BlockPos> compareAnchors = homes.isEmpty() ? List.of(candidateAnchor) : homes;
+
+        // HOME anchors remain the strongest identity signal. Compare both the original primary
+        // anchor and every alias observed in prior saves, so a village no longer depends on one
+        // resident's home position staying alive/unchanged.
         for (Map.Entry<UUID, BlockPos> entry : registry.villageAnchors.entrySet()) {
             long distance = Long.MAX_VALUE;
-            for (BlockPos home : compareAnchors) {
+            for (BlockPos home : homes.isEmpty() ? List.of(candidateAnchor) : homes) {
                 distance = Math.min(distance, horizontalDistanceSquared(home, entry.getValue()));
+                for (long alias : registry.knownHomes.getOrDefault(entry.getKey(), Set.of())) {
+                    distance = Math.min(distance, horizontalDistanceSquared(home, BlockPos.of(alias)));
+                }
             }
-            if (distance <= ID_MATCH_RADIUS_SQUARED && distance < bestDistance) {
+            if (distance <= ID_MATCH_RADIUS_SQUARED
+                && (distance < bestDistance || (distance == bestDistance && bestId != null
+                    && entry.getKey().toString().compareTo(bestId.toString()) < 0))) {
                 bestDistance = distance;
                 bestId = entry.getKey();
             }
         }
-        if (bestId != null) return bestId;
 
-        UUID created = UUID.randomUUID();
-        registry.villageAnchors.put(created, candidateAnchor);
-        registry.setDirty();
-        return created;
+        // If anchors changed or disappeared, overlap with previously observed resident UUIDs is
+        // a fallback. HOME-based matches take precedence, so one villager wandering into another
+        // town cannot override that town's well-established home anchors.
+        if (bestId == null) {
+            int bestOverlap = 0;
+            for (Map.Entry<UUID, Set<UUID>> entry : registry.knownResidents.entrySet()) {
+                int overlap = 0;
+                for (UUID residentId : currentResidentIds) {
+                    if (entry.getValue().contains(residentId)) overlap++;
+                }
+                if (overlap > bestOverlap || (overlap == bestOverlap && overlap > 0 && bestId != null
+                    && entry.getKey().toString().compareTo(bestId.toString()) < 0)) {
+                    bestOverlap = overlap;
+                    bestId = entry.getKey();
+                }
+            }
+        }
+
+        boolean changed = false;
+        if (bestId == null) {
+            bestId = UUID.randomUUID();
+            registry.villageAnchors.put(bestId, candidateAnchor);
+            changed = true;
+        } else if (!registry.villageAnchors.containsKey(bestId)) {
+            registry.villageAnchors.put(bestId, candidateAnchor);
+            changed = true;
+        }
+
+        Set<Long> savedHomes = registry.knownHomes.computeIfAbsent(bestId, ignored -> new HashSet<>());
+        for (BlockPos home : homes) {
+            if (savedHomes.add(home.asLong())) changed = true;
+        }
+        Set<UUID> savedResidents = registry.knownResidents.computeIfAbsent(bestId, ignored -> new HashSet<>());
+        for (UUID residentId : currentResidentIds) {
+            if (savedResidents.add(residentId)) changed = true;
+        }
+        if (changed) registry.setDirty();
+        return bestId;
     }
 
     /** Claim a physical storage block for the persistent village selected around groupCenter. */
@@ -229,6 +279,31 @@ public final class VillageRegistry extends SavedData {
             UUID id = parseUuid(entry.getString("id"));
             if (id != null) data.villageAnchors.put(id, BlockPos.of(entry.getLong("anchor")));
         }
+        // Older 0.15.0 world data may contain only the primary anchor. Promote it to an alias
+        // before reading optional expanded maps; no existing save needs to be discarded.
+        for (Map.Entry<UUID, BlockPos> entry : data.villageAnchors.entrySet()) {
+            data.knownHomes.computeIfAbsent(entry.getKey(), ignored -> new HashSet<>()).add(entry.getValue().asLong());
+        }
+        ListTag knownHomeTags = tag.getList("knownHomes", Tag.TAG_COMPOUND);
+        for (int i = 0; i < knownHomeTags.size(); i++) {
+            CompoundTag entry = knownHomeTags.getCompound(i);
+            UUID id = parseUuid(entry.getString("id"));
+            if (id == null) continue;
+            Set<Long> positions = data.knownHomes.computeIfAbsent(id, ignored -> new HashSet<>());
+            for (long position : entry.getLongArray("positions")) positions.add(position);
+        }
+        ListTag knownResidentTags = tag.getList("knownResidents", Tag.TAG_COMPOUND);
+        for (int i = 0; i < knownResidentTags.size(); i++) {
+            CompoundTag entry = knownResidentTags.getCompound(i);
+            UUID id = parseUuid(entry.getString("id"));
+            if (id == null) continue;
+            Set<UUID> members = data.knownResidents.computeIfAbsent(id, ignored -> new HashSet<>());
+            ListTag memberTags = entry.getList("members", Tag.TAG_STRING);
+            for (int j = 0; j < memberTags.size(); j++) {
+                UUID resident = parseUuid(memberTags.getString(j));
+                if (resident != null) members.add(resident);
+            }
+        }
         data.storageOwners.putAll(readOwners(tag.getList("storageOwners", Tag.TAG_COMPOUND)));
         data.bedOwners.putAll(readOwners(tag.getList("bedOwners", Tag.TAG_COMPOUND)));
         data.workBlockOwners.putAll(readOwners(tag.getList("workBlockOwners", Tag.TAG_COMPOUND)));
@@ -245,6 +320,27 @@ public final class VillageRegistry extends SavedData {
             villageTags.add(value);
         }
         tag.put("villageAnchors", villageTags);
+
+        ListTag knownHomeTags = new ListTag();
+        for (Map.Entry<UUID, Set<Long>> entry : knownHomes.entrySet()) {
+            CompoundTag value = new CompoundTag();
+            value.putString("id", entry.getKey().toString());
+            value.putLongArray("positions", entry.getValue().stream().mapToLong(Long::longValue).sorted().toArray());
+            knownHomeTags.add(value);
+        }
+        tag.put("knownHomes", knownHomeTags);
+
+        ListTag knownResidentTags = new ListTag();
+        for (Map.Entry<UUID, Set<UUID>> entry : knownResidents.entrySet()) {
+            CompoundTag value = new CompoundTag();
+            value.putString("id", entry.getKey().toString());
+            ListTag memberTags = new ListTag();
+            entry.getValue().stream().sorted(Comparator.comparing(UUID::toString))
+                .forEach(resident -> memberTags.add(StringTag.valueOf(resident.toString())));
+            value.put("members", memberTags);
+            knownResidentTags.add(value);
+        }
+        tag.put("knownResidents", knownResidentTags);
         tag.put("storageOwners", writeOwners(storageOwners));
         tag.put("bedOwners", writeOwners(bedOwners));
         tag.put("workBlockOwners", writeOwners(workBlockOwners));
