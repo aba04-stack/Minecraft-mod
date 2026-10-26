@@ -59,8 +59,8 @@ public final class VillageReservations {
      */
     public static boolean reserveStoragesForItems(ServerLevel level, BlockPos center, Villager owner,
                                                   String kind, Map<Item, Integer> requirements, int requestedRadius) {
-        if (owner == null || !owner.isAlive() || requirements == null || requirements.isEmpty()
-            || owner.getPersistentData().getBoolean(ACTIVE)) return false;
+        if (owner == null || !owner.isAlive() || requirements == null || requirements.isEmpty()) return false;
+        if (hasLiveReservation(level, owner, owner.getPersistentData())) return false;
         int radius = Math.max(0, Math.min(requestedRadius, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()));
         Map<Item, Integer> available = new HashMap<>();
         List<StorageStock> storages = new ArrayList<>();
@@ -114,7 +114,7 @@ public final class VillageReservations {
                                                      List<BlockPos> requested, String kind) {
         if (owner == null || !owner.isAlive() || requested == null || requested.isEmpty()) return false;
         CompoundTag data = owner.getPersistentData();
-        if (data.getBoolean(ACTIVE)) return false;
+        if (hasLiveReservation(level, owner, data)) return false;
 
         Set<Long> positions = normalizeStoragePositions(level, requested);
         if (positions.isEmpty()) return false;
@@ -129,9 +129,10 @@ public final class VillageReservations {
         if (owner == null || !owner.isAlive() || storage == null || !level.hasChunkAt(storage)
             || !isStorage(level.getBlockState(storage))) return false;
         CompoundTag data = owner.getPersistentData();
-        if (data.getBoolean(ACTIVE) && !data.getString(KIND).equals(kind)) return false;
+        boolean hasLiveClaim = hasLiveReservation(level, owner, data);
+        if (hasLiveClaim && !data.getString(KIND).equals(kind)) return false;
         Set<Long> positions = readPositions(data);
-        if (data.getBoolean(ACTIVE) && positions.contains(storage.asLong())) return true;
+        if (hasLiveClaim && positions.contains(storage.asLong())) return true;
 
         Set<Long> additions = normalizeStoragePositions(level, List.of(storage));
         if (additions.isEmpty()) return false;
@@ -244,14 +245,14 @@ public final class VillageReservations {
             BlockPos pos = BlockPos.of(packed);
             if (!level.hasChunkAt(pos) || isStorage(level.getBlockState(pos))) valid.add(packed);
         }
+        if (valid.isEmpty()) {
+            release(data);
+            return false;
+        }
         if (valid.size() != claimed.length) {
-            if (valid.isEmpty()) {
-                release(data);
-                return false;
-            }
             data.putLongArray(POSITIONS, valid.stream().mapToLong(Long::longValue).toArray());
         }
-        return !valid.isEmpty();
+        return true;
     }
 
     public static void release(CompoundTag data) {
