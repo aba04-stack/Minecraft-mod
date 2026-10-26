@@ -202,6 +202,41 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "project_site_collision")
+    public static void activeHouseAndFarmProjectsProtectTheirFootprints(GameTestHelper helper) {
+        placeFloor(helper);
+        Villager houseOwner = helper.spawn(EntityType.VILLAGER, 0, 1, 1);
+        Villager farmOwner = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+
+        BlockPos houseSite = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos farmSite = helper.absolutePos(new BlockPos(50, 1, 1));
+        var houseData = houseOwner.getPersistentData();
+        houseData.putBoolean(VillageBuilder.ACTIVE_KEY, true);
+        houseData.putInt("livingvillages_builder_site_x", houseSite.getX());
+        houseData.putInt("livingvillages_builder_site_y", houseSite.getY());
+        houseData.putInt("livingvillages_builder_site_z", houseSite.getZ());
+
+        var farmData = farmOwner.getPersistentData();
+        farmData.putBoolean(VillageFarmBuilder.ACTIVE_KEY, true);
+        farmData.putInt("livingvillages_farm_build_site_x", farmSite.getX());
+        farmData.putInt("livingvillages_farm_build_site_y", farmSite.getY());
+        farmData.putInt("livingvillages_farm_build_site_z", farmSite.getZ());
+
+        helper.assertTrue(!VillageReservations.isProjectSiteAvailable(
+                helper.getLevel(), houseSite.offset(7, 0, 0), 8, null),
+            "A new house or farm site inside the safety margin of an active house must be rejected.");
+        helper.assertTrue(VillageReservations.isProjectSiteAvailable(
+                helper.getLevel(), houseSite.offset(8, 0, 0), 8, null),
+            "A site exactly at the configured minimum separation from the active house is allowed.");
+        helper.assertTrue(!VillageReservations.isProjectSiteAvailable(
+                helper.getLevel(), farmSite.offset(0, 0, 7), 8, null),
+            "A new project must also respect the safety margin around an active farm.");
+        helper.assertTrue(VillageReservations.isProjectSiteAvailable(
+                helper.getLevel(), farmSite.offset(0, 0, 8), 8, null),
+            "A site exactly at the minimum separation from the active farm is allowed.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {
