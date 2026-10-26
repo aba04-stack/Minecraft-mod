@@ -19,7 +19,6 @@ for marker in (
     "home.dimension().equals(level.dimension())",
     "ID_MATCH_RADIUS_SQUARED",
     "VillageArea.isBlockInResidentGroup(level, groupCenter, location)",
-    "VillageArea.isStorageInResidentGroup(level, groupCenter, storage)",
     'tag.put("villageAnchors", villageTags)',
     'tag.put("storageOwners", writeOwners(storageOwners))',
     'tag.put("bedOwners", writeOwners(bedOwners))',
