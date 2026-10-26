@@ -235,6 +235,12 @@ def main() -> int:
         except Exception as exc:
             errors.append(f"shell syntax check failed for {script.relative_to(ROOT)}: {exc}")
 
+    try:
+        subprocess.run(["bash", "-n", str(ROOT / "tools/smoke_test_client.sh")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"client smoke-test shell syntax failed: {exc}")
+
     if errors:
         print("STATIC CHECK FAILED")
         for err in errors:
