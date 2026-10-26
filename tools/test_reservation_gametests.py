@@ -27,7 +27,8 @@ with gzip.open(TEMPLATE, "rb") as stream:
     nbt = stream.read()
 assert nbt, "The GameTest template must be a non-empty gzip-compressed NBT document."
 assert "type = 'gameTestServer'" in BUILD, "Gradle must declare the real GameTestServer run."
-assert "systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id" in BUILD,
-"GameTestServer must enable this mod's test namespace."
+assert (
+    "systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id" in BUILD
+), "GameTestServer must enable this mod's test namespace."
 assert "runGameTestServer" in WORKFLOW, "CI must execute the registered GameTests."
 print("RESERVATION GAMETEST CONTRACT PASSED: source registration, NBT template, Gradle and CI wiring")
