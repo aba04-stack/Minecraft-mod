@@ -65,8 +65,9 @@ public final class VillageReservations {
         if (owner == null || !owner.isAlive() || storage == null || !level.hasChunkAt(storage)
             || !isStorage(level.getBlockState(storage))) return false;
         CompoundTag data = owner.getPersistentData();
+        if (data.getBoolean(ACTIVE) && !data.getString(KIND).equals(kind)) return false;
         Set<Long> positions = readPositions(data);
-        if (positions.contains(storage.asLong())) return true;
+        if (data.getBoolean(ACTIVE) && positions.contains(storage.asLong())) return true;
 
         Set<Long> additions = normalizeStoragePositions(level, List.of(storage));
         if (additions.isEmpty()) return false;

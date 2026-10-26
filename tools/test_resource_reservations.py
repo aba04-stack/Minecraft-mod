@@ -10,6 +10,8 @@ for marker in (
     "data.putLongArray(POSITIONS, packed)",
     "data.getLongArray(POSITIONS)",
     'data.getString(KIND).equals(expectedKind)',
+    'if (data.getBoolean(ACTIVE) && !data.getString(KIND).equals(kind)) return false;',
+    'if (data.getBoolean(ACTIVE) && positions.contains(storage.asLong())) return true;',
     'VillageReservations.release(data, "logistics_delivery")',
     'VillageReservations.release(data, "food_stockpiling")',
     "tryReserveStoragePositions",
