@@ -146,6 +146,26 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "home_less_resident_assignment")
+    public static void multipleResidentsWithoutHomeDoNotBreakGrouping(GameTestHelper helper) {
+        placeFloor(helper);
+        Villager homeResident = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager firstWithoutHome = helper.spawn(EntityType.VILLAGER, 0, 1, 1);
+        Villager secondWithoutHome = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        for (Villager villager : List.of(homeResident, firstWithoutHome, secondWithoutHome)) {
+            villager.setNoAi(true);
+        }
+
+        BlockPos home = helper.absolutePos(new BlockPos(1, 1, 1));
+        homeResident.getBrain().setMemory(
+            MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), home));
+
+        List<Villager> selected = VillageArea.findVillagers(helper.getLevel(), home, 8, 8);
+        helper.assertTrue(selected.size() == 3,
+            "Multiple HOME-less residents must attach safely to one nearby HOME group.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {
