@@ -439,6 +439,7 @@ public final class VillagerTreeWork {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = origin.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos) || !isStorageBlock(level.getBlockState(pos))
+                        || !VillageReservations.isStorageAvailable(level, pos, villager)
                         || !(level.getBlockEntity(pos) instanceof Container container)) continue;
                     for (int slot = 0; slot < container.getContainerSize(); slot++) {
                         ItemStack stack = container.getItem(slot);
@@ -670,7 +671,7 @@ public final class VillagerTreeWork {
         if (data.getBoolean(REPLANT_FETCH_ACTIVE)) {
             storagePos = new BlockPos(data.getInt(REPLANT_FETCH_X), data.getInt(REPLANT_FETCH_Y), data.getInt(REPLANT_FETCH_Z));
         } else {
-            storagePos = findStorageWithSapling(level, source, preferred, allowAnySpecies);
+            storagePos = findStorageWithSapling(villager, level, source, preferred, allowAnySpecies);
             if (storagePos == null) return false;
             data.putBoolean(REPLANT_FETCH_ACTIVE, true);
             data.putInt(REPLANT_FETCH_X, storagePos.getX());
@@ -679,6 +680,7 @@ public final class VillagerTreeWork {
         }
 
         if (!level.hasChunkAt(storagePos) || !isStorageBlock(level.getBlockState(storagePos))
+            || !VillageReservations.isStorageAvailable(level, storagePos, villager)
             || !(level.getBlockEntity(storagePos) instanceof Container container)) {
             clearSaplingFetch(data);
             return false;
@@ -712,7 +714,7 @@ public final class VillagerTreeWork {
         return true;
     }
 
-    private static BlockPos findStorageWithSapling(ServerLevel level, BlockPos source, Block preferred, boolean allowAnySpecies) {
+    private static BlockPos findStorageWithSapling(Villager villager, ServerLevel level, BlockPos source, Block preferred, boolean allowAnySpecies) {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
@@ -720,7 +722,8 @@ public final class VillagerTreeWork {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = source.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorageBlock(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorageBlock(level.getBlockState(pos))
+                        || !VillageReservations.isStorageAvailable(level, pos, villager)) continue;
                     if (!(level.getBlockEntity(pos) instanceof Container container)
                         || findSaplingSlot(container, preferred, allowAnySpecies) < 0) continue;
                     double distance = pos.distSqr(source);

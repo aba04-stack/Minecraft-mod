@@ -188,17 +188,18 @@ public final class VillageDefense {
             return;
         }
 
-        ItemStack fromStorage = takeMatchingFromStorage(level, guard.blockPosition(), predicate);
+        ItemStack fromStorage = takeMatchingFromStorage(level, guard, guard.blockPosition(), predicate);
         if (!fromStorage.isEmpty()) guard.setItemSlot(slot, fromStorage);
     }
 
-    private static ItemStack takeMatchingFromStorage(ServerLevel level, BlockPos origin, Predicate<ItemStack> predicate) {
+    private static ItemStack takeMatchingFromStorage(ServerLevel level, Villager guard, BlockPos origin, Predicate<ItemStack> predicate) {
         int radius = Math.min(10, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -3; dy <= 4; dy++) {
                     BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageReservations.isStorageAvailable(level, pos, guard)) continue;
                     BlockEntity be = level.getBlockEntity(pos);
                     if (!(be instanceof Container container)) continue;
                     for (int slot = 0; slot < container.getContainerSize(); slot++) {
