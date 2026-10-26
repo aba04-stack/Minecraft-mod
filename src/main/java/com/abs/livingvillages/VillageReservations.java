@@ -71,6 +71,7 @@ public final class VillageReservations {
         for (BlockPos pos : BlockPos.betweenClosed(
             center.offset(-radius, -6, -radius), center.offset(radius, 6, radius))) {
             if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                || !VillageRegistry.isStorageForVillage(level, center, pos)
                 || !isStorageAvailable(level, pos, owner)) continue;
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (!(blockEntity instanceof Container container)) continue;
@@ -171,7 +172,11 @@ public final class VillageReservations {
 
     public static boolean isStorageAvailable(ServerLevel level, BlockPos storage, Villager owner) {
         if (storage == null) return false;
-        if (owner != null && !VillageArea.isStorageInResidentGroup(level, owner, storage)) return false;
+        if (owner != null) {
+            BlockPos groupCenter = VillagerRoles.getHome(owner);
+            if (groupCenter == null) groupCenter = owner.blockPosition();
+            if (!VillageRegistry.isStorageForVillage(level, groupCenter, storage)) return false;
+        }
         AABB search = new AABB(storage).inflate(LOOKUP_RADIUS, 24.0D, LOOKUP_RADIUS);
         for (Villager candidate : level.getEntitiesOfClass(Villager.class, search, Villager::isAlive)) {
             if (candidate == owner) continue;

@@ -611,7 +611,7 @@ public final class VillageIndustry {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
-                        || !VillageArea.isStorageInResidentGroup(level, center, pos)
+                        || !VillageRegistry.isStorageForVillage(level, center, pos)
                         || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
                     BlockEntity entity = level.getBlockEntity(pos);
                     if (entity instanceof Container container) refs.add(new StorageRef(pos.immutable(), container));

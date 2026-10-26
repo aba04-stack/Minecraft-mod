@@ -218,6 +218,12 @@ def main() -> int:
         errors.append(f"resource reservation regression check failed: {exc}")
 
     try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_village_registry.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"village identity registry regression check failed: {exc}")
+
+    try:
         subprocess.run(["java", str(ROOT / "tools/JavaSyntaxCheck.java"), str(ROOT / "src/main/java")],
                        check=True, capture_output=True, text=True)
     except Exception as exc:

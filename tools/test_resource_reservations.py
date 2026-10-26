@@ -63,11 +63,11 @@ scheduler = (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
 assert "VillageIndustry.tickArea(level, villageCenter);" in scheduler
 assert "VillagePopulation.tickArea(level, villageCenter, villagers);\n            if (villagers.stream().anyMatch" not in scheduler
 
-assert "VillageArea.isStorageInResidentGroup(level, owner, storage)" in reservations
+assert "VillageRegistry.isStorageForVillage(level, groupCenter, storage)" in reservations
 assert "VillageReservations.isStorageAvailable(level, storagePos, villager)" in (JAVA / "VillageBuilder.java").read_text(encoding="utf-8")
 assert "VillageReservations.isStorageAvailable(level, storagePos, worker)" in (JAVA / "VillageFarmBuilder.java").read_text(encoding="utf-8")
-assert "VillageArea.isStorageInResidentGroup(level, center, pos)" in (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
-assert "VillageArea.isStorageInResidentGroup(level, center, pos)" in (JAVA / "VillageIndustry.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isStorageForVillage(level, center, pos)" in (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isStorageForVillage(level, center, pos)" in (JAVA / "VillageIndustry.java").read_text(encoding="utf-8")
 assert "(owner == null && !VillageArea.isStorageInResidentGroup(level, center, pos))" in (JAVA / "VillageFarmBuilder.java").read_text(encoding="utf-8")
 assert "(owner == null && !VillageArea.isStorageInResidentGroup(level, center, pos))" in (JAVA / "VillagePopulation.java").read_text(encoding="utf-8")
 assert "VillageArea.isStorageInResidentGroup(level, center, pos)" in (JAVA / "VillageElder.java").read_text(encoding="utf-8")
