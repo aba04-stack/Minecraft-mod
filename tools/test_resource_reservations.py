@@ -12,8 +12,6 @@ for marker in (
     'data.getString(KIND).equals(expectedKind)',
     'if (data.getBoolean(ACTIVE) && !data.getString(KIND).equals(kind)) return false;',
     'if (data.getBoolean(ACTIVE) && positions.contains(storage.asLong())) return true;',
-    'VillageReservations.release(data, "logistics_delivery")',
-    'VillageReservations.release(data, "food_stockpiling")',
     "tryReserveStoragePositions",
     "tryAddStorageReservation",
     "isStorageAvailable",
@@ -27,6 +25,8 @@ checks = {
     "VillageFarmBuilder.java": ("reserveNearbyStorages(level, center, worker, \"farm\")", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", "VillageReservations.release(data)"),
     "VillageCraftingJobs.java": ("tryReserveStoragePositions(level, villager", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", "VillageReservations.release(data)"),
     "LivingVillages.java": ("VillageReservations.isStorageAvailable(level, pos, null)",),
+    "VillageLogistics.java": ('VillageReservations.release(data, "logistics_delivery")',),
+    "VillagerAutonomy.java": ('VillageReservations.release(data, "food_stockpiling")',),
 }
 for filename, markers in checks.items():
     source = (JAVA / filename).read_text(encoding="utf-8")
