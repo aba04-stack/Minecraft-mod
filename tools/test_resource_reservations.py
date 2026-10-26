@@ -9,6 +9,9 @@ reservations = (JAVA / "VillageReservations.java").read_text(encoding="utf-8")
 for marker in (
     "data.putLongArray(POSITIONS, packed)",
     "data.getLongArray(POSITIONS)",
+    'data.getString(KIND).equals(expectedKind)',
+    'VillageReservations.release(data, "logistics_delivery")',
+    'VillageReservations.release(data, "food_stockpiling")',
     "tryReserveStoragePositions",
     "tryAddStorageReservation",
     "isStorageAvailable",

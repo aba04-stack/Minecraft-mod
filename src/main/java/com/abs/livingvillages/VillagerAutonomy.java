@@ -372,7 +372,7 @@ public final class VillagerAutonomy {
     }
 
     private static void cancelTrip(Villager villager, CompoundTag data) {
-        VillageReservations.release(data);
+        VillageReservations.release(data, "food_stockpiling");
         if (data.getBoolean(TARGET_ACTIVE)) {
             BlockPos ownedStandPos = new BlockPos(
                 data.getInt(TARGET_STAND_X), data.getInt(TARGET_STAND_Y), data.getInt(TARGET_STAND_Z));

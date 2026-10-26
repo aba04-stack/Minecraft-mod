@@ -282,7 +282,7 @@ public final class VillageLogistics {
     }
 
     private static void cancelTrip(Villager villager, CompoundTag data) {
-        VillageReservations.release(data);
+        VillageReservations.release(data, "logistics_delivery");
         if (data.getBoolean(ACTIVE)) {
             BlockPos ownStand = new BlockPos(data.getInt(STAND_X), data.getInt(STAND_Y), data.getInt(STAND_Z));
             villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {

@@ -119,6 +119,13 @@ public final class VillageReservations {
         data.remove(POSITIONS);
     }
 
+    /** Release a claim only when the caller still owns it for the expected task type. */
+    public static void release(CompoundTag data, String expectedKind) {
+        if (data == null || !data.getBoolean(ACTIVE)
+            || !data.getString(KIND).equals(expectedKind)) return;
+        release(data);
+    }
+
     private static Set<Long> normalizeStoragePositions(ServerLevel level, List<BlockPos> requested) {
         Set<Long> positions = new LinkedHashSet<>();
         for (BlockPos pos : requested) {
