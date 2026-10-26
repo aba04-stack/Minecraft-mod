@@ -16,7 +16,7 @@ for marker in (
     "Resident UUIDs provide a fallback when all known HOME anchors move or disappear.",
     "currentResidentIds",
     "bestOverlap",
-    "minimumOverlap = currentResidentIds.size() / 2 + 1",
+    "currentResidentIds.size() / 2 + 1",
     "if (overlap < minimumOverlap) continue;",
     "tag.put(\"knownHomes\", knownHomeTags)",
     "tag.put(\"knownResidents\", knownResidentTags)",
@@ -50,6 +50,8 @@ for marker in (
 ):
     assert marker in registry, f"persistent registry missing {marker}"
 
+assert "int minimumOverlap = currentResidentIds.isEmpty()" in registry
+assert "? Integer.MAX_VALUE : currentResidentIds.size() / 2 + 1;" in registry
 assert "public static boolean isStorageForVillage(" in registry
 assert "public static boolean isBedForVillage(" in registry
 assert "public static boolean isWorkBlockForVillage(" in registry

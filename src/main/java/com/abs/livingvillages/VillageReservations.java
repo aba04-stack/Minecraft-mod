@@ -181,7 +181,7 @@ public final class VillageReservations {
         for (Villager candidate : level.getEntitiesOfClass(Villager.class, search, Villager::isAlive)) {
             if (candidate == owner) continue;
             CompoundTag data = candidate.getPersistentData();
-            if (!data.getBoolean(ACTIVE)) continue;
+            if (!hasLiveReservation(level, candidate, data)) continue;
             for (long packed : data.getLongArray(POSITIONS)) {
                 if (packed == storage.asLong()) return false;
             }
@@ -199,7 +199,7 @@ public final class VillageReservations {
         int minZ = center.getZ() - horizontal, maxZ = center.getZ() + horizontal;
         for (Villager candidate : level.getEntitiesOfClass(Villager.class, search, Villager::isAlive)) {
             CompoundTag data = candidate.getPersistentData();
-            if (!data.getBoolean(ACTIVE)) continue;
+            if (!hasLiveReservation(level, candidate, data)) continue;
             for (long packed : data.getLongArray(POSITIONS)) {
                 BlockPos pos = BlockPos.of(packed);
                 // A broken or unloaded chest is not an accessible reservation target and must not
@@ -211,6 +211,47 @@ public final class VillageReservations {
             }
         }
         return false;
+    }
+
+    /**
+     * Reconciles a persisted claim against its owning task. If a task was reset by another
+     * subsystem or a reserved chest was replaced, stale claims are removed automatically.
+     * Unloaded chunks are retained because their block state cannot be safely inspected.
+     */
+    private static boolean hasLiveReservation(ServerLevel level, Villager owner, CompoundTag data) {
+        if (!data.getBoolean(ACTIVE)) {
+            if (!data.getString(KIND).isBlank() || data.getLongArray(POSITIONS).length > 0) release(data);
+            return false;
+        }
+
+        boolean taskActive = switch (data.getString(KIND)) {
+            case "house" -> data.getBoolean(VillageBuilder.ACTIVE_KEY);
+            case "farm" -> data.getBoolean(VillageFarmBuilder.ACTIVE_KEY);
+            case "crafting" -> data.getBoolean(VillageCraftingJobs.ACTIVE_KEY);
+            case "food_delivery" -> data.getBoolean(VillagePopulation.ACTIVE_KEY);
+            case "logistics_delivery" -> data.getBoolean("livingvillages_logistics_active");
+            case "food_stockpiling" -> data.getBoolean("livingvillages_autonomy_target_active");
+            default -> false;
+        };
+        if (!taskActive) {
+            release(data);
+            return false;
+        }
+
+        long[] claimed = data.getLongArray(POSITIONS);
+        List<Long> valid = new ArrayList<>(claimed.length);
+        for (long packed : claimed) {
+            BlockPos pos = BlockPos.of(packed);
+            if (!level.hasChunkAt(pos) || isStorage(level.getBlockState(pos))) valid.add(packed);
+        }
+        if (valid.size() != claimed.length) {
+            if (valid.isEmpty()) {
+                release(data);
+                return false;
+            }
+            data.putLongArray(POSITIONS, valid.stream().mapToLong(Long::longValue).toArray());
+        }
+        return !valid.isEmpty();
     }
 
     public static void release(CompoundTag data) {
