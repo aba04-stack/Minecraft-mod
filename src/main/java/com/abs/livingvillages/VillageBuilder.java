@@ -83,6 +83,13 @@ public final class VillageBuilder {
         return villager.getPersistentData().getBoolean(ACTIVE_KEY);
     }
 
+    /** Returns the active house blueprint's lower corner, or null when this resident owns no house project. */
+    public static BlockPos activeProjectSite(Villager villager) {
+        CompoundTag data = villager.getPersistentData();
+        if (!data.getBoolean(ACTIVE_KEY)) return null;
+        return new BlockPos(data.getInt(SITE_X), data.getInt(SITE_Y), data.getInt(SITE_Z));
+    }
+
     public static boolean hasActiveProjectNear(ServerLevel level, BlockPos center) {
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) return false;
@@ -117,7 +124,8 @@ public final class VillageBuilder {
         if (!LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
             || plankBlock == null || !plankBlock.defaultBlockState().is(BlockTags.PLANKS)
-            || doorItem == null || !(Block.byItem(doorItem) instanceof DoorBlock)) return false;
+            || doorItem == null || !(Block.byItem(doorItem) instanceof DoorBlock)
+            || !VillageReservations.isProjectSiteAvailable(level, site, 8, null)) return false;
         Villager builder = findAvailableBuilder(level, center);
         if (builder == null) return false;
 

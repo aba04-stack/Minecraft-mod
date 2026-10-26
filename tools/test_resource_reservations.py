@@ -25,12 +25,16 @@ for marker in (
     "isStorageAvailable",
     "hasReservationInArea",
     "public static void release(CompoundTag data)",
+    "isProjectSiteAvailable",
+    "private static boolean sitesConflict(BlockPos first, BlockPos second, int separation)",
+    "VillageBuilder.activeProjectSite(candidate)",
+    "VillageFarmBuilder.activeProjectSite(candidate)",
 ):
     assert marker in reservations, f"reservation manager missing {marker}"
 
 checks = {
-    "VillageBuilder.java": ("reserveStoragesForItems(level, builder.blockPosition(), builder, \"house\"", "tryAddStorageReservation(level, villager, storage, \"house\")", 'VillageReservations.release(data, "house")'),
-    "VillageFarmBuilder.java": ("findStorages(level, candidateOrigin, null)", "firstHoeInStorage(candidateStorages)", "reserveStoragesForItems(level, candidateOrigin, candidate, \"farm\"", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", 'VillageReservations.release(data, "farm")'),
+    "VillageBuilder.java": ("reserveStoragesForItems(level, builder.blockPosition(), builder, \"house\"", "VillageReservations.isProjectSiteAvailable(level, site, 8, null)", "tryAddStorageReservation(level, villager, storage, \"house\")", 'VillageReservations.release(data, "house")'),
+    "VillageFarmBuilder.java": ("findStorages(level, candidateOrigin, null)", "firstHoeInStorage(candidateStorages)", "VillageReservations.isProjectSiteAvailable(level, site, 8, null)", "reserveStoragesForItems(level, candidateOrigin, candidate, \"farm\"", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", 'VillageReservations.release(data, "farm")'),
     "VillageCraftingJobs.java": ("reserveStoragesForItems(level, origin, villager", "totalInputs.merge(ingredient.item(), ingredient.count(), Integer::sum)", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", 'VillageReservations.release(data, "crafting")'),
     "LivingVillages.java": ("VillageReservations.isStorageAvailable(level, pos, null)",),
     "VillagePopulation.java": ('VillageReservations.release(data, "food_delivery")',),
@@ -41,6 +45,10 @@ for filename, markers in checks.items():
     source = (JAVA / filename).read_text(encoding="utf-8")
     for marker in markers:
         assert marker in source, f"{filename} must include {marker}"
+
+planner = (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
+assert "VillageReservations.isProjectSiteAvailable(level, base, 8, null)" in planner
+assert planner.count("VillageReservations.isProjectSiteAvailable(level, base, 8, null)") == 2
 
 industry = (JAVA / "VillageIndustry.java").read_text(encoding="utf-8")
 assert "VillageReservations.isStorageAvailable(level, pos, null)" in industry

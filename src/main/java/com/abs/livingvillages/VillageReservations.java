@@ -142,6 +142,33 @@ public final class VillageReservations {
         return true;
     }
 
+    /**
+     * Prevents a house or farm from starting within the footprint/safety margin of an active
+     * project, even when that project belongs to a different HOME-anchored resident group.
+     */
+    public static boolean isProjectSiteAvailable(ServerLevel level, BlockPos site,
+                                                  int minimumSeparationBlocks, Villager owner) {
+        if (site == null) return false;
+        int separation = Math.max(1, minimumSeparationBlocks);
+        AABB search = new AABB(site).inflate(LOOKUP_RADIUS, 32.0D, LOOKUP_RADIUS);
+        for (Villager candidate : level.getEntitiesOfClass(Villager.class, search, Villager::isAlive)) {
+            if (candidate == owner) continue;
+            BlockPos houseSite = VillageBuilder.activeProjectSite(candidate);
+            if (sitesConflict(site, houseSite, separation)) return false;
+            BlockPos farmSite = VillageFarmBuilder.activeProjectSite(candidate);
+            if (sitesConflict(site, farmSite, separation)) return false;
+        }
+        return true;
+    }
+
+    private static boolean sitesConflict(BlockPos first, BlockPos second, int separation) {
+        if (second == null || Math.abs(first.getY() - second.getY()) > 8) return false;
+        long dx = (long) first.getX() - second.getX();
+        long dz = (long) first.getZ() - second.getZ();
+        long minimumSquared = (long) separation * separation;
+        return dx * dx + dz * dz < minimumSquared;
+    }
+
     public static boolean isStorageAvailable(ServerLevel level, BlockPos storage, Villager owner) {
         if (storage == null) return false;
         AABB search = new AABB(storage).inflate(LOOKUP_RADIUS, 24.0D, LOOKUP_RADIUS);

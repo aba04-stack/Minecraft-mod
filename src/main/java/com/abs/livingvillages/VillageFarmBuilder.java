@@ -84,6 +84,13 @@ public final class VillageFarmBuilder {
         return villager.getPersistentData().getBoolean(ACTIVE_KEY);
     }
 
+    /** Returns the active farm blueprint's lower corner, or null when this resident owns no farm project. */
+    public static BlockPos activeProjectSite(Villager villager) {
+        CompoundTag data = villager.getPersistentData();
+        if (!data.getBoolean(ACTIVE_KEY)) return null;
+        return new BlockPos(data.getInt(SITE_X), data.getInt(SITE_Y), data.getInt(SITE_Z));
+    }
+
     public static boolean hasActiveProjectNear(ServerLevel level, BlockPos center) {
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) return false;
@@ -118,7 +125,8 @@ public final class VillageFarmBuilder {
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
-            || !isSupportedCrop(seedItem, cropBlock)) return false;
+            || !isSupportedCrop(seedItem, cropBlock)
+            || !VillageReservations.isProjectSiteAvailable(level, site, 8, null)) return false;
 
         List<Villager> candidates = new ArrayList<>(VillageArea.findVillagers(level, center).stream().filter(v -> v.isAlive()
             && VillagerRoles.isUnemployedAdult(v) && !v.isSleeping()

@@ -357,7 +357,8 @@ public final class LivingVillages {
                     if (!level.hasChunkAt(new BlockPos(x, center.getY(), z))) continue;
                     int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                     BlockPos base = new BlockPos(x, y, z);
-                    if (isSuitableFarmSite(level, base)) {
+                    if (isSuitableFarmSite(level, base)
+                        && VillageReservations.isProjectSiteAvailable(level, base, 8, null)) {
                         return base;
                     }
                 }
@@ -543,7 +544,8 @@ public final class LivingVillages {
                     if (!level.hasChunkAt(new BlockPos(x, center.getY(), z))) continue;
                     int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                     BlockPos base = new BlockPos(x, y, z);
-                    if (isSuitableSite(level, base)) {
+                    if (isSuitableSite(level, base)
+                        && VillageReservations.isProjectSiteAvailable(level, base, 8, null)) {
                         return base;
                     }
                 }
