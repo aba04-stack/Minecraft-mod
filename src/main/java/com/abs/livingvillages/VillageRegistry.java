@@ -112,24 +112,36 @@ public final class VillageRegistry extends SavedData {
 
     /** Claim a physical storage block for the persistent village selected around groupCenter. */
     public static boolean isStorageForVillage(ServerLevel level, BlockPos groupCenter, BlockPos storage) {
-        if (storage == null || !level.hasChunkAt(storage) || !isStorage(level.getBlockState(storage))) return false;
-        return claimAsset(level, groupCenter, storage, get(level).storageOwners);
-    }
-
-    /** Bed-foot ownership API for a later housing/population integration step. */
-    public static boolean isBedForVillage(ServerLevel level, BlockPos groupCenter, BlockPos bedFoot) {
-        if (bedFoot == null || !level.hasChunkAt(bedFoot)
-            || !(level.getBlockState(bedFoot).getBlock() instanceof BedBlock)
-            || level.getBlockState(bedFoot).getValue(BedBlock.PART) != net.minecraft.world.level.block.state.properties.BedPart.FOOT) {
+        if (storage == null || !level.hasChunkAt(storage)) return false;
+        VillageRegistry registry = get(level);
+        if (!isStorage(level.getBlockState(storage))) {
+            removeStaleOwner(registry, storage, registry.storageOwners);
             return false;
         }
-        return claimAsset(level, groupCenter, bedFoot, get(level).bedOwners);
+        return claimAsset(level, groupCenter, storage, registry.storageOwners);
     }
 
-    /** Workstation ownership API for a later production/job-planner integration step. */
+    /** Bed-foot ownership API for housing and population checks. */
+    public static boolean isBedForVillage(ServerLevel level, BlockPos groupCenter, BlockPos bedFoot) {
+        if (bedFoot == null || !level.hasChunkAt(bedFoot)) return false;
+        VillageRegistry registry = get(level);
+        if (!(level.getBlockState(bedFoot).getBlock() instanceof BedBlock)
+            || level.getBlockState(bedFoot).getValue(BedBlock.PART) != net.minecraft.world.level.block.state.properties.BedPart.FOOT) {
+            removeStaleOwner(registry, bedFoot, registry.bedOwners);
+            return false;
+        }
+        return claimAsset(level, groupCenter, bedFoot, registry.bedOwners);
+    }
+
+    /** Workstation ownership API for production and crafting scans. */
     public static boolean isWorkBlockForVillage(ServerLevel level, BlockPos groupCenter, BlockPos workBlock) {
-        if (workBlock == null || !level.hasChunkAt(workBlock) || !isWorkBlock(level.getBlockState(workBlock))) return false;
-        return claimAsset(level, groupCenter, workBlock, get(level).workBlockOwners);
+        if (workBlock == null || !level.hasChunkAt(workBlock)) return false;
+        VillageRegistry registry = get(level);
+        if (!isWorkBlock(level.getBlockState(workBlock))) {
+            removeStaleOwner(registry, workBlock, registry.workBlockOwners);
+            return false;
+        }
+        return claimAsset(level, groupCenter, workBlock, registry.workBlockOwners);
     }
 
     private static boolean claimAsset(ServerLevel level, BlockPos groupCenter, BlockPos location,
@@ -140,10 +152,51 @@ public final class VillageRegistry extends SavedData {
         long key = location.asLong();
         UUID existing = ownership.get(key);
         if (existing != null) return existing.equals(villageId);
-        if (!VillageArea.isStorageInResidentGroup(level, groupCenter, location)) return false;
+        if (!VillageArea.isBlockInResidentGroup(level, groupCenter, location)) return false;
         ownership.put(key, villageId);
         registry.setDirty();
         return true;
+    }
+
+    private static void removeStaleOwner(VillageRegistry registry, BlockPos location, Map<Long, UUID> ownership) {
+        if (ownership.remove(location.asLong()) != null) registry.setDirty();
+    }
+
+    /**
+     * Lazily clear old asset claims in loaded chunks around an active village.
+     * Unloaded assets are left alone because their block state cannot be checked safely.
+     */
+    public static void cleanupInvalidAssets(ServerLevel level, BlockPos center, int radius) {
+        if (level == null || center == null) return;
+        VillageRegistry registry = get(level);
+        int horizontal = Math.max(0, radius);
+        int minX = center.getX() - horizontal, maxX = center.getX() + horizontal;
+        int minY = center.getY() - 8, maxY = center.getY() + 8;
+        int minZ = center.getZ() - horizontal, maxZ = center.getZ() + horizontal;
+        boolean changed = removeInvalidOwners(level, registry.storageOwners, minX, maxX, minY, maxY, minZ, maxZ,
+            VillageRegistry::isStorage);
+        changed |= removeInvalidOwners(level, registry.bedOwners, minX, maxX, minY, maxY, minZ, maxZ,
+            state -> state.getBlock() instanceof BedBlock
+                && state.getValue(BedBlock.PART) == net.minecraft.world.level.block.state.properties.BedPart.FOOT);
+        changed |= removeInvalidOwners(level, registry.workBlockOwners, minX, maxX, minY, maxY, minZ, maxZ,
+            VillageRegistry::isWorkBlock);
+        if (changed) registry.setDirty();
+    }
+
+    private static boolean removeInvalidOwners(ServerLevel level, Map<Long, UUID> ownership,
+                                               int minX, int maxX, int minY, int maxY, int minZ, int maxZ,
+                                               java.util.function.Predicate<BlockState> validState) {
+        boolean changed = false;
+        for (Long key : new ArrayList<>(ownership.keySet())) {
+            BlockPos pos = BlockPos.of(key);
+            if (pos.getX() < minX || pos.getX() > maxX || pos.getY() < minY || pos.getY() > maxY
+                || pos.getZ() < minZ || pos.getZ() > maxZ || !level.hasChunkAt(pos)) continue;
+            if (!validState.test(level.getBlockState(pos))) {
+                ownership.remove(key);
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     private static boolean isStorage(BlockState state) {

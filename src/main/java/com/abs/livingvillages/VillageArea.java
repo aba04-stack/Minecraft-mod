@@ -105,19 +105,24 @@ public final class VillageArea {
             .anyMatch(resident -> resident.getUUID().equals(owner.getUUID()));
     }
 
-    /** Checks that a storage block's nearest selected resident cluster overlaps the requested group. */
-    public static boolean isStorageInResidentGroup(ServerLevel level, BlockPos groupCenter, BlockPos storage) {
-        if (groupCenter == null || storage == null) return false;
+    /** Checks that a location's nearest selected resident cluster overlaps the requested group. */
+    public static boolean isBlockInResidentGroup(ServerLevel level, BlockPos groupCenter, BlockPos location) {
+        if (groupCenter == null || location == null) return false;
         int radius = storageGroupLookupRadius();
         List<Villager> requestedGroup = findVillagers(level, groupCenter, radius, 32);
         if (requestedGroup.isEmpty()) return false;
-        List<Villager> storageGroup = findVillagers(level, storage, radius, 32);
-        for (Villager resident : storageGroup) {
+        List<Villager> locationGroup = findVillagers(level, location, radius, 32);
+        for (Villager resident : locationGroup) {
             for (Villager requested : requestedGroup) {
                 if (resident.getUUID().equals(requested.getUUID())) return true;
             }
         }
         return false;
+    }
+
+    /** Backward-compatible name retained for storage-related callers. */
+    public static boolean isStorageInResidentGroup(ServerLevel level, BlockPos groupCenter, BlockPos storage) {
+        return isBlockInResidentGroup(level, groupCenter, storage);
     }
 
     private static int storageGroupLookupRadius() {

@@ -18,7 +18,8 @@ for marker in (
     "resolveOrCreateId(level, center, residents)",
     "home.dimension().equals(level.dimension())",
     "ID_MATCH_RADIUS_SQUARED",
-    "VillageArea.isStorageInResidentGroup(level, groupCenter, location)",
+    "VillageArea.isBlockInResidentGroup(level, groupCenter, location)",
+    "VillageArea.isStorageInResidentGroup(level, groupCenter, storage)",
     'tag.put("villageAnchors", villageTags)',
     'tag.put("storageOwners", writeOwners(storageOwners))',
     'tag.put("bedOwners", writeOwners(bedOwners))',
@@ -26,12 +27,23 @@ for marker in (
     'tag.getList("villageAnchors", Tag.TAG_COMPOUND)',
     'readOwners(tag.getList("storageOwners", Tag.TAG_COMPOUND))',
     "setDirty()",
+    "removeStaleOwner(registry, storage, registry.storageOwners)",
+    "removeStaleOwner(registry, bedFoot, registry.bedOwners)",
+    "removeStaleOwner(registry, workBlock, registry.workBlockOwners)",
+    "cleanupInvalidAssets(ServerLevel level, BlockPos center, int radius)",
+    "removeInvalidOwners(level, registry.storageOwners",
+    "removeInvalidOwners(level, registry.bedOwners",
+    "removeInvalidOwners(level, registry.workBlockOwners",
 ):
     assert marker in registry, f"persistent registry missing {marker}"
 
 assert "public static boolean isStorageForVillage(" in registry
 assert "public static boolean isBedForVillage(" in registry
 assert "public static boolean isWorkBlockForVillage(" in registry
+assert "cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())" in (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isBedForVillage(level, center, pos)" in (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isBedForVillage(level, center, pos)" in (JAVA / "VillageBuilder.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isBedForVillage(level, center, pos)" in (JAVA / "VillagePopulation.java").read_text(encoding="utf-8")
 
 for filename in ("LivingVillages.java", "VillageIndustry.java", "VillageFarmBuilder.java",
                  "VillageCraftingJobs.java", "VillageElder.java"):

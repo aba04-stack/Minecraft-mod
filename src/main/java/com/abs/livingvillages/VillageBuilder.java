@@ -546,7 +546,8 @@ public final class VillageBuilder {
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -8, -radius), center.offset(radius, 8, radius))) {
             if (!level.hasChunkAt(pos)) continue;
             BlockState state = level.getBlockState(pos);
-            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT) continue;
+            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT
+                || !VillageRegistry.isBedForVillage(level, center, pos)) continue;
             BlockPos head = pos.relative(state.getValue(HorizontalDirectionalBlock.FACING));
             if (!level.hasChunkAt(head) || !level.getBlockState(pos.above()).isAir()
                 || !level.getBlockState(pos.above(2)).isAir()

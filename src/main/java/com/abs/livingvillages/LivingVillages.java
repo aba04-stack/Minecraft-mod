@@ -186,6 +186,7 @@ public final class LivingVillages {
             if (villagers.isEmpty() || isDuplicateArea(alreadyChecked, level, villagers)) continue;
             rememberActiveArea(alreadyChecked, level, villagers);
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
+            VillageRegistry.cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers)) {
                 VillagerRoles.assignRoles(level, villageCenter);
@@ -466,7 +467,8 @@ public final class LivingVillages {
         for (BlockPos pos : BlockPos.betweenClosed(minX, minY, minZ, maxX, maxY, maxZ)) {
             if (!level.hasChunkAt(pos)) continue;
             BlockState state = level.getBlockState(pos);
-            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT) continue;
+            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT
+                || !VillageRegistry.isBedForVillage(level, center, pos)) continue;
             BlockPos head = pos.relative(state.getValue(HorizontalDirectionalBlock.FACING));
             if (!level.hasChunkAt(head) || !level.getBlockState(pos.above()).isAir()
                 || !level.getBlockState(pos.above(2)).isAir()
