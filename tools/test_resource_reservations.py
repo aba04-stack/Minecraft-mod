@@ -13,6 +13,9 @@ for marker in (
     'if (data.getBoolean(ACTIVE) && !data.getString(KIND).equals(kind)) return false;',
     'if (data.getBoolean(ACTIVE) && positions.contains(storage.asLong())) return true;',
     "tryReserveStoragePositions",
+    "reserveStoragesForItems",
+    "available.getOrDefault(requirement.getKey(), 0) < requirement.getValue()",
+    "relevantStorages.add(pos.immutable())",
     "tryAddStorageReservation",
     "isStorageAvailable",
     "hasReservationInArea",
@@ -21,9 +24,9 @@ for marker in (
     assert marker in reservations, f"reservation manager missing {marker}"
 
 checks = {
-    "VillageBuilder.java": ("reserveNearbyStorages(level, center, builder, \"house\")", "tryAddStorageReservation(level, villager, storage, \"house\")", 'VillageReservations.release(data, "house")'),
-    "VillageFarmBuilder.java": ("reserveNearbyStorages(level, center, worker, \"farm\")", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", 'VillageReservations.release(data, "farm")'),
-    "VillageCraftingJobs.java": ("tryReserveStoragePositions(level, villager", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", 'VillageReservations.release(data, "crafting")'),
+    "VillageBuilder.java": ("reserveStoragesForItems(level, center, builder, \"house\"", "tryAddStorageReservation(level, villager, storage, \"house\")", 'VillageReservations.release(data, "house")'),
+    "VillageFarmBuilder.java": ("reserveStoragesForItems(level, center, worker, \"farm\"", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", 'VillageReservations.release(data, "farm")'),
+    "VillageCraftingJobs.java": ("reserveStoragesForItems(level, origin, villager", "missingInputs.merge(ingredient.item(), missing, Integer::sum)", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", 'VillageReservations.release(data, "crafting")'),
     "LivingVillages.java": ("VillageReservations.isStorageAvailable(level, pos, null)",),
     "VillagePopulation.java": ('VillageReservations.release(data, "food_delivery")',),
     "VillageLogistics.java": ('VillageReservations.release(data, "logistics_delivery")',),

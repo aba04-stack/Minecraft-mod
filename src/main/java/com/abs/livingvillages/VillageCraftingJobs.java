@@ -166,8 +166,13 @@ public final class VillageCraftingJobs {
             data.putLong(NEXT_JOB, now + RETRY_TICKS);
             return;
         }
-        if (!VillageReservations.tryReserveStoragePositions(level, villager,
-            storages.stream().map(StorageRef::pos).toList(), "crafting")) {
+        Map<Item, Integer> missingInputs = new LinkedHashMap<>();
+        for (Ingredient ingredient : recipe.inputs()) {
+            int missing = Math.max(0, ingredient.count() - inventoryCount(villager.getInventory(), ingredient.item()));
+            if (missing > 0) missingInputs.merge(ingredient.item(), missing, Integer::sum);
+        }
+        if (!missingInputs.isEmpty() && !VillageReservations.reserveStoragesForItems(level, origin, villager,
+            "crafting", missingInputs, Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()))) {
             data.putLong(NEXT_JOB, now + RETRY_TICKS);
             return;
         }

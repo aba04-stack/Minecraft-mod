@@ -124,7 +124,10 @@ public final class VillageBuilder {
         Item plankItem = plankBlock.asItem();
         if (!canFitProjectMaterials(builder.getInventory(), plankItem, PLANKS_REQUIRED, Items.RED_BED, doorItem)) return false;
 
-        if (!VillageReservations.reserveNearbyStorages(level, center, builder, "house")) return false;
+        java.util.Map<Item, Integer> materialBill = java.util.Map.of(
+            plankItem, PLANKS_REQUIRED, Items.RED_BED, 1, doorItem, 1);
+        if (!VillageReservations.reserveStoragesForItems(level, center, builder, "house",
+            materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) return false;
         CompoundTag data = builder.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
         data.putInt(PHASE, FETCH_PLANKS);

@@ -4,14 +4,20 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -44,6 +50,42 @@ public final class VillageReservations {
             positions.add(pos.immutable());
         }
         return tryReserveStoragePositions(level, owner, positions, kind);
+    }
+
+    /**
+     * Claim only physical containers that hold items needed by a task.
+     * Item totals are validated before any claim is saved, so partial stock never starts a job.
+     */
+    public static boolean reserveStoragesForItems(ServerLevel level, BlockPos center, Villager owner,
+                                                  String kind, Map<Item, Integer> requirements, int requestedRadius) {
+        if (owner == null || !owner.isAlive() || requirements == null || requirements.isEmpty()
+            || owner.getPersistentData().getBoolean(ACTIVE)) return false;
+        int radius = Math.max(0, Math.min(requestedRadius, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()));
+        Map<Item, Integer> available = new HashMap<>();
+        List<BlockPos> relevantStorages = new ArrayList<>();
+
+        for (BlockPos pos : BlockPos.betweenClosed(
+            center.offset(-radius, -8, -radius), center.offset(radius, 8, radius))) {
+            if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                || !isStorageAvailable(level, pos, owner)) continue;
+            BlockEntity blockEntity = level.getBlockEntity(pos);
+            if (!(blockEntity instanceof Container container)) continue;
+
+            boolean relevant = false;
+            for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                ItemStack stack = container.getItem(slot);
+                if (stack.isEmpty() || !requirements.containsKey(stack.getItem())) continue;
+                available.merge(stack.getItem(), stack.getCount(), Integer::sum);
+                relevant = true;
+            }
+            if (relevant) relevantStorages.add(pos.immutable());
+        }
+
+        for (Map.Entry<Item, Integer> requirement : requirements.entrySet()) {
+            if (requirement.getValue() <= 0
+                || available.getOrDefault(requirement.getKey(), 0) < requirement.getValue()) return false;
+        }
+        return tryReserveStoragePositions(level, owner, relevantStorages, kind);
     }
 
     public static boolean tryReserveStoragePositions(ServerLevel level, Villager owner,

@@ -134,7 +134,10 @@ public final class VillageFarmBuilder {
             .filter(v -> canFitRequiredItems(v.getInventory(), seedItem, hoeItem))
             .findFirst().orElse(null);
         if (worker == null) return false;
-        if (!VillageReservations.reserveNearbyStorages(level, center, worker, "farm")) return false;
+        java.util.Map<Item, Integer> materialBill = java.util.Map.of(
+            seedItem, CROP_COUNT, Items.WATER_BUCKET, 1, Items.COMPOSTER, 1, hoeItem, 1);
+        if (!VillageReservations.reserveStoragesForItems(level, center, worker, "farm",
+            materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) return false;
 
         CompoundTag data = worker.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
