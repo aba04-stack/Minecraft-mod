@@ -64,8 +64,10 @@ public final class VillageArea {
             for (int clusterIndex = 0; clusterIndex < clusters.size(); clusterIndex++) {
                 long clusterDistance = Long.MAX_VALUE;
                 for (Resident member : clusters.get(clusterIndex)) {
-                    clusterDistance = Math.min(clusterDistance,
-                        horizontalDistanceSquared(position, member.homePosition()));
+                    if (member.homePosition() != null) {
+                        clusterDistance = Math.min(clusterDistance,
+                            horizontalDistanceSquared(position, member.homePosition()));
+                    }
                     clusterDistance = Math.min(clusterDistance,
                         horizontalDistanceSquared(position, member.villager().blockPosition()));
                 }

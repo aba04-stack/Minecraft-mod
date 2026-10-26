@@ -22,7 +22,7 @@ import java.util.List;
 public final class VillageReservationGameTests {
     private VillageReservationGameTests() {}
 
-    @GameTest(template = "empty", timeoutTicks = 20)
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "reservation_competition")
     public static void oneTaskExcludesCompetingTaskUntilItEnds(GameTestHelper helper) {
         placeFloor(helper);
         BlockPos relativeChest = new BlockPos(1, 1, 1);
@@ -58,7 +58,7 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "empty", timeoutTicks = 20)
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "stale_storage_cleanup")
     public static void removedChestDoesNotKeepAStaleReservation(GameTestHelper helper) {
         placeFloor(helper);
         BlockPos relativeChest = new BlockPos(1, 1, 1);
@@ -93,7 +93,7 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "empty", timeoutTicks = 20)
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "neighbor_village_isolation")
     public static void neighboringVillagesKeepSeparateStorageOwnership(GameTestHelper helper) {
         // The closest HOME anchors across these two groups are 22 blocks apart: enough to
         // exercise the grouping threshold while both settlements remain in one broad scan.

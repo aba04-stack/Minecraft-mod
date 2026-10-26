@@ -13,7 +13,9 @@ SOURCE = JAVA.read_text(encoding="utf-8")
 for marker in (
     "@GameTestHolder(LivingVillages.MOD_ID)",
     "@PrefixGameTestTemplate(false)",
-    '@GameTest(template = "empty", timeoutTicks = 20)',
+    '@GameTest(template = "empty", timeoutTicks = 20, batch = "reservation_competition")',
+    '@GameTest(template = "empty", timeoutTicks = 20, batch = "stale_storage_cleanup")',
+    '@GameTest(template = "empty", timeoutTicks = 20, batch = "neighbor_village_isolation")',
     "oneTaskExcludesCompetingTaskUntilItEnds",
     "removedChestDoesNotKeepAStaleReservation",
     "neighboringVillagesKeepSeparateStorageOwnership",
@@ -32,6 +34,9 @@ assert TEMPLATE.exists(), "The GameTest empty structure template must exist."
 with gzip.open(TEMPLATE, "rb") as stream:
     nbt = stream.read()
 assert nbt, "The GameTest template must be a non-empty gzip-compressed NBT document."
+assert b"\x00\x00\x00\x1f\x00\x00\x00\x04\x00\x00\x00\x03" in nbt, (
+    "The shared GameTest template must be wide enough for the neighboring-village scenario."
+)
 assert "type = 'gameTestServer'" in BUILD, "Gradle must declare the real GameTestServer run."
 assert (
     "systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id" in BUILD
