@@ -18,6 +18,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
+import java.util.List;
+
 /**
  * Small, real autonomy layer for vanilla farmer villagers.
  *

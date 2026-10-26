@@ -18,9 +18,9 @@ for marker in (
     assert marker in reservations, f"reservation manager missing {marker}"
 
 checks = {
-    "VillageBuilder.java": ("reserveNearbyStorages(level, center, builder, \"house\")", "VillageReservations.release(data)"),
-    "VillageFarmBuilder.java": ("reserveNearbyStorages(level, center, worker, \"farm\")", "VillageReservations.release(data)"),
-    "VillageCraftingJobs.java": ("tryReserveStoragePositions(level, villager", "VillageReservations.release(data)"),
+    "VillageBuilder.java": ("reserveNearbyStorages(level, center, builder, \"house\")", "tryAddStorageReservation(level, villager, storage, \"house\")", "VillageReservations.release(data)"),
+    "VillageFarmBuilder.java": ("reserveNearbyStorages(level, center, worker, \"farm\")", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", "VillageReservations.release(data)"),
+    "VillageCraftingJobs.java": ("tryReserveStoragePositions(level, villager", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", "VillageReservations.release(data)"),
     "LivingVillages.java": ("VillageReservations.isStorageAvailable(level, pos, null)",),
 }
 for filename, markers in checks.items():

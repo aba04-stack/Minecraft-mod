@@ -610,23 +610,33 @@ public final class VillageFarmBuilder {
         BlockPos origin = VillagerRoles.getHome(worker) == null ? worker.blockPosition() : VillagerRoles.getHome(worker);
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
         List<StorageRef> refs = findStorageRefs(level, origin, radius, worker);
-        return refs.stream().filter(ref -> countItem(ref.container(), item) > 0)
-            .sorted(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))))
-            .map(ref -> makeTarget(level, worker, ref.pos())).filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        refs.sort(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
+        for (StorageRef ref : refs) {
+            if (countItem(ref.container(), item) <= 0) continue;
+            StorageTarget target = makeTarget(level, worker, ref.pos());
+            if (target != null && VillageReservations.tryAddStorageReservation(level, worker, ref.pos(), "farm")) return target;
+        }
+        return null;
     }
 
     private static StorageTarget findNearestStorageWithRoom(Villager worker, ServerLevel level, ItemStack offered) {
         BlockPos origin = VillagerRoles.getHome(worker) == null ? worker.blockPosition() : VillagerRoles.getHome(worker);
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
-        return findStorageRefs(level, origin, radius, worker).stream()
-            .filter(ref -> canInsert(ref.container(), offered))
-            .sorted(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))))
-            .map(ref -> makeTarget(level, worker, ref.pos())).filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        List<StorageRef> refs = findStorageRefs(level, origin, radius, worker);
+        refs.sort(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
+        for (StorageRef ref : refs) {
+            if (!canInsert(ref.container(), offered)) continue;
+            StorageTarget target = makeTarget(level, worker, ref.pos());
+            if (target != null && VillageReservations.tryAddStorageReservation(level, worker, ref.pos(), "farm")) return target;
+        }
+        return null;
     }
 
     private static StorageTarget findTargetForContainer(Villager worker, ServerLevel level, Container container, Item item) {
         for (StorageRef ref : findStorageRefs(level, worker.blockPosition(), LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get(), worker)) {
-            if (ref.container() == container && countItem(container, item) > 0) return makeTarget(level, worker, ref.pos());
+            if (ref.container() != container || countItem(container, item) <= 0) continue;
+            StorageTarget target = makeTarget(level, worker, ref.pos());
+            if (target != null && VillageReservations.tryAddStorageReservation(level, worker, ref.pos(), "farm")) return target;
         }
         return null;
     }

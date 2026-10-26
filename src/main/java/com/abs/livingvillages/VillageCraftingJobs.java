@@ -827,10 +827,13 @@ public final class VillageCraftingJobs {
         BlockPos origin = VillagerRoles.getHome(villager);
         if (origin == null) origin = villager.blockPosition();
         List<StorageRef> storages = findStorages(level, origin, radius, villager);
-        return storages.stream().filter(ref -> countItem(ref.container(), item) > 0)
-            .sorted(Comparator.comparingDouble(ref -> villager.distanceToSqr(Vec3.atCenterOf(ref.pos()))))
-            .map(ref -> makeTarget(level, villager, ref.pos()))
-            .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        storages.sort(Comparator.comparingDouble(ref -> villager.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
+        for (StorageRef ref : storages) {
+            if (countItem(ref.container(), item) <= 0) continue;
+            StorageTarget target = makeTarget(level, villager, ref.pos());
+            if (target != null && VillageReservations.tryAddStorageReservation(level, villager, ref.pos(), "crafting")) return target;
+        }
+        return null;
     }
 
     private static StorageTarget findStorageWithRoom(ServerLevel level, Villager villager, ItemStack output) {
@@ -838,10 +841,13 @@ public final class VillageCraftingJobs {
         BlockPos origin = VillagerRoles.getHome(villager);
         if (origin == null) origin = villager.blockPosition();
         List<StorageRef> storages = findStorages(level, origin, radius, villager);
-        return storages.stream().filter(ref -> canInsert(ref.container(), output))
-            .sorted(Comparator.comparingDouble(ref -> villager.distanceToSqr(Vec3.atCenterOf(ref.pos()))))
-            .map(ref -> makeTarget(level, villager, ref.pos()))
-            .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        storages.sort(Comparator.comparingDouble(ref -> villager.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
+        for (StorageRef ref : storages) {
+            if (!canInsert(ref.container(), output)) continue;
+            StorageTarget target = makeTarget(level, villager, ref.pos());
+            if (target != null && VillageReservations.tryAddStorageReservation(level, villager, ref.pos(), "crafting")) return target;
+        }
+        return null;
     }
 
     private static StorageTarget makeTarget(ServerLevel level, Villager villager, BlockPos storage) {

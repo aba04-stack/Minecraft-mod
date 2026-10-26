@@ -377,7 +377,9 @@ public final class VillagePopulation {
         if (level.hasChunkAt(preferred) && isStorage(level.getBlockState(preferred))
             && VillageReservations.isStorageAvailable(level, preferred, courier)) {
             BlockPos stand = findStandNear(level, preferred, origin);
-            if (stand != null) return new StorageTarget(preferred.immutable(), stand.immutable());
+            if (stand != null && VillageReservations.tryAddStorageReservation(level, courier, preferred, "food_delivery")) {
+                return new StorageTarget(preferred.immutable(), stand.immutable());
+            }
         }
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
         StorageTarget best = null;
@@ -390,7 +392,7 @@ public final class VillagePopulation {
                         || !VillageReservations.isStorageAvailable(level, chest, courier)
                         || !(level.getBlockEntity(chest) instanceof Container)) continue;
                     BlockPos stand = findStandNear(level, chest, origin);
-                    if (stand == null) continue;
+                    if (stand == null || !VillageReservations.tryAddStorageReservation(level, courier, chest, "food_delivery")) continue;
                     double distance = origin.distSqr(stand);
                     if (distance < bestDistance) {
                         bestDistance = distance;

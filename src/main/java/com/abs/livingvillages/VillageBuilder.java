@@ -402,7 +402,9 @@ public final class VillageBuilder {
         for (BlockPos storage : candidates) {
             for (Direction direction : HORIZONTAL) {
                 BlockPos stand = storage.relative(direction);
-                if (isSafeStand(level, stand)) return new StorageTarget(storage, stand.immutable());
+                if (!isSafeStand(level, stand)) continue;
+                if (!VillageReservations.tryAddStorageReservation(level, villager, storage, "house")) break;
+                return new StorageTarget(storage, stand.immutable());
             }
         }
         return null;
