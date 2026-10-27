@@ -12,6 +12,7 @@ for marker in (
     "ClientTickEvent.Post",
     "new ElderScreen(testData)",
     "layoutSmokeTestFailure()",
+    "PANEL_HEIGHT = 220",
     "children().size() != 7",
     "button.getX() + button.getWidth() > width",
     "button.getY() + button.getHeight() > height",
