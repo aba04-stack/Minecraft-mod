@@ -468,6 +468,77 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+
+    @GameTest(template = "empty", timeoutTicks = 40, batch = "home_less_neighbor_recovery")
+    public static void homeLessRelocatedResidentsDoNotMergeIntoNeighbor(GameTestHelper helper) {
+        for (int x = 0; x <= 30; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos homeOneA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeOneB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos homeTwoA = helper.absolutePos(new BlockPos(25, 1, 1));
+        BlockPos homeTwoB = helper.absolutePos(new BlockPos(27, 1, 1));
+        BlockPos storageOne = helper.absolutePos(new BlockPos(5, 1, 1));
+        BlockPos storageTwo = helper.absolutePos(new BlockPos(23, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(23, 1, 1), Blocks.CHEST);
+
+        Villager oneA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager oneB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        Villager twoA = helper.spawn(EntityType.VILLAGER, 25, 1, 1);
+        Villager twoB = helper.spawn(EntityType.VILLAGER, 27, 1, 1);
+        for (Villager villager : List.of(oneA, oneB, twoA, twoB)) villager.setNoAi(true);
+        oneA.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeOneA));
+        oneB.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeOneB));
+        twoA.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeTwoA));
+        twoB.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeTwoB));
+
+        BlockPos centerOne = helper.absolutePos(new BlockPos(2, 1, 1));
+        BlockPos centerTwo = helper.absolutePos(new BlockPos(26, 1, 1));
+        java.util.UUID villageOne = VillageRegistry.villageId(helper.getLevel(), centerOne);
+        java.util.UUID villageTwo = VillageRegistry.villageId(helper.getLevel(), centerTwo);
+        helper.assertTrue(villageOne != null && villageTwo != null && !villageOne.equals(villageTwo),
+            "The two neighboring groups must start with distinct persistent identities.");
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerOne, storageOne),
+            "The first storage must be registered before its residents move.");
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerTwo, storageTwo),
+            "The second storage must be registered before the relocation.");
+
+        // Give the SavedData registry a tick boundary before HOME memories and positions change.
+        helper.runAfterDelay(1, () -> {
+            oneA.getBrain().eraseMemory(MemoryModuleType.HOME);
+            oneB.getBrain().eraseMemory(MemoryModuleType.HOME);
+            BlockPos movedOneA = helper.absolutePos(new BlockPos(20, 1, 1));
+            BlockPos movedOneB = helper.absolutePos(new BlockPos(22, 1, 1));
+            oneA.setPos(movedOneA.getX() + 0.5D, movedOneA.getY(), movedOneA.getZ() + 0.5D);
+            oneB.setPos(movedOneB.getX() + 0.5D, movedOneB.getY(), movedOneB.getZ() + 0.5D);
+            BlockPos movedCenterOne = helper.absolutePos(new BlockPos(21, 1, 1));
+
+            List<Villager> recoveredResidents = VillageArea.findVillagers(
+                helper.getLevel(), movedCenterOne, 32, 32);
+            helper.assertTrue(recoveredResidents.size() == 2,
+                "HOME-less residents with a known village identity must not be absorbed by the neighboring HOME group.");
+            java.util.UUID recoveredVillageOne = VillageRegistry.villageId(helper.getLevel(), movedCenterOne);
+            helper.assertTrue(villageOne.equals(recoveredVillageOne),
+                "Resident UUID history must preserve village one after its HOME anchors disappear near village two.");
+            helper.assertTrue(villageTwo.equals(VillageRegistry.villageId(helper.getLevel(), centerTwo)),
+                "Village two must keep its own identity after village one's relocation.");
+            helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), movedCenterOne, storageOne),
+                "The moved residents must retain access to their original storage.");
+            helper.assertTrue(!VillageRegistry.isStorageForVillage(helper.getLevel(), centerTwo, storageOne),
+                "The neighboring village must not annex storage still owned by the relocated village.");
+            helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerTwo, storageTwo),
+                "The neighboring village must retain access to its own storage.");
+            helper.succeed();
+        });
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {
