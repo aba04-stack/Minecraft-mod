@@ -341,7 +341,8 @@ public final class VillageReservationGameTests {
             helper.assertTrue(!before.isEmpty(),
                 "The saved " + key + " registry section must contain test data.");
             helper.assertTrue(before.equals(after),
-                "The " + key + " section must preserve all identities and ownership across SavedData load/save.");
+                "The " + key + " section must preserve all identities and ownership across SavedData load/save."
+                    + " before=" + before + ", after=" + after);
         }
         helper.succeed();
     }

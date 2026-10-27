@@ -285,11 +285,6 @@ public final class VillageRegistry extends SavedData {
             UUID id = parseUuid(entry.getString("id"));
             if (id != null) data.villageAnchors.put(id, BlockPos.of(entry.getLong("anchor")));
         }
-        // Older 0.15.0 world data may contain only the primary anchor. Promote it to an alias
-        // before reading optional expanded maps; no existing save needs to be discarded.
-        for (Map.Entry<UUID, BlockPos> entry : data.villageAnchors.entrySet()) {
-            data.knownHomes.computeIfAbsent(entry.getKey(), ignored -> new HashSet<>()).add(entry.getValue().asLong());
-        }
         ListTag knownHomeTags = tag.getList("knownHomes", Tag.TAG_COMPOUND);
         for (int i = 0; i < knownHomeTags.size(); i++) {
             CompoundTag entry = knownHomeTags.getCompound(i);
@@ -297,6 +292,14 @@ public final class VillageRegistry extends SavedData {
             if (id == null) continue;
             Set<Long> positions = data.knownHomes.computeIfAbsent(id, ignored -> new HashSet<>());
             for (long position : entry.getLongArray("positions")) positions.add(position);
+        }
+        // Older saves have no alias record for a village, so promote the legacy primary anchor.
+        // A current save may legitimately contain an empty alias set when that group had no HOME memory.
+        for (Map.Entry<UUID, BlockPos> entry : data.villageAnchors.entrySet()) {
+            if (!data.knownHomes.containsKey(entry.getKey())) {
+                data.knownHomes.computeIfAbsent(entry.getKey(), ignored -> new HashSet<>())
+                    .add(entry.getValue().asLong());
+            }
         }
         ListTag knownResidentTags = tag.getList("knownResidents", Tag.TAG_COMPOUND);
         for (int i = 0; i < knownResidentTags.size(); i++) {
