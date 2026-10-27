@@ -200,6 +200,12 @@ def main() -> int:
         errors.append(f"elder management regression check failed: {exc}")
 
     try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_elder_screen_smoke.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"elder screen smoke-test contract failed: {exc}")
+
+    try:
         subprocess.run([sys.executable, str(ROOT / "tools/test_active_area_safety.py")],
                        check=True, capture_output=True, text=True)
     except Exception as exc:
@@ -265,6 +271,7 @@ def main() -> int:
     print("- breeding food recipient order checked (hungriest first, deterministic tie-break)")
     print("- breeding support uses real stored food, a physical courier, valid bed space and vanilla reproduction")
     print("- elder panel actions, role election, configuration checks and 1.21.1 screen signature checked")
+    print("- headless client smoke test creates the elder screen and checks all seven buttons stay inside the viewport")
     print("- active-area queries use a shared HOME-anchored nearest-group selector")
     print("- resident counts/roles/projects/industry/crafting/food routes use the selected group")
     print("- farmland/bed/site/patrol scans skip unloaded chunks")
