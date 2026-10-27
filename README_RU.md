@@ -104,7 +104,7 @@
 - JSON-файлы переводов разбираются парсером.
 - Сборочные shell-скрипты проверяются через `sh -n`.
 - Исходники дополнительно компилируются с Minecraft/NeoForge classpath в GitHub Actions.
-- `./gradlew build` успешно выполнен на CI для commit `d47ab9d8d02d5237bf866deeb47eadbd2935c964`; актуальный артефакт `livingvillages-0.15.0` опубликован в [workflow run 40552220317](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40552220317/artifacts/12754744512).
+- `./gradlew build` успешно выполнен на CI для commit `708a655c8a4425f455e8bca7ff970ab31d5ef8a0`; артефакт `livingvillages-0.15.0` опубликован в [успешном workflow run 40553636283](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40553636283/artifacts/12756606252).
 - Восемь Minecraft GameTests реально выполнены через `runGameTestServer`, включая миграцию старого реестра без списка HOME-алиасов.
 - Smoke-test dedicated server подтверждает, что сервер достиг сообщения готовности без ошибки загрузки мода.
 - Headless client smoke-test под Xvfb/software OpenGL прошёл до инициализации ресурсов; интерактивная проверка UI этим не подтверждается.
