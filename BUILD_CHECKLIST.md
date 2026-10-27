@@ -13,13 +13,16 @@
 - [x] House/farm site searches and project start guard against nearby active build sites, including projects owned by a different resident group.
 - [x] Physical storage selection checks that a chest's nearest HOME-anchored resident group overlaps the requesting village group.
 - [ ] Run `runClient` and manually verify farm project initialization, food courier behavior and the elder panel.
-- [ ] Test storage isolation with two villages whose resource-search radii overlap.
-- [ ] In a test world, start a house and farm project from neighboring settlements and verify the projects do not overlap.
-- [ ] Run two competing resource tasks and verify one task cannot take from a chest claimed by the other.
+- [ ] In a normal client world, run two neighboring villages with overlapping resource-search radii and check the full gameplay cycle.
+- [ ] In a test world, start a house and farm project from neighboring settlements and verify the actual projects do not overlap; GameTest covers the geometry guard.
+- [x] GitHub Actions GameTests confirm that two HOME groups do not claim each other's chests, beds or workstations.
+- [x] GitHub Actions GameTests confirm that a task cannot reuse a rival chest claim, and that removing/replacing a chest clears stale reservation/ownership.
+- [x] A village ID survives HOME-memory loss and resident relocation in a GameTest.
+- [x] A SavedData round-trip preserves village IDs, HOME aliases, known residents and storage/bed/work-block owners.
+- [ ] Run two real resource tasks in a normal world and verify one cannot take from a chest claimed by the other.
 - [ ] Check that cancelling/disabling logistics does not release a house/farm/crafting claim on the same worker.
-- [ ] Check resource reservations when a chest is broken or a worker dies; task recovery is not implemented yet.
-- [ ] In a test world, place two nearby villages and confirm that elder, population counts, roles and work orders remain independent.
-- [ ] Verify physical chests, beds, workstations and building sites are not mistakenly treated as shared resources between neighboring villages.
+- [x] Chest removal/replacement is covered by GameTest; worker death and recovery of an in-flight project remain untested and unimplemented.
+- [ ] In a normal client world, place two nearby villages and confirm elder, population counts, roles and work orders remain independent.
 - [ ] Builder: 96 same-type planks, matching door, red bed; 96 planks remain after crafting door.
 - [ ] Farm: 24 seed items, water bucket, composter, hoe; worker makes each block placement in sequence.
 - [ ] Config toggles: pausing a project does not block unrelated village work when its feature is disabled.

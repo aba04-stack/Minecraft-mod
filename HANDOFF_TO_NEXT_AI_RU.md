@@ -27,15 +27,15 @@
 
 ## Важные оговорки
 
-- Последний успешный JAR опубликован GitHub Actions: [артефакт `livingvillages-0.15.0`](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40331939182/artifacts/12655395208). Он соответствует commit `83f25ee9de8d35fba40b1345411d35d17c99cf54`; после новых изменений исходников скачивай артефакт соответствующего нового CI, а не используй старую сборку.
+- Последний проверенный JAR опубликован GitHub Actions: [артефакт `livingvillages-0.15.0`](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40552220317/artifacts/12754744512). Он соответствует commit `d47ab9d8d02d5237bf866deeb47eadbd2935c964`; после последующих изменений кода всегда выбирай артефакт соответствующего CI.
 - `gradlew`/`gradlew.bat` в текущем проекте — checksum-проверяемый bootstrap, который загружает официальный Gradle 9.2.1 при наличии сети; это не стандартный wrapper с `gradle-wrapper.jar`. Для первой настоящей проверки необходимо интернет-соединение к `services.gradle.org` и репозиториям Gradle/Minecraft/NeoForge.
-- Компиляция, пять GameTests, запуск dedicated server и headless client smoke-test до инициализации ресурсов подтверждены для commit `83f25ee9de8d35fba40b1345411d35d17c99cf54` в [GitHub Actions](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40331939182). Тесты проверяют конкурирующие резервы, владение сундуками/кроватями/рабочими блоками соседних групп, безопасную группировку без HOME и расстояния между активными строительными площадками. Интерактивное меню и полный игровой цикл двух деревень в обычном клиенте по-прежнему не проверены.
+- Полная CI-проверка для commit `d47ab9d8d02d5237bf866deeb47eadbd2935c964` прошла: статические проверки, Gradle build, семь GameTests, запуск dedicated server, headless client smoke-test и загрузка JAR — [результат](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40552220317). Есть проверки сохранения ID после потери HOME/переезда и round-trip реестра, но они не заменяют обычный игровой мир.
 - Некоторые заявленные механики могли быть проверены только статическими тестами. Проведи честный аудит реального кода и не считай README доказательством работоспособности.
 
 ## Приоритеты следующей работы
 
 ### P0 — игровая проверка уже собираемой версии
-1. Последняя полная проверка — commit `83f25ee9de8d35fba40b1345411d35d17c99cf54`: статические проверки, `./gradlew build`, пять внутриигровых GameTests, запуск dedicated server, headless client smoke-test до инициализации ресурсов и загрузка JAR прошли успешно. [CI](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40331939182).
+1. Последняя полная проверка кода — commit `d47ab9d8d02d5237bf866deeb47eadbd2935c964`: статические проверки, `./gradlew build`, семь внутриигровых GameTests, запуск dedicated server, headless client smoke-test до инициализации ресурсов и загрузка JAR прошли успешно. [CI](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40552220317).
 2. Обычный headless `runClient` теперь проходит до инициализации ресурсов под Xvfb, но это не тест интерактивного UI. Следующий шаг — открыть/закрыть экран старосты, проверить server-side actions и взаимодействие клиента с dedicated server.
 3. Собрать два близких поселения в тестовом мире и проверить поведение жителей, заказов и интерфейса. Статические тесты не заменяют эту проверку.
 
