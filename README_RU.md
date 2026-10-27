@@ -104,7 +104,7 @@
 - JSON-файлы переводов разбираются парсером.
 - Сборочные shell-скрипты проверяются через `sh -n`.
 - Исходники дополнительно компилируются с Minecraft/NeoForge classpath в GitHub Actions.
-- `./gradlew build`, десять GameTests и headless-проверка компоновки экрана старосты успешно выполнены для commit `c0f111dd81eea237aa3262c0913c27de42ef8022`; [проверенный JAR]( https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119/artifacts/12761080201 ).
+- `./gradlew build`, десять GameTests и headless-проверка компоновки экрана старосты успешно выполнены для commit `c0f111dd81eea237aa3262c0913c27de42ef8022`; [проверенный JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119/artifacts/12761080201).
 - Десять Minecraft GameTests реально выполнены через `runGameTestServer`, включая миграцию старого реестра без списка HOME-алиасов, резервирование чужих сундуков и переезд жителей без HOME рядом с соседней деревней.
 - Smoke-test dedicated server подтверждает, что сервер достиг сообщения готовности без ошибки загрузки мода.
 - Headless client smoke-test под Xvfb/software OpenGL создаёт настоящий экран старосты и проверяет семь кнопок/границы панели на окне `427×240`. Нажатия кнопок, сетевые ответы сервера и полный игровой сценарий не автоматизированы.
