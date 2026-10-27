@@ -31,7 +31,6 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.fml.DistExecutor;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -269,8 +268,7 @@ public final class VillageElder {
     }
 
     private static void handlePanelOnClient(ElderPanelData data, IPayloadContext context) {
-        DistExecutor.unsafeRunWhenOn(net.neoforged.api.distmarker.Dist.CLIENT,
-            () -> () -> LivingVillagesClient.openElderPanel(data));
+        context.enqueueWork(() -> LivingVillagesClient.openElderPanel(data));
     }
 
     private static void handleActionOnServer(ElderAction action, IPayloadContext context) {
@@ -340,8 +338,7 @@ public final class VillageElder {
         ServerLevel level = player.serverLevel();
         BlockPos origin = elder.blockPosition();
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(origin).inflate(radius, 12.0D, radius);
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
+        List<Villager> villagers = VillageArea.findVillagers(level, origin);
         int adults = (int) villagers.stream().filter(v -> !v.isBaby()).count();
         int children = villagers.size() - adults;
         int beds = countBeds(level, origin, radius);
@@ -361,7 +358,8 @@ public final class VillageElder {
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
             if (!level.hasChunkAt(pos)) continue;
             BlockState state = level.getBlockState(pos);
-            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT) continue;
+            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT
+                || !VillageRegistry.isBedForVillage(level, center, pos)) continue;
             BlockPos head = pos.relative(state.getValue(HorizontalDirectionalBlock.FACING));
             if (level.hasChunkAt(head) && level.getBlockState(pos.above()).isAir()
                 && level.getBlockState(pos.above(2)).isAir()
@@ -381,6 +379,8 @@ public final class VillageElder {
             if (!level.getBlockState(pos).is(Blocks.CHEST)
                 && !level.getBlockState(pos).is(Blocks.TRAPPED_CHEST)
                 && !level.getBlockState(pos).is(Blocks.BARREL)) continue;
+            if (!VillageRegistry.isStorageForVillage(level, center, pos)
+                || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (!(blockEntity instanceof Container container)) continue;
             for (int slot = 0; slot < container.getContainerSize(); slot++) {

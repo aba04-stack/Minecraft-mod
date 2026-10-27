@@ -151,7 +151,7 @@ def main() -> int:
         "incremental farm builder": "class VillageFarmBuilder",
         "farm crop completion check": "current.is(cropBlock)",
         "validated vanilla crop/seed mapping": "isSupportedCrop(Item seedItem, Block cropBlock)",
-        "hungriest breeding recipient first": "Comparator.comparingInt(VillagePopulation::foodPoints)\n                .thenComparing",
+        "hungriest breeding recipient first": "Comparator.comparingInt((Villager v) -> foodPoints(v))\n                .thenComparing",
         "role reconciliation": "roleDisabled",
         "builder config toggle": "ENABLE_VILLAGE_BUILDER",
         "construction reach check": "withinPlacementReach",
@@ -200,6 +200,42 @@ def main() -> int:
         errors.append(f"elder management regression check failed: {exc}")
 
     try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_elder_screen_smoke.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"elder screen smoke-test contract failed: {exc}")
+
+    try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_active_area_safety.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"active-area safety regression check failed: {exc}")
+
+    try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_village_area_grouping.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"village area grouping regression check failed: {exc}")
+
+    try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_resource_reservations.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"resource reservation regression check failed: {exc}")
+
+    try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_reservation_gametests.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"reservation GameTest contract check failed: {exc}")
+
+    try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_village_registry.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"village identity registry regression check failed: {exc}")
+
+    try:
         subprocess.run(["java", str(ROOT / "tools/JavaSyntaxCheck.java"), str(ROOT / "src/main/java")],
                        check=True, capture_output=True, text=True)
     except Exception as exc:
@@ -210,6 +246,12 @@ def main() -> int:
             subprocess.run(["sh", "-n", str(script)], check=True, capture_output=True, text=True)
         except Exception as exc:
             errors.append(f"shell syntax check failed for {script.relative_to(ROOT)}: {exc}")
+
+    try:
+        subprocess.run(["bash", "-n", str(ROOT / "tools/smoke_test_client.sh")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"client smoke-test shell syntax failed: {exc}")
 
     if errors:
         print("STATIC CHECK FAILED")
@@ -229,6 +271,12 @@ def main() -> int:
     print("- breeding food recipient order checked (hungriest first, deterministic tie-break)")
     print("- breeding support uses real stored food, a physical courier, valid bed space and vanilla reproduction")
     print("- elder panel actions, role election, configuration checks and 1.21.1 screen signature checked")
+    print("- headless client smoke test creates the elder screen and checks all seven buttons stay inside the viewport")
+    print("- active-area queries use a shared HOME-anchored nearest-group selector")
+    print("- resident counts/roles/projects/industry/crafting/food routes use the selected group")
+    print("- farmland/bed/site/patrol scans skip unloaded chunks")
+    print("- persistent storage reservations are conflict-checked and released on completion")
+    print("- Minecraft GameTests cover competing claims and removed-chest cleanup")
     print("- resource-ledger feature markers present")
     print("- shell scripts pass sh -n")
     print("NOTE: This does not compile the Minecraft/NeoForge source or test behavior in game.")

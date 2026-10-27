@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Static contract checks for persistent physical-storage reservations."""
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+JAVA = ROOT / "src/main/java/com/abs/livingvillages"
+reservations = (JAVA / "VillageReservations.java").read_text(encoding="utf-8")
+
+for marker in (
+    "data.putLongArray(POSITIONS, packed)",
+    "data.getLongArray(POSITIONS)",
+    'data.getString(KIND).equals(expectedKind)',
+    'if (hasLiveClaim && !data.getString(KIND).equals(kind)) return false;',
+    'if (hasLiveClaim && positions.contains(storage.asLong())) return true;',
+    "tryReserveStoragePositions",
+    "reserveStoragesForItems",
+    "if (hasLiveReservation(level, owner, owner.getPersistentData())) return false;",
+    "if (hasLiveReservation(level, owner, data)) return false;",
+    "boolean hasLiveClaim = hasLiveReservation(level, owner, data);",
+    "if (valid.isEmpty()) {\n            release(data);\n            return false;",
+    "available.getOrDefault(requirement.getKey(), 0) < requirement.getValue()",
+    "if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;",
+    "remaining.put(item, need - amount)",
+    "if (selected.isEmpty() || remaining.values().stream().anyMatch(amount -> amount > 0)) return false;",
+    "private record StorageStock(BlockPos pos, Map<Item, Integer> items)",
+    "Comparator.comparingDouble(stock -> stock.pos().distSqr(center))",
+    "center.offset(-radius, -6, -radius)",
+    "tryAddStorageReservation",
+    "isStorageAvailable",
+    "hasReservationInArea",
+    "private static boolean hasLiveReservation(ServerLevel level, Villager owner, CompoundTag data)",
+    'case "house" -> data.getBoolean(VillageBuilder.ACTIVE_KEY);',
+    'case "farm" -> data.getBoolean(VillageFarmBuilder.ACTIVE_KEY);',
+    'case "crafting" -> data.getBoolean(VillageCraftingJobs.ACTIVE_KEY);',
+    'case "food_delivery" -> data.getBoolean(VillagePopulation.ACTIVE_KEY);',
+    'case "logistics_delivery" -> data.getBoolean("livingvillages_logistics_active");',
+    'case "food_stockpiling" -> data.getBoolean("livingvillages_autonomy_target_active");',
+    'if (!taskActive) {\n            release(data);\n            return false;',
+    "data.putLongArray(POSITIONS, valid.stream().mapToLong(Long::longValue).toArray())",
+    "public static void release(CompoundTag data)",
+    "isProjectSiteAvailable",
+    "private static boolean sitesConflict(BlockPos first, BlockPos second, int separation)",
+    "VillageBuilder.activeProjectSite(candidate)",
+    "VillageFarmBuilder.activeProjectSite(candidate)",
+):
+    assert marker in reservations, f"reservation manager missing {marker}"
+
+area = (JAVA / "VillageArea.java").read_text(encoding="utf-8")
+assert "isStorageInResidentGroup(ServerLevel level, Villager owner, BlockPos storage)" in area
+assert "isStorageInResidentGroup(ServerLevel level, BlockPos groupCenter, BlockPos storage)" in area
+assert "storageGroupLookupRadius()" in area
+
+checks = {
+    "VillageBuilder.java": ("reserveStoragesForItems(level, builder.blockPosition(), builder, \"house\"", "VillageReservations.isProjectSiteAvailable(level, site, 8, null)", "tryAddStorageReservation(level, villager, storage, \"house\")", 'VillageReservations.release(data, "house")'),
+    "VillageFarmBuilder.java": ("findStorages(level, candidateOrigin, null)", "firstHoeInStorage(candidateStorages)", "VillageReservations.isProjectSiteAvailable(level, site, 8, null)", "reserveStoragesForItems(level, candidateOrigin, candidate, \"farm\"", "tryAddStorageReservation(level, worker, ref.pos(), \"farm\")", 'VillageReservations.release(data, "farm")'),
+    "VillageCraftingJobs.java": ("reserveStoragesForItems(level, origin, villager", "totalInputs.merge(ingredient.item(), ingredient.count(), Integer::sum)", "tryAddStorageReservation(level, villager, ref.pos(), \"crafting\")", 'VillageReservations.release(data, "crafting")'),
+    "LivingVillages.java": ("VillageReservations.isStorageAvailable(level, pos, null)",),
+    "VillagePopulation.java": ('VillageReservations.release(data, "food_delivery")',),
+    "VillageLogistics.java": ('VillageReservations.release(data, "logistics_delivery")',),
+    "VillagerAutonomy.java": ('VillageReservations.release(data, "food_stockpiling")',),
+}
+for filename, markers in checks.items():
+    source = (JAVA / filename).read_text(encoding="utf-8")
+    for marker in markers:
+        assert marker in source, f"{filename} must include {marker}"
+
+planner = (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
+assert "VillageReservations.isProjectSiteAvailable(level, base, 8, null)" in planner
+assert planner.count("VillageReservations.isProjectSiteAvailable(level, base, 8, null)") == 2
+
+industry = (JAVA / "VillageIndustry.java").read_text(encoding="utf-8")
+assert "VillageReservations.isStorageAvailable(level, pos, null)" in industry
+assert "hasStorageBlock(level, center, radius)" in industry
+assert "VillageReservations.hasReservationInArea(level, center, radius, 8)) return;" not in industry
+scheduler = (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
+assert "VillageIndustry.tickArea(level, villageCenter);" in scheduler
+assert "VillagePopulation.tickArea(level, villageCenter, villagers);\n            if (villagers.stream().anyMatch" not in scheduler
+
+assert "VillageRegistry.isStorageForVillage(level, groupCenter, storage)" in reservations
+assert "VillageReservations.isStorageAvailable(level, storagePos, villager)" in (JAVA / "VillageBuilder.java").read_text(encoding="utf-8")
+assert "VillageReservations.isStorageAvailable(level, storagePos, worker)" in (JAVA / "VillageFarmBuilder.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isStorageForVillage(level, center, pos)" in (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isStorageForVillage(level, center, pos)" in (JAVA / "VillageIndustry.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isStorageForVillage(level, center, pos)" in (JAVA / "VillageFarmBuilder.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isStorageForVillage(level, center, pos)" in (JAVA / "VillagePopulation.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isStorageForVillage(level, center, pos)" in (JAVA / "VillageElder.java").read_text(encoding="utf-8")
+assert "VillageRegistry.isBedForVillage(level, center, pos)" in (JAVA / "VillageElder.java").read_text(encoding="utf-8")
+assert "VillageReservations.isStorageAvailable(level, storagePos, villager)" in (JAVA / "VillageCraftingJobs.java").read_text(encoding="utf-8")
+print("RESOURCE RESERVATIONS CONTRACT PASSED: persistent chest claims, conflict checks, owner access, and cleanup")

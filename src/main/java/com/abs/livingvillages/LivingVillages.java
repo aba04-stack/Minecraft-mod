@@ -102,16 +102,11 @@ public final class LivingVillages {
             ServerLevel level = player.serverLevel();
             BlockPos center = player.blockPosition();
 
-            // Ignore nearby players only when they are in the same dimension.
-            boolean duplicateArea = alreadyChecked.stream()
-                .anyMatch(previous -> previous.level() == level
-                    && previous.position().distSqr(center) < 64.0D * 64.0D);
-            if (duplicateArea) {
+            List<Villager> villagers = findVillagers(level, center);
+            if (isDuplicateArea(alreadyChecked, level, villagers)) {
                 continue;
             }
-            alreadyChecked.add(new ActiveArea(level, center.immutable()));
-
-            List<Villager> villagers = findVillagers(level, center);
+            rememberActiveArea(alreadyChecked, level, villagers);
             if (villagers.size() < LivingVillagesConfig.MINIMUM_VILLAGERS.get()) {
                 continue;
             }
@@ -187,14 +182,11 @@ public final class LivingVillages {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             ServerLevel level = player.serverLevel();
             BlockPos center = player.blockPosition();
-            boolean duplicateArea = alreadyChecked.stream()
-                .anyMatch(previous -> previous.level() == level
-                    && previous.position().distSqr(center) < 48.0D * 48.0D);
-            if (duplicateArea) continue;
-            alreadyChecked.add(new ActiveArea(level, center.immutable()));
             List<Villager> villagers = findVillagers(level, center);
-            if (villagers.isEmpty()) continue;
+            if (villagers.isEmpty() || isDuplicateArea(alreadyChecked, level, villagers)) continue;
+            rememberActiveArea(alreadyChecked, level, villagers);
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
+            VillageRegistry.cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers)) {
                 VillagerRoles.assignRoles(level, villageCenter);
@@ -210,19 +202,14 @@ public final class LivingVillages {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             ServerLevel level = player.serverLevel();
             BlockPos playerPos = player.blockPosition();
-            boolean duplicateArea = alreadyChecked.stream()
-                .anyMatch(previous -> previous.level() == level
-                    && previous.position().distSqr(playerPos) < 48.0D * 48.0D);
-            if (duplicateArea) continue;
-            alreadyChecked.add(new ActiveArea(level, playerPos.immutable()));
             List<Villager> villagers = findVillagers(level, playerPos);
-            if (villagers.isEmpty()) continue;
+            if (villagers.isEmpty() || isDuplicateArea(alreadyChecked, level, villagers)) continue;
+            rememberActiveArea(alreadyChecked, level, villagers);
             BlockPos villageCenter = averageVillagerPosition(villagers, playerPos);
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (!VillageElder.isAutomationEnabled(villagers) && !VillageElder.hasPendingRequest(villagers)) continue;
             VillagePopulation.tickArea(level, villageCenter, villagers);
-            if (villagers.stream().anyMatch(v -> (LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get() && VillageBuilder.isProjectActive(v))
-                || (LivingVillagesConfig.ENABLE_FARM_PROJECTS.get() && VillageFarmBuilder.isProjectActive(v)))) continue;
+            // Industry scans only unreserved containers, so it can continue with separate stock.
             VillageIndustry.tickArea(level, villageCenter);
         }
     }
@@ -232,10 +219,9 @@ public final class LivingVillages {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             ServerLevel level = player.serverLevel();
             BlockPos pos = player.blockPosition();
-            if (checked.stream().anyMatch(area -> area.level() == level
-                && area.position().distSqr(pos) < 48.0D * 48.0D)) continue;
-            checked.add(new ActiveArea(level, pos.immutable()));
             List<Villager> villagers = findVillagers(level, pos);
+            if (villagers.isEmpty() || isDuplicateArea(checked, level, villagers)) continue;
+            rememberActiveArea(checked, level, villagers);
             int request = VillageElder.pendingRequest(villagers);
             if (request == VillageElder.REQUEST_HOUSE && LivingVillagesConfig.ENABLE_HOUSING_PROJECTS.get()
                 && LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) return true;
@@ -350,6 +336,8 @@ public final class LivingVillages {
         BlockPos min = center.offset(-radius, -8, -radius);
         BlockPos max = center.offset(radius, 8, radius);
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            // Never force-load distant chunks just to count farmland for an active village.
+            if (!level.hasChunkAt(pos)) continue;
             if (level.getBlockState(pos).is(Blocks.FARMLAND)) {
                 count++;
             }
@@ -366,9 +354,12 @@ public final class LivingVillages {
                     }
                     int x = center.getX() + dx;
                     int z = center.getZ() + dz;
+                    // Heightmap queries may access chunk data; skip columns that are not loaded.
+                    if (!level.hasChunkAt(new BlockPos(x, center.getY(), z))) continue;
                     int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                     BlockPos base = new BlockPos(x, y, z);
-                    if (isSuitableFarmSite(level, base)) {
+                    if (isSuitableFarmSite(level, base)
+                        && VillageReservations.isProjectSiteAvailable(level, base, 8, null)) {
                         return base;
                     }
                 }
@@ -384,6 +375,7 @@ public final class LivingVillages {
             for (int dz = 0; dz < FARM_SIZE; dz++) {
                 int x = base.getX() + dx;
                 int z = base.getZ() + dz;
+                if (!level.hasChunkAt(new BlockPos(x, baseY, z))) return false;
                 if (level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) != baseY) {
                     return false;
                 }
@@ -397,6 +389,7 @@ public final class LivingVillages {
         }
         int composterX = base.getX() + 2;
         int composterZ = base.getZ() - 1;
+        if (!level.hasChunkAt(new BlockPos(composterX, baseY, composterZ))) return false;
         if (level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, composterX, composterZ) != baseY) {
             return false;
         }
@@ -442,9 +435,7 @@ public final class LivingVillages {
     }
 
     private List<Villager> findVillagers(ServerLevel level, BlockPos center) {
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return level.getEntitiesOfClass(Villager.class, area);
+        return VillageArea.findVillagers(level, center);
     }
 
     private BlockPos averageVillagerPosition(List<Villager> villagers, BlockPos fallback) {
@@ -476,7 +467,8 @@ public final class LivingVillages {
         for (BlockPos pos : BlockPos.betweenClosed(minX, minY, minZ, maxX, maxY, maxZ)) {
             if (!level.hasChunkAt(pos)) continue;
             BlockState state = level.getBlockState(pos);
-            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT) continue;
+            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT
+                || !VillageRegistry.isBedForVillage(level, center, pos)) continue;
             BlockPos head = pos.relative(state.getValue(HorizontalDirectionalBlock.FACING));
             if (!level.hasChunkAt(head) || !level.getBlockState(pos.above()).isAir()
                 || !level.getBlockState(pos.above(2)).isAir()
@@ -502,6 +494,8 @@ public final class LivingVillages {
             if (!state.is(Blocks.CHEST) && !state.is(Blocks.TRAPPED_CHEST) && !state.is(Blocks.BARREL)) {
                 continue;
             }
+            if (!VillageRegistry.isStorageForVillage(level, center, pos)
+                || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (blockEntity instanceof Container container) {
                 containers.add(container);
@@ -549,9 +543,12 @@ public final class LivingVillages {
                     }
                     int x = center.getX() + dx;
                     int z = center.getZ() + dz;
+                    // Do not load a new chunk just to probe a possible house location.
+                    if (!level.hasChunkAt(new BlockPos(x, center.getY(), z))) continue;
                     int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                     BlockPos base = new BlockPos(x, y, z);
-                    if (isSuitableSite(level, base)) {
+                    if (isSuitableSite(level, base)
+                        && VillageReservations.isProjectSiteAvailable(level, base, 8, null)) {
                         return base;
                     }
                 }
@@ -566,6 +563,7 @@ public final class LivingVillages {
             for (int dz = 0; dz < 5; dz++) {
                 int x = base.getX() + dx;
                 int z = base.getZ() + dz;
+                if (!level.hasChunkAt(new BlockPos(x, baseY, z))) return false;
                 int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                 if (surfaceY != baseY) {
                     return false;
@@ -587,7 +585,20 @@ public final class LivingVillages {
         return true;
     }
 
-    private record ActiveArea(ServerLevel level, BlockPos position) {
+    private static boolean isDuplicateArea(List<ActiveArea> checked, ServerLevel level, List<Villager> villagers) {
+        if (villagers.isEmpty()) return false;
+        return checked.stream().anyMatch(previous -> previous.level() == level && previous.overlaps(villagers));
+    }
+
+    private static void rememberActiveArea(List<ActiveArea> checked, ServerLevel level, List<Villager> villagers) {
+        if (villagers.isEmpty()) return;
+        checked.add(new ActiveArea(level, villagers.stream().map(v -> v.getUUID().toString()).toList()));
+    }
+
+    private record ActiveArea(ServerLevel level, List<String> residentIds) {
+        private boolean overlaps(List<Villager> villagers) {
+            return villagers.stream().anyMatch(v -> residentIds.contains(v.getUUID().toString()));
+        }
     }
 
     private record CropPlan(net.minecraft.world.item.Item seedItem, Block cropBlock, int available) {

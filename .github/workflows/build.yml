@@ -1,0 +1,85 @@
+name: Build mod
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: living-villages-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Run static project checks
+        run: python3 tools/validate_project.py
+      - name: Build with checksum-pinned Gradle bootstrap
+        run: ./gradlew build
+      - name: Run in-world reservation GameTests
+        run: ./gradlew runGameTestServer
+      - name: Smoke-test dedicated server startup
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p run/server build
+          printf 'eula=true\n' > run/server/eula.txt
+          log_file=build/server-smoke.log
+
+          # Run in a separate process group so timeout cleanup also stops the Java server child.
+          setsid ./gradlew runServer > "$log_file" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill -TERM -- "-$server_pid" 2>/dev/null || true
+            sleep 2
+            kill -KILL -- "-$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          deadline=$((SECONDS + 150))
+          while (( SECONDS < deadline )); do
+            if grep -Eq 'Done \([0-9.]+s\)! For help, type "help"' "$log_file"; then
+              echo "Dedicated server reached the ready state."
+              exit 0
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo "Dedicated server exited before becoming ready."
+              tail -n 200 "$log_file" || true
+              if [ -f run/server/logs/latest.log ]; then tail -n 200 run/server/logs/latest.log; fi
+              exit 1
+            fi
+            sleep 2
+          done
+
+          echo "Dedicated server did not reach the ready state within 150 seconds."
+          tail -n 200 "$log_file" || true
+          if [ -f run/server/logs/latest.log ]; then tail -n 200 run/server/logs/latest.log; fi
+          exit 1
+      - name: Smoke-test client startup with software OpenGL
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0
+          bash tools/smoke_test_client.sh
+      - name: Upload mod JAR
+        uses: actions/upload-artifact@v7
+        with:
+          name: livingvillages-0.15.0
+          path: build/libs/livingvillages-0.15.0.jar
+          if-no-files-found: error

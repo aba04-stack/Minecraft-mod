@@ -3,8 +3,29 @@
 - [x] Food courier selects the hungriest eligible adult first, with deterministic tie-break.
 - [x] POSIX/Windows Gradle bootstrap pins version 9.2.1 and verifies distribution SHA-256.
 - [x] Run `python3 tools/validate_project.py`; this validates source structure but does not resolve Minecraft/NeoForge symbols.
-- [ ] Run `./gradlew build` on a machine with network access to Gradle/Minecraft/NeoForge repositories.
-- [ ] Run `runClient` and manually verify farm project initialization and food courier behavior.
+- [x] `./gradlew build` passed in GitHub Actions on Java 21 with Minecraft 1.21.1 / NeoForge 21.1.264.
+- [x] Active-area safety regression: population query filters dead villagers; farmland/bed scans, house/farm site searches, and guard patrol-point selection skip unloaded chunks.
+- [x] Shared HOME-anchored village-group selector is used by planner, roles, home/farm projects, crafting, industry, food courier and elder population display.
+- [x] Active-area deduplication compares selected villager UUID overlap instead of suppressing areas only by player distance.
+- [x] Persistent storage reservation contract test: claims are saved on worker data, checked for conflicts, and released with a task-kind guard.
+- [x] House, farm, crafting, food courier, logistics, farmer stockpiling, miner/tool and guard storage paths check reservations.
+- [x] Newly discovered source/destination chests are claimed before worker routing.
+- [x] House/farm site searches and project start guard against nearby active build sites, including projects owned by a different resident group.
+- [x] Physical storage selection checks that a chest's nearest HOME-anchored resident group overlaps the requesting village group.
+- [x] Headless client smoke test opens the real elder screen and verifies all seven buttons fit in `427×240`.
+- [ ] Run `runClient` and manually verify button clicks/server responses, farm project initialization and food courier behavior.
+- [ ] In a normal client world, run two neighboring villages with overlapping resource-search radii and check the full gameplay cycle.
+- [ ] In a test world, start a house and farm project from neighboring settlements and verify the actual projects do not overlap; GameTest covers the geometry guard.
+- [x] GitHub Actions GameTests confirm that two HOME groups do not claim each other's chests, beds or workstations.
+- [x] GitHub Actions GameTests confirm that a task cannot reuse a rival chest claim, and that removing/replacing a chest clears stale reservation/ownership.
+- [x] A village ID survives HOME-memory loss and resident relocation in a GameTest.
+- [x] HOME-less villagers keep their saved group when relocated next to another village; verified in GameTest on CI commit `c0f111dd81eea237aa3262c0913c27de42ef8022`.
+- [x] A SavedData round-trip preserves village IDs, HOME aliases, known residents and storage/bed/work-block owners.
+- [x] A legacy SavedData payload without the HOME-alias section promotes its primary anchor into the new alias map.
+- [ ] Run two real resource tasks in a normal world and verify one cannot take from a chest claimed by the other.
+- [ ] Check that cancelling/disabling logistics does not release a house/farm/crafting claim on the same worker.
+- [x] Chest removal/replacement is covered by GameTest; worker death and recovery of an in-flight project remain untested and unimplemented.
+- [ ] In a normal client world, place two nearby villages and confirm elder, population counts, roles and work orders remain independent.
 - [ ] Builder: 96 same-type planks, matching door, red bed; 96 planks remain after crafting door.
 - [ ] Farm: 24 seed items, water bucket, composter, hoe; worker makes each block placement in sequence.
 - [ ] Config toggles: pausing a project does not block unrelated village work when its feature is disabled.
@@ -23,8 +44,9 @@
 - [x] Назначение новых шахтёров/стражников требует инструмента, доступного лично или в местном складе.
 - [x] Добавлена поддержка естественного размножения без ручного создания детей: курьер доставляет настоящую еду, а рождение/рост контролирует ванильная механика.
 - [x] Курьер не начинает рейс без двух взрослых, потенциально свободной подходящей кровати и реального запаса еды сверх резерва.
+- [x] Сканирование грядок/кроватей, поиск площадок дома/фермы и выбор патрульной точки проверяют загрузку чанка до доступа к блокам/heightmap; запросы деревни исключают мёртвых жителей.
 - [x] При сбое возврата контейнера невмещённые реальные предметы выбрасываются рядом с курьером, а не удаляются молча.
-- [ ] Полная Gradle compilation на Java 21 с Minecraft 1.21.1 / NeoForge 21.1.264 (загрузка Gradle доступна через checksum-проверяемый bootstrap).
+- [x] Полная Gradle-компиляция на Java 21 с Minecraft 1.21.1 / NeoForge 21.1.264 подтверждена в GitHub Actions.
 - [ ] Запуск `runClient` и тест поведения на игровом клиенте.
 
 - [x] Добавлен конечный автомат физического ремесленника с фазами сбора входов, работы у верстака и доставки результата.
@@ -57,13 +79,13 @@
 
 ## Текущий статус
 
-Полная компиляция и запуск не завершены в этой среде: Gradle и зависимости Minecraft/NeoForge требуют скачивания. Не распространять как проверенный JAR до выполнения тестов выше.
+Компиляция и старт dedicated server подтверждены GitHub Actions; игровой клиент и функциональные сценарии по чек-листу ещё не проверены. Не считать текущий артефакт релизом для основного мира до выполнения игровых тестов.
 
 - [x] Добавлен строитель, который забирает реальные материалы и возводит хижину по блокам.
 - [x] Материалы и проект строителя сохраняются в persistent data жителя.
 - [x] Строитель проверяет досягаемость, прямую видимость, загруженность чанка и `mobGriefing`.
 - [x] Параллельная физическая работа ремесленника приостанавливается на время стройки.
-- [ ] Полная Gradle compile с Minecraft/NeoForge dependency classpath.
+- [x] Полная Gradle-компиляция с Minecraft/NeoForge dependency classpath — успешно на GitHub Actions.
 - [ ] Тест `runClient`: наблюдать подход к складу, сбор 96 досок + двери + кровати, постановку блоков/двух частей двери и сохранение проекта после перезахода.
 - [ ] Тест `runClient`: ферма строится по одному действию; при исчезновении ресурса проект ждёт, не создаёт предметы и не перезаписывает блоки игрока.
 - [ ] Тест отключения ролей: отключение шахтёра, защитника, ремесленника или строителя должно освобождать роль/маршрут без зависшего `WALK_TARGET`.
@@ -88,4 +110,4 @@
 - [ ] Проверить обычный ПКМ пустой рукой, Shift+ПКМ и ПКМ с предметом в руке.
 - [ ] Нажать все кнопки, проверить ответ сервера, появление/отмену запросов и изменение приоритетов.
 - [ ] Убедиться, что после перезахода староста и его состояние остаются согласованными, а повторного старосты не появляется.
-- [ ] Пройти отдельный тест на dedicated server, где клиентские классы не загружаются на серверной стороне.
+- [x] Smoke-test dedicated server: сервер стартует с модом и достигает состояния готовности без загрузки GUI-клиента.

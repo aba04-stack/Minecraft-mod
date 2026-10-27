@@ -58,18 +58,14 @@ public final class VillageIndustry {
             || !LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()) return;
 
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
+        List<Villager> villagers = VillageArea.findVillagers(level, center);
         if (villagers.isEmpty()) return;
-        if (VillageFarmBuilder.hasActiveProjectNear(level, center)
-            || VillageBuilder.hasActiveProjectNear(level, center)) return;
-        // A physical work order reserves stock while ingredients are being carried to the bench.
-        // Pause this planner until the order is complete, so no other recipe spends the same inputs.
-        if (LivingVillagesConfig.ENABLE_PHYSICAL_CRAFTING.get()
-            && villagers.stream().anyMatch(v -> v.getPersistentData().getBoolean(VillageCraftingJobs.ACTIVE_KEY))) return;
 
         List<StorageRef> storages = findStorages(level, center, radius);
         if (storages.isEmpty()) {
+            // If physical chests exist but are reserved by active projects, do not mistake them
+            // for a brand-new settlement and attempt duplicate storage bootstrap from inventory.
+            if (hasStorageBlock(level, center, radius)) return;
             // Bootstrap is itself a real recipe: two matching logs -> eight planks -> one chest.
             // All ingredients must be in a villager's own inventory; nothing is created for free.
             bootstrapStorage(level, center, villagers);
@@ -219,9 +215,7 @@ public final class VillageIndustry {
                 if (predicate.test(stack)) total += stack.getCount();
             }
         }
-        AABB area = new AABB(center).inflate(LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get(), 12.0D,
-            LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
-        for (Villager villager : level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)) {
+        for (Villager villager : VillageArea.findVillagers(level, center)) {
             // A tool in an unrelated worker's pockets is not a village-wide tool supply.
             if (!workerCanUseTool.test(villager)) continue;
             if (predicate.test(villager.getMainHandItem())) total += villager.getMainHandItem().getCount();
@@ -530,9 +524,8 @@ public final class VillageIndustry {
     }
 
     private static boolean hasWorkerNearStorage(ServerLevel level, BlockPos center, List<StorageRef> storages) {
-        AABB area = new AABB(center).inflate(LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get(), 12.0D,
-            LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, v -> v.isAlive() && !v.isBaby());
+        List<Villager> villagers = VillageArea.findVillagers(level, center).stream()
+            .filter(v -> !v.isBaby()).toList();
         for (StorageRef storage : storages) if (hasWorkerNear(villagers, storage.pos(), 5.0D)) return true;
         return false;
     }
@@ -574,7 +567,11 @@ public final class VillageIndustry {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -8; dy <= 8; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !level.getBlockState(pos).is(block)) continue;
+                    if (!level.hasChunkAt(pos)) continue;
+                    net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
+                    if (!state.is(block)) continue;
+                    if (VillageRegistry.isWorkBlockState(state)
+                        && !VillageRegistry.isWorkBlockForVillage(level, center, pos)) continue;
                     double distance = pos.distSqr(center);
                     if (distance < bestDistance) { bestDistance = distance; best = pos.immutable(); }
                 }
@@ -589,12 +586,30 @@ public final class VillageIndustry {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (level.hasChunkAt(pos) && level.getBlockState(pos).is(block)) found.add(pos.immutable());
+                    if (!level.hasChunkAt(pos)) continue;
+                    net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
+                    if (!state.is(block)) continue;
+                    if (VillageRegistry.isWorkBlockState(state)
+                        && !VillageRegistry.isWorkBlockForVillage(level, center, pos)) continue;
+                    found.add(pos.immutable());
                 }
             }
         }
         found.sort(Comparator.comparingDouble(pos -> pos.distSqr(center)));
         return found;
+    }
+
+    private static boolean hasStorageBlock(ServerLevel level, BlockPos center, int radius) {
+        int scanRadius = Math.min(radius, 24);
+        for (int dx = -scanRadius; dx <= scanRadius; dx++) {
+            for (int dz = -scanRadius; dz <= scanRadius; dz++) {
+                for (int dy = -4; dy <= 4; dy++) {
+                    BlockPos pos = center.offset(dx, dy, dz);
+                    if (level.hasChunkAt(pos) && isStorage(level.getBlockState(pos))) return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static List<StorageRef> findStorages(ServerLevel level, BlockPos center, int radius) {
@@ -604,7 +619,9 @@ public final class VillageIndustry {
             for (int dz = -scanRadius; dz <= scanRadius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, center, pos)
+                        || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
                     BlockEntity entity = level.getBlockEntity(pos);
                     if (entity instanceof Container container) refs.add(new StorageRef(pos.immutable(), container));
                 }

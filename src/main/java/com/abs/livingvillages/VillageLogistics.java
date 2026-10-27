@@ -88,6 +88,10 @@ public final class VillageLogistics {
             return;
         }
 
+        if (!VillageReservations.tryReserveStoragePositions(level, villager, List.of(target.storage()), "logistics_delivery")) {
+            data.putLong(NEXT_SCAN, level.getGameTime() + SEARCH_RETRY_TICKS);
+            return;
+        }
         data.putBoolean(ACTIVE, true);
         data.putInt(CHEST_X, target.storage().getX()); data.putInt(CHEST_Y, target.storage().getY()); data.putInt(CHEST_Z, target.storage().getZ());
         data.putInt(STAND_X, target.stand().getX()); data.putInt(STAND_Y, target.stand().getY()); data.putInt(STAND_Z, target.stand().getZ());
@@ -105,7 +109,11 @@ public final class VillageLogistics {
         }
         BlockPos storagePos = new BlockPos(data.getInt(CHEST_X), data.getInt(CHEST_Y), data.getInt(CHEST_Z));
         BlockPos standPos = new BlockPos(data.getInt(STAND_X), data.getInt(STAND_Y), data.getInt(STAND_Z));
+        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
+        if (ownershipCenter == null) ownershipCenter = villager.blockPosition();
         if (!level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
+            || !VillageRegistry.isStorageForVillage(level, ownershipCenter, storagePos)
+            || !VillageReservations.isStorageAvailable(level, storagePos, villager)
             || !(level.getBlockEntity(storagePos) instanceof Container container)) {
             cancelTrip(villager, data);
             data.putLong(NEXT_SCAN, now + SEARCH_RETRY_TICKS);
@@ -145,12 +153,16 @@ public final class VillageLogistics {
     private static StorageTarget findNearestStorageWithRoom(Villager villager, ServerLevel level) {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
+        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
+        if (ownershipCenter == null) ownershipCenter = origin;
         List<BlockPos> storagePositions = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
+                        || !VillageReservations.isStorageAvailable(level, pos, villager)) continue;
                     if (!(level.getBlockEntity(pos) instanceof Container container) || !hasAnySpace(villager, container)) continue;
                     storagePositions.add(pos.immutable());
                 }
@@ -276,6 +288,7 @@ public final class VillageLogistics {
     }
 
     private static void cancelTrip(Villager villager, CompoundTag data) {
+        VillageReservations.release(data, "logistics_delivery");
         if (data.getBoolean(ACTIVE)) {
             BlockPos ownStand = new BlockPos(data.getInt(STAND_X), data.getInt(STAND_Y), data.getInt(STAND_Z));
             villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {

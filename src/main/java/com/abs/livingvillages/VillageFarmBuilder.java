@@ -84,13 +84,17 @@ public final class VillageFarmBuilder {
         return villager.getPersistentData().getBoolean(ACTIVE_KEY);
     }
 
+    /** Returns the active farm blueprint's lower corner, or null when this resident owns no farm project. */
+    public static BlockPos activeProjectSite(Villager villager) {
+        CompoundTag data = villager.getPersistentData();
+        if (!data.getBoolean(ACTIVE_KEY)) return null;
+        return new BlockPos(data.getInt(SITE_X), data.getInt(SITE_Y), data.getInt(SITE_Z));
+    }
+
     public static boolean hasActiveProjectNear(ServerLevel level, BlockPos center) {
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) return false;
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return !level.getEntitiesOfClass(Villager.class, area,
-            v -> v.isAlive() && isProjectActive(v)).isEmpty();
+        return VillageArea.findVillagers(level, center).stream().anyMatch(VillageFarmBuilder::isProjectActive);
     }
 
     public static boolean hasHoe(List<Container> containers) {
@@ -121,24 +125,36 @@ public final class VillageFarmBuilder {
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
-            || !isSupportedCrop(seedItem, cropBlock)) return false;
+            || !isSupportedCrop(seedItem, cropBlock)
+            || !VillageReservations.isProjectSiteAvailable(level, site, 8, null)) return false;
 
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        List<Villager> candidates = level.getEntitiesOfClass(Villager.class, area, v -> v.isAlive()
+        List<Villager> candidates = new ArrayList<>(VillageArea.findVillagers(level, center).stream().filter(v -> v.isAlive()
             && VillagerRoles.isUnemployedAdult(v) && !v.isSleeping()
             && v.getPersistentData().getString(VillagerRoles.ROLE_KEY).isEmpty()
             && !hasOtherTask(v.getPersistentData())
-            && !v.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET));
+            && !v.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)).toList());
         candidates.sort(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))));
-        List<Container> storages = findStorages(level, center);
-        Item hoeItem = firstHoeInStorage(storages);
-        if (hoeItem == Items.AIR) return false;
+        Villager worker = null;
+        Item hoeItem = Items.AIR;
+        BlockPos storageOrigin = null;
+        for (Villager candidate : candidates) {
+            BlockPos candidateOrigin = VillagerRoles.getHome(candidate);
+            if (candidateOrigin == null) candidateOrigin = candidate.blockPosition();
+            List<Container> candidateStorages = findStorages(level, candidateOrigin, null);
+            Item candidateHoe = firstHoeInStorage(candidateStorages);
+            if (candidateHoe == Items.AIR || !canFitRequiredItems(candidate.getInventory(), seedItem, candidateHoe)) continue;
 
-        Villager worker = candidates.stream()
-            .filter(v -> canFitRequiredItems(v.getInventory(), seedItem, hoeItem))
-            .findFirst().orElse(null);
-        if (worker == null) return false;
+            java.util.Map<Item, Integer> materialBill = java.util.Map.of(
+                seedItem, CROP_COUNT, Items.WATER_BUCKET, 1, Items.COMPOSTER, 1, candidateHoe, 1);
+            if (!VillageReservations.reserveStoragesForItems(level, candidateOrigin, candidate, "farm",
+                materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) continue;
+
+            worker = candidate;
+            hoeItem = candidateHoe;
+            storageOrigin = candidateOrigin;
+            break;
+        }
+        if (worker == null || hoeItem == Items.AIR || storageOrigin == null) return false;
 
         CompoundTag data = worker.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
@@ -204,6 +220,7 @@ public final class VillageFarmBuilder {
         if (data.getBoolean(ROUTE_ACTIVE) && data.getInt(ROUTE_KIND) == ROUTE_TO_STORAGE) {
             BlockPos storagePos = routeStorage(data);
             if (!level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
+                || !VillageReservations.isStorageAvailable(level, storagePos, worker)
                 || !(level.getBlockEntity(storagePos) instanceof Container storage)) {
                 clearOwnedRoute(worker, data);
                 data.putLong(NEXT_ACTION, now + RETRY_TICKS);
@@ -248,6 +265,7 @@ public final class VillageFarmBuilder {
             BlockPos storagePos = routeStorage(data);
             Item hoeItem = parseItem(data.getString(ROUTE_ITEM));
             if (!level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
+                || !VillageReservations.isStorageAvailable(level, storagePos, worker)
                 || !(level.getBlockEntity(storagePos) instanceof Container storage) || !isHoeItem(hoeItem)) {
                 clearOwnedRoute(worker, data);
                 data.putLong(NEXT_ACTION, now + RETRY_TICKS);
@@ -268,7 +286,7 @@ public final class VillageFarmBuilder {
             return;
         }
 
-        List<Container> storages = findStorages(level, VillagerRoles.getHome(worker) == null ? worker.blockPosition() : VillagerRoles.getHome(worker));
+        List<Container> storages = findStorages(level, VillagerRoles.getHome(worker) == null ? worker.blockPosition() : VillagerRoles.getHome(worker), worker);
         for (Container storage : storages) {
             Item candidate = firstHoeInContainer(storage);
             if (candidate == Items.AIR) continue;
@@ -399,6 +417,7 @@ public final class VillageFarmBuilder {
         if (data.getBoolean(ROUTE_ACTIVE) && data.getInt(ROUTE_KIND) == ROUTE_TO_OUTPUT) {
             BlockPos storagePos = routeStorage(data);
             if (!level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
+                || !VillageReservations.isStorageAvailable(level, storagePos, worker)
                 || !(level.getBlockEntity(storagePos) instanceof Container storage)) {
                 clearOwnedRoute(worker, data);
                 data.putLong(NEXT_ACTION, now + RETRY_TICKS);
@@ -555,6 +574,7 @@ public final class VillageFarmBuilder {
 
     private static void clearProject(Villager worker, CompoundTag data) {
         clearOwnedRoute(worker, data);
+        VillageReservations.release(data, "farm");
         data.putBoolean(ACTIVE_KEY, false);
         data.remove(PHASE); data.remove(SEED_ITEM); data.remove(CROP_BLOCK);
         data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);
@@ -590,14 +610,16 @@ public final class VillageFarmBuilder {
             && level.getBlockState(pos.below()).blocksMotion();
     }
 
-    private static List<Container> findStorages(ServerLevel level, BlockPos center) {
+    private static List<Container> findStorages(ServerLevel level, BlockPos center, Villager owner) {
         List<Container> found = new ArrayList<>();
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -6; dy <= 6; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, center, pos)
+                        || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
                     if (level.getBlockEntity(pos) instanceof Container container) found.add(container);
                 }
             }
@@ -608,35 +630,47 @@ public final class VillageFarmBuilder {
     private static StorageTarget findNearestStorageWithItem(Villager worker, ServerLevel level, Item item) {
         BlockPos origin = VillagerRoles.getHome(worker) == null ? worker.blockPosition() : VillagerRoles.getHome(worker);
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
-        List<StorageRef> refs = findStorageRefs(level, origin, radius);
-        return refs.stream().filter(ref -> countItem(ref.container(), item) > 0)
-            .sorted(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))))
-            .map(ref -> makeTarget(level, worker, ref.pos())).filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        List<StorageRef> refs = findStorageRefs(level, origin, radius, worker);
+        refs.sort(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
+        for (StorageRef ref : refs) {
+            if (countItem(ref.container(), item) <= 0) continue;
+            StorageTarget target = makeTarget(level, worker, ref.pos());
+            if (target != null && VillageReservations.tryAddStorageReservation(level, worker, ref.pos(), "farm")) return target;
+        }
+        return null;
     }
 
     private static StorageTarget findNearestStorageWithRoom(Villager worker, ServerLevel level, ItemStack offered) {
         BlockPos origin = VillagerRoles.getHome(worker) == null ? worker.blockPosition() : VillagerRoles.getHome(worker);
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
-        return findStorageRefs(level, origin, radius).stream()
-            .filter(ref -> canInsert(ref.container(), offered))
-            .sorted(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))))
-            .map(ref -> makeTarget(level, worker, ref.pos())).filter(java.util.Objects::nonNull).findFirst().orElse(null);
-    }
-
-    private static StorageTarget findTargetForContainer(Villager worker, ServerLevel level, Container container, Item item) {
-        for (StorageRef ref : findStorageRefs(level, worker.blockPosition(), LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) {
-            if (ref.container() == container && countItem(container, item) > 0) return makeTarget(level, worker, ref.pos());
+        List<StorageRef> refs = findStorageRefs(level, origin, radius, worker);
+        refs.sort(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
+        for (StorageRef ref : refs) {
+            if (!canInsert(ref.container(), offered)) continue;
+            StorageTarget target = makeTarget(level, worker, ref.pos());
+            if (target != null && VillageReservations.tryAddStorageReservation(level, worker, ref.pos(), "farm")) return target;
         }
         return null;
     }
 
-    private static List<StorageRef> findStorageRefs(ServerLevel level, BlockPos center, int radius) {
+    private static StorageTarget findTargetForContainer(Villager worker, ServerLevel level, Container container, Item item) {
+        for (StorageRef ref : findStorageRefs(level, worker.blockPosition(), LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get(), worker)) {
+            if (ref.container() != container || countItem(container, item) <= 0) continue;
+            StorageTarget target = makeTarget(level, worker, ref.pos());
+            if (target != null && VillageReservations.tryAddStorageReservation(level, worker, ref.pos(), "farm")) return target;
+        }
+        return null;
+    }
+
+    private static List<StorageRef> findStorageRefs(ServerLevel level, BlockPos center, int radius, Villager owner) {
         List<StorageRef> found = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -6; dy <= 6; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, center, pos)
+                        || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
                     if (level.getBlockEntity(pos) instanceof Container container) found.add(new StorageRef(pos.immutable(), container));
                 }
             }
