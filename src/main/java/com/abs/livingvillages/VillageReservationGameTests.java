@@ -237,6 +237,53 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 40, batch = "village_identity_recovery")
+    public static void villageIdentitySurvivesHomeAnchorLossAndRelocation(GameTestHelper helper) {
+        for (int x = 0; x <= 30; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos storage = helper.absolutePos(new BlockPos(5, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+
+        Villager first = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager second = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        first.setNoAi(true);
+        second.setNoAi(true);
+        first.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeA));
+        second.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeB));
+
+        BlockPos originalCenter = helper.absolutePos(new BlockPos(2, 1, 1));
+        java.util.UUID originalId = VillageRegistry.villageId(helper.getLevel(), originalCenter);
+        helper.assertTrue(originalId != null,
+            "The initial resident group must receive a persistent village identity.");
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), originalCenter, storage),
+            "The original storage must be owned before the residents move.");
+
+        // Wait one tick so the per-tick identity query cache cannot hide a real identity change.
+        helper.runAfterDelay(1, () -> {
+            first.getBrain().eraseMemory(MemoryModuleType.HOME);
+            second.getBrain().eraseMemory(MemoryModuleType.HOME);
+            BlockPos movedFirst = helper.absolutePos(new BlockPos(25, 1, 1));
+            BlockPos movedSecond = helper.absolutePos(new BlockPos(27, 1, 1));
+            first.setPos(movedFirst.getX() + 0.5D, movedFirst.getY(), movedFirst.getZ() + 0.5D);
+            second.setPos(movedSecond.getX() + 0.5D, movedSecond.getY(), movedSecond.getZ() + 0.5D);
+
+            BlockPos movedCenter = helper.absolutePos(new BlockPos(26, 1, 1));
+            java.util.UUID recoveredId = VillageRegistry.villageId(helper.getLevel(), movedCenter);
+            helper.assertTrue(originalId.equals(recoveredId),
+                "Resident UUID overlap must preserve the village identity when HOME anchors disappear and residents relocate.");
+            helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), movedCenter, storage),
+                "A previously registered chest must remain owned by the same village after relocation.");
+            helper.succeed();
+        });
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {

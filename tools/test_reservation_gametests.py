@@ -40,6 +40,10 @@ for marker in (
     "The first village must not use the second village's workshop.",
     "Removing a chest must also clear its persisted village-ownership claim.",
     "A claim must be released when its owning task ends.",
+    '@GameTest(template = "empty", timeoutTicks = 40, batch = "village_identity_recovery")',
+    "villageIdentitySurvivesHomeAnchorLossAndRelocation",
+    "Resident UUID overlap must preserve the village identity when HOME anchors disappear and residents relocate.",
+    "A previously registered chest must remain owned by the same village after relocation.",
     "A removed container must not retain its reservation.",
 ):
     assert marker in SOURCE, f"GameTest source is missing {marker}"
