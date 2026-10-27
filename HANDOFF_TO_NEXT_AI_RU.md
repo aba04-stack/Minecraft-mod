@@ -27,16 +27,16 @@
 
 ## Важные оговорки
 
-- Последний проверенный JAR опубликован GitHub Actions: [артефакт `livingvillages-0.15.0`](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40558085625/artifacts/12758616292). Он соответствует commit `6325d2ff9aff69ad163303b0cb8ec6216986654e`; после последующих изменений кода всегда выбирай артефакт соответствующего CI.
+- Последний проверенный JAR опубликован GitHub Actions: [артефакт `livingvillages-0.15.0`](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119/artifacts/12761080201). Он соответствует commit `c0f111dd81eea237aa3262c0913c27de42ef8022`; после последующих изменений кода всегда выбирай артефакт соответствующего CI.
 - `gradlew`/`gradlew.bat` в текущем проекте — checksum-проверяемый bootstrap, который загружает официальный Gradle 9.2.1 при наличии сети; это не стандартный wrapper с `gradle-wrapper.jar`. Для первой настоящей проверки необходимо интернет-соединение к `services.gradle.org` и репозиториям Gradle/Minecraft/NeoForge.
-- Полная CI-проверка для commit `6325d2ff9aff69ad163303b0cb8ec6216986654e` прошла: статические проверки, Gradle build, десять GameTests, запуск dedicated server, headless client smoke-test и загрузка JAR — [результат](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40558085625). Десять тестов включают миграцию legacy-реестра и сохранение HOME-less группы рядом с соседним поселением; они не заменяют обычный игровой мир.
+- Полная CI-проверка для commit `c0f111dd81eea237aa3262c0913c27de42ef8022` прошла: статические проверки, Gradle build, десять GameTests, запуск dedicated server, headless client screen-layout smoke-test и загрузка JAR — [результат](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119). Экран старосты создаётся и все семь кнопок помещаются в окно `427×240`; тест не симулирует нажатия или ответы сервера.
 - Некоторые заявленные механики могли быть проверены только статическими тестами. Проведи честный аудит реального кода и не считай README доказательством работоспособности.
 
 ## Приоритеты следующей работы
 
 ### P0 — игровая проверка уже собираемой версии
-1. Последняя полная проверка кода — commit `6325d2ff9aff69ad163303b0cb8ec6216986654e`: статические проверки, `./gradlew build`, десять внутриигровых GameTests, запуск dedicated server, headless client smoke-test до инициализации ресурсов и загрузка JAR прошли успешно. [CI](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40558085625).
-2. Обычный headless `runClient` теперь проходит до инициализации ресурсов под Xvfb, но это не тест интерактивного UI. Следующий шаг — открыть/закрыть экран старосты, проверить server-side actions и взаимодействие клиента с dedicated server.
+1. Последняя полная проверка кода — commit `c0f111dd81eea237aa3262c0913c27de42ef8022`: статические проверки, `./gradlew build`, десять внутриигровых GameTests, запуск dedicated server, реальная инициализация экрана старосты с проверкой границ семи кнопок и загрузка JAR прошли успешно. [CI](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119).
+2. Headless `runClient` под Xvfb теперь автоматически создаёт настоящий экран старосты и проверяет, что семь кнопок помещаются в viewport. Следующий шаг — проверить в обычном мире нажатия кнопок, server-side actions, ответы клиента и взаимодействие с dedicated server.
 3. Собрать два близких поселения в тестовом мире и проверить поведение жителей, заказов и интерфейса. Статические тесты не заменяют эту проверку.
 
 ### P1 — довести изоляцию поселений и общую экономику

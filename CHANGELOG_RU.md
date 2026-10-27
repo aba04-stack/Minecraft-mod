@@ -1,11 +1,18 @@
 # История изменений Living Villages
 
+## Компактная панель старосты и проверка UI в CI — 27 октября 2026
+- Headless smoke-test теперь открывает реальный `ElderScreen`, а не просто ждёт инициализации ресурсов.
+- Проверяются наличие семи кнопок и границы панели/кнопок; тест обнаружил, что прежняя панель не помещалась в логическое окно `427×240`.
+- Высота панели сокращена до 220 px, текст и кнопки сдвинуты вверх; повторная проверка подтвердила, что все семь кнопок помещаются в окно.
+- Полный CI с десятью GameTests, Gradle build, запуском dedicated server, headless UI-layout smoke-test и публикацией JAR прошёл успешно.
+- [Результат CI](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119) · [Проверенный JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119/artifacts/12761080201).
+
 ## Последняя проверка и исправление HOME-less групп — 27 октября 2026
 - Воспроизведён и исправлен баг: после потери HOME и переезда рядом с другой деревней жители без HOME могли присоединиться к чужой группе.
 - `VillageArea` восстанавливает принадлежность HOME-less жителей по сохранённой истории UUID; `VillageRegistry` проверяет историю жителей раньше пространственного совпадения с чужим HOME-якорем.
 - Добавлен внутриигровой GameTest на переезд HOME-less жителей рядом с соседним поселением.
-- Все десять Minecraft GameTests, статические проверки, Gradle build, dedicated-server startup и headless client startup прошли в CI.
-- [Результат CI](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40558085625) · [Проверенный JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40558085625/artifacts/12758616292).
+- Все десять Minecraft GameTests, статические проверки, Gradle build, dedicated-server startup и headless client layout test прошли в CI.
+- [Результат CI](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119) · [Проверенный JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119/artifacts/12761080201).
 
 ## 0.15.0 — основа старосты и исправления логики
 - Добавлена роль старосты поверх обычного жителя: сохраняются ванильная профессия, торговля и уровень.

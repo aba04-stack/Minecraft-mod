@@ -12,13 +12,14 @@
 - [x] Newly discovered source/destination chests are claimed before worker routing.
 - [x] House/farm site searches and project start guard against nearby active build sites, including projects owned by a different resident group.
 - [x] Physical storage selection checks that a chest's nearest HOME-anchored resident group overlaps the requesting village group.
-- [ ] Run `runClient` and manually verify farm project initialization, food courier behavior and the elder panel.
+- [x] Headless client smoke test opens the real elder screen and verifies all seven buttons fit in `427×240`.
+- [ ] Run `runClient` and manually verify button clicks/server responses, farm project initialization and food courier behavior.
 - [ ] In a normal client world, run two neighboring villages with overlapping resource-search radii and check the full gameplay cycle.
 - [ ] In a test world, start a house and farm project from neighboring settlements and verify the actual projects do not overlap; GameTest covers the geometry guard.
 - [x] GitHub Actions GameTests confirm that two HOME groups do not claim each other's chests, beds or workstations.
 - [x] GitHub Actions GameTests confirm that a task cannot reuse a rival chest claim, and that removing/replacing a chest clears stale reservation/ownership.
 - [x] A village ID survives HOME-memory loss and resident relocation in a GameTest.
-- [x] HOME-less villagers keep their saved group when relocated next to another village; verified in GameTest on CI commit `6325d2ff9aff69ad163303b0cb8ec6216986654e`.
+- [x] HOME-less villagers keep their saved group when relocated next to another village; verified in GameTest on CI commit `c0f111dd81eea237aa3262c0913c27de42ef8022`.
 - [x] A SavedData round-trip preserves village IDs, HOME aliases, known residents and storage/bed/work-block owners.
 - [x] A legacy SavedData payload without the HOME-alias section promotes its primary anchor into the new alias map.
 - [ ] Run two real resource tasks in a normal world and verify one cannot take from a chest claimed by the other.
