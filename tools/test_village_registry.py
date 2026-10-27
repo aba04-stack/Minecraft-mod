@@ -81,4 +81,14 @@ assert "VillageRegistry.isBedForVillage(level, center, pos)" in elder
 reservations = (JAVA / "VillageReservations.java").read_text(encoding="utf-8")
 assert "VillageRegistry.isStorageForVillage(level, center, pos)" in reservations
 assert "VillageRegistry.isStorageForVillage(level, groupCenter, storage)" in reservations
-print("VILLAGE REGISTRY CONTRACT PASSED: saved identity, serialized asset owners, and main resource scans")
+
+for filename, marker in {
+    "VillagerMining.java": "VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)",
+    "VillagerTreeWork.java": "VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)",
+    "VillageDefense.java": "VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)",
+    "VillagerAutonomy.java": "VillageRegistry.isStorageForVillage(level, ownershipCenter, chestPos)",
+    "VillageLogistics.java": "VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)",
+}.items():
+    source = (JAVA / filename).read_text(encoding="utf-8")
+    assert marker in source, f"{filename} must verify persistent village ownership before using storage"
+print("VILLAGE REGISTRY CONTRACT PASSED: saved identity, serialized asset owners, and all audited storage consumers")

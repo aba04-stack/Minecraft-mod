@@ -159,8 +159,11 @@ public final class VillagerAutonomy {
             return;
         }
 
+        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
+        if (ownershipCenter == null) ownershipCenter = villager.blockPosition();
         if (!level.hasChunkAt(chestPos)
             || !isStorageBlock(level.getBlockState(chestPos))
+            || !VillageRegistry.isStorageForVillage(level, ownershipCenter, chestPos)
             || !VillageReservations.isStorageAvailable(level, chestPos, villager)
             || !(level.getBlockEntity(chestPos) instanceof Container container)) {
             cancelTrip(villager, data);
@@ -198,6 +201,8 @@ public final class VillagerAutonomy {
     private static StorageTarget findNearestStorage(Villager villager, ServerLevel level) {
         int radius = Math.min(12, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
+        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
+        if (ownershipCenter == null) ownershipCenter = origin;
         StorageTarget best = null;
         double bestDistance = Double.MAX_VALUE;
 
@@ -206,6 +211,7 @@ public final class VillagerAutonomy {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos chestPos = origin.offset(dx, dy, dz);
                     if (!level.hasChunkAt(chestPos) || !isStorageBlock(level.getBlockState(chestPos))
+                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, chestPos)
                         || !VillageReservations.isStorageAvailable(level, chestPos, villager)) {
                         continue;
                     }

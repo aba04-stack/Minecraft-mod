@@ -434,11 +434,14 @@ public final class VillagerTreeWork {
         if (!held.isEmpty()) return ItemStack.EMPTY;
         int radius = Math.min(12, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
+        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
+        if (ownershipCenter == null) ownershipCenter = origin;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = origin.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos) || !isStorageBlock(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
                         || !VillageReservations.isStorageAvailable(level, pos, villager)
                         || !(level.getBlockEntity(pos) instanceof Container container)) continue;
                     for (int slot = 0; slot < container.getContainerSize(); slot++) {
@@ -679,7 +682,10 @@ public final class VillagerTreeWork {
             data.putInt(REPLANT_FETCH_Z, storagePos.getZ());
         }
 
+        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
+        if (ownershipCenter == null) ownershipCenter = villager.blockPosition();
         if (!level.hasChunkAt(storagePos) || !isStorageBlock(level.getBlockState(storagePos))
+            || !VillageRegistry.isStorageForVillage(level, ownershipCenter, storagePos)
             || !VillageReservations.isStorageAvailable(level, storagePos, villager)
             || !(level.getBlockEntity(storagePos) instanceof Container container)) {
             clearSaplingFetch(data);
@@ -716,6 +722,8 @@ public final class VillagerTreeWork {
 
     private static BlockPos findStorageWithSapling(Villager villager, ServerLevel level, BlockPos source, Block preferred, boolean allowAnySpecies) {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
+        if (ownershipCenter == null) ownershipCenter = villager.blockPosition();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (int dx = -radius; dx <= radius; dx++) {
@@ -723,6 +731,7 @@ public final class VillagerTreeWork {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = source.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos) || !isStorageBlock(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
                         || !VillageReservations.isStorageAvailable(level, pos, villager)) continue;
                     if (!(level.getBlockEntity(pos) instanceof Container container)
                         || findSaplingSlot(container, preferred, allowAnySpecies) < 0) continue;
