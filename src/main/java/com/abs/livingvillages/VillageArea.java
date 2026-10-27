@@ -9,7 +9,10 @@ import net.minecraft.world.phys.AABB;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * Shared best-effort boundary for currently loaded village residents.
@@ -54,13 +57,29 @@ public final class VillageArea {
 
         List<List<Resident>> clusters = connectedComponents(withHome, true, HOME_CLUSTER_LINK_BLOCKS);
         List<Resident> unattached = new ArrayList<>();
+        Map<UUID, List<Resident>> historicalResidents = new LinkedHashMap<>();
 
-        // A resident without a HOME memory may still be an ordinary member of a nearby group.
-        // Attach them to one nearest cluster only; never let them bridge two home clusters.
+        // Preserve known membership when a villager has lost HOME. This is stronger than
+        // proximity: a relocated villager must not be annexed merely because another village's
+        // HOME anchor is now closer. If its old group's HOME cluster is present, reattach there;
+        // otherwise keep known members together as a separate fallback cluster.
         for (Resident resident : withoutHome) {
+            BlockPos position = resident.villager().blockPosition();
+            UUID knownVillage = VillageRegistry.knownVillageIdForResident(level, resident.villager().getUUID());
+            if (knownVillage != null) {
+                int knownCluster = nearestClusterForVillage(level, clusters, knownVillage, position);
+                if (knownCluster >= 0) {
+                    clusters.get(knownCluster).add(resident);
+                } else {
+                    historicalResidents.computeIfAbsent(knownVillage, ignored -> new ArrayList<>()).add(resident);
+                }
+                continue;
+            }
+
+            // An unregistered or historically ambiguous resident may still belong to a nearby group.
+            // Attach them to one nearest cluster only; never let one wandering resident bridge clusters.
             int nearestCluster = -1;
             long nearestDistance = Long.MAX_VALUE;
-            BlockPos position = resident.villager().blockPosition();
             for (int clusterIndex = 0; clusterIndex < clusters.size(); clusterIndex++) {
                 long clusterDistance = Long.MAX_VALUE;
                 for (Resident member : clusters.get(clusterIndex)) {
@@ -84,6 +103,9 @@ public final class VillageArea {
             }
         }
 
+        for (List<Resident> residentsWithKnownIdentity : historicalResidents.values()) {
+            clusters.addAll(connectedComponents(residentsWithKnownIdentity, false, FALLBACK_CLUSTER_LINK_BLOCKS));
+        }
         clusters.addAll(connectedComponents(unattached, false, FALLBACK_CLUSTER_LINK_BLOCKS));
         if (clusters.isEmpty()) {
             // Defensive fallback for unusual API state: never lose alive candidates.
@@ -130,6 +152,35 @@ public final class VillageArea {
     private static int storageGroupLookupRadius() {
         return Math.min(128, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()
             + LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get() + 32);
+    }
+
+    private static int nearestClusterForVillage(ServerLevel level, List<List<Resident>> clusters,
+                                                 UUID villageId, BlockPos residentPosition) {
+        int selected = -1;
+        long bestDistance = Long.MAX_VALUE;
+        long attachLimit = (long) HOME_CLUSTER_LINK_BLOCKS * HOME_CLUSTER_LINK_BLOCKS;
+        for (int i = 0; i < clusters.size(); i++) {
+            List<Resident> cluster = clusters.get(i);
+            boolean matchingIdentity = false;
+            long distance = Long.MAX_VALUE;
+            for (Resident member : cluster) {
+                if (member.homePosition() != null
+                    && villageId.equals(VillageRegistry.knownVillageIdForHomeAnchor(level, member.homePosition()))) {
+                    matchingIdentity = true;
+                }
+                distance = Math.min(distance,
+                    horizontalDistanceSquared(residentPosition, member.villager().blockPosition()));
+                if (member.homePosition() != null) {
+                    distance = Math.min(distance,
+                        horizontalDistanceSquared(residentPosition, member.homePosition()));
+                }
+            }
+            if (matchingIdentity && distance < bestDistance) {
+                selected = i;
+                bestDistance = distance;
+            }
+        }
+        return bestDistance <= attachLimit ? selected : -1;
     }
 
     private static List<List<Resident>> connectedComponents(List<Resident> source,

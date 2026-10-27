@@ -29,6 +29,10 @@ for marker in (
     "bedOwners",
     "workBlockOwners",
     "public static UUID villageId(ServerLevel level, BlockPos center)",
+    "knownVillageIdForResident",
+    "knownVillageIdForHomeAnchor",
+    "if (!homes.isEmpty())",
+    "if (bestId == null && homes.isEmpty() && registry.knownResidents.isEmpty())",
     "resolveOrCreateId(level, center, residents)",
     "home.dimension().equals(level.dimension())",
     "ID_MATCH_RADIUS_SQUARED",
@@ -52,6 +56,7 @@ for marker in (
 ):
     assert marker in registry, f"persistent registry missing {marker}"
 
+assert registry.index("if (!homes.isEmpty())") < registry.index("if (bestId == null) {"), "HOME-less groups must reach UUID-overlap matching before spatial fallback"
 assert "int minimumOverlap = currentResidentIds.isEmpty()" in registry
 assert "? Integer.MAX_VALUE : currentResidentIds.size() / 2 + 1;" in registry
 assert "public static boolean isStorageForVillage(" in registry

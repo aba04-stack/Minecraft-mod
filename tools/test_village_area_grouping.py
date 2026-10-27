@@ -15,6 +15,9 @@ assert "home.dimension().equals(level.dimension())" in area, "HOME anchors must 
 assert "HOME_CLUSTER_LINK_BLOCKS = 20" in area, "home-based groups need a bounded link distance"
 assert "FALLBACK_CLUSTER_LINK_BLOCKS = 20" in area, "residents without HOME memories need a bounded fallback"
 assert "clusters.get(nearestCluster).add(resident)" in area, "homeless residents must attach to one nearest cluster, not bridge clusters"
+assert "knownVillageIdForResident(level, resident.villager().getUUID())" in area, "known HOME-less residents must keep their previous village identity"
+assert "historicalResidents.computeIfAbsent(knownVillage" in area, "known residents without a matching HOME cluster must remain grouped separately"
+assert "nearestClusterForVillage(level, clusters, knownVillage, position)" in area, "HOME-less residents should rejoin a nearby HOME cluster only when its saved identity matches"
 assert "selectNearestCluster(clusters, center)" in area, "active work must choose the group nearest its requested center"
 assert "resident.homePosition() == null" in area, "group selection should prefer stable HOME anchors over workers' temporary positions"
 main = (JAVA / "LivingVillages.java").read_text(encoding="utf-8")

@@ -59,6 +59,38 @@ public final class VillageRegistry extends SavedData {
         return level.getDataStorage().computeIfAbsent(FACTORY, DATA_NAME);
     }
 
+    /** Return a resident's prior village only when the SavedData history is unambiguous. */
+    static UUID knownVillageIdForResident(ServerLevel level, UUID residentId) {
+        if (level == null || residentId == null) return null;
+        VillageRegistry registry = get(level);
+        UUID found = null;
+        for (Map.Entry<UUID, Set<UUID>> entry : registry.knownResidents.entrySet()) {
+            if (!entry.getValue().contains(residentId)) continue;
+            if (found != null && !found.equals(entry.getKey())) return null;
+            found = entry.getKey();
+        }
+        return found;
+    }
+
+    /** Resolve a current HOME position from persisted aliases without recursively selecting a group. */
+    static UUID knownVillageIdForHomeAnchor(ServerLevel level, BlockPos home) {
+        if (level == null || home == null) return null;
+        VillageRegistry registry = get(level);
+        UUID found = null;
+        long key = home.asLong();
+        for (Map.Entry<UUID, Set<Long>> entry : registry.knownHomes.entrySet()) {
+            if (!entry.getValue().contains(key)) continue;
+            if (found != null && !found.equals(entry.getKey())) return null;
+            found = entry.getKey();
+        }
+        for (Map.Entry<UUID, BlockPos> entry : registry.villageAnchors.entrySet()) {
+            if (!entry.getValue().equals(home)) continue;
+            if (found != null && !found.equals(entry.getKey())) return null;
+            found = entry.getKey();
+        }
+        return found;
+    }
+
     /** A query center is evaluated at most once per game tick. */
     public static UUID villageId(ServerLevel level, BlockPos center) {
         if (level == null || center == null) return null;
@@ -101,28 +133,29 @@ public final class VillageRegistry extends SavedData {
         UUID bestId = null;
         long bestDistance = Long.MAX_VALUE;
 
-        // HOME anchors remain the strongest identity signal. Compare both the original primary
-        // anchor and every alias observed in prior saves, so a village no longer depends on one
-        // resident's home position staying alive/unchanged.
-        for (Map.Entry<UUID, BlockPos> entry : registry.villageAnchors.entrySet()) {
-            long distance = Long.MAX_VALUE;
-            for (BlockPos home : homes.isEmpty() ? List.of(candidateAnchor) : homes) {
-                distance = Math.min(distance, horizontalDistanceSquared(home, entry.getValue()));
-                for (long alias : registry.knownHomes.getOrDefault(entry.getKey(), Set.of())) {
-                    distance = Math.min(distance, horizontalDistanceSquared(home, BlockPos.of(alias)));
+        // HOME anchors remain the strongest identity signal when the current resident group
+        // actually has HOME memories. Never substitute a current position for a missing HOME:
+        // after relocation, that position may be nearer to a different village's saved anchor.
+        if (!homes.isEmpty()) {
+            for (Map.Entry<UUID, BlockPos> entry : registry.villageAnchors.entrySet()) {
+                long distance = Long.MAX_VALUE;
+                for (BlockPos home : homes) {
+                    distance = Math.min(distance, horizontalDistanceSquared(home, entry.getValue()));
+                    for (long alias : registry.knownHomes.getOrDefault(entry.getKey(), Set.of())) {
+                        distance = Math.min(distance, horizontalDistanceSquared(home, BlockPos.of(alias)));
+                    }
                 }
-            }
-            if (distance <= ID_MATCH_RADIUS_SQUARED
-                && (distance < bestDistance || (distance == bestDistance && bestId != null
-                    && entry.getKey().toString().compareTo(bestId.toString()) < 0))) {
-                bestDistance = distance;
-                bestId = entry.getKey();
+                if (distance <= ID_MATCH_RADIUS_SQUARED
+                    && (distance < bestDistance || (distance == bestDistance && bestId != null
+                        && entry.getKey().toString().compareTo(bestId.toString()) < 0))) {
+                    bestDistance = distance;
+                    bestId = entry.getKey();
+                }
             }
         }
 
-        // If anchors changed or disappeared, overlap with previously observed resident UUIDs is
-        // a fallback. HOME-based matches take precedence, so one villager wandering into another
-        // town cannot override that town's well-established home anchors.
+        // When HOME is absent, prior resident UUID membership comes first. Otherwise proximity
+        // to a neighbor's old home could overwrite a valid identity during relocation.
         if (bestId == null) {
             // Avoid adopting a different village's identity because just one wandering resident
             // happens to be inside the query area. HOME anchors already match first; the UUID
@@ -139,6 +172,24 @@ public final class VillageRegistry extends SavedData {
                 if (overlap > bestOverlap || (overlap == bestOverlap && overlap > 0 && bestId != null
                     && entry.getKey().toString().compareTo(bestId.toString()) < 0)) {
                     bestOverlap = overlap;
+                    bestId = entry.getKey();
+                }
+            }
+        }
+
+        // Very old registries may not yet have any resident UUID history. Keep a spatial
+        // migration fallback only for that legacy shape; otherwise a new HOME-less group must not
+        // silently adopt a known neighboring village's identity.
+        if (bestId == null && homes.isEmpty() && registry.knownResidents.isEmpty()) {
+            for (Map.Entry<UUID, BlockPos> entry : registry.villageAnchors.entrySet()) {
+                long distance = horizontalDistanceSquared(candidateAnchor, entry.getValue());
+                for (long alias : registry.knownHomes.getOrDefault(entry.getKey(), Set.of())) {
+                    distance = Math.min(distance, horizontalDistanceSquared(candidateAnchor, BlockPos.of(alias)));
+                }
+                if (distance <= ID_MATCH_RADIUS_SQUARED
+                    && (distance < bestDistance || (distance == bestDistance && bestId != null
+                        && entry.getKey().toString().compareTo(bestId.toString()) < 0))) {
+                    bestDistance = distance;
                     bestId = entry.getKey();
                 }
             }
