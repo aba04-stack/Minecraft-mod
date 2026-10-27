@@ -373,6 +373,36 @@ public final class VillageReservationGameTests {
         return rows;
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "legacy_registry_migration")
+    public static void legacyRegistryWithoutHomeAliasesMigratesPrimaryAnchor(GameTestHelper helper) {
+        // Simulate a pre-alias SavedData payload: only primary village anchors existed.
+        CompoundTag legacy = new CompoundTag();
+        ListTag villageAnchors = new ListTag();
+        String villageId = java.util.UUID.randomUUID().toString();
+        BlockPos primaryAnchor = helper.absolutePos(new BlockPos(2, 1, 1));
+
+        CompoundTag entry = new CompoundTag();
+        entry.putString("id", villageId);
+        entry.putLong("anchor", primaryAnchor.asLong());
+        villageAnchors.add(entry);
+        legacy.put("villageAnchors", villageAnchors);
+
+        VillageRegistry restored = VillageRegistry.load(legacy, helper.getLevel().registryAccess());
+        CompoundTag migrated = restored.save(new CompoundTag(), helper.getLevel().registryAccess());
+        ListTag knownHomes = migrated.getList("knownHomes", Tag.TAG_COMPOUND);
+        boolean foundMigratedAlias = false;
+        for (int i = 0; i < knownHomes.size(); i++) {
+            CompoundTag savedEntry = knownHomes.getCompound(i);
+            if (!savedEntry.getString("id").equals(villageId)) continue;
+            for (long home : savedEntry.getLongArray("positions")) {
+                if (home == primaryAnchor.asLong()) foundMigratedAlias = true;
+            }
+        }
+        helper.assertTrue(foundMigratedAlias,
+            "A legacy registry without knownHomes records must promote its primary anchor exactly as a migration fallback.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {
