@@ -11,6 +11,9 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
@@ -23,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -400,6 +404,67 @@ public final class VillageReservationGameTests {
         }
         helper.assertTrue(foundMigratedAlias,
             "A legacy registry without knownHomes records must promote its primary anchor exactly as a migration fallback.");
+        helper.succeed();
+    }
+
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "foreign_storage_reservation")
+    public static void taskCannotReserveAnotherVillagesStorage(GameTestHelper helper) {
+        for (int x = 0; x <= 30; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos homeOneA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeOneB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos homeTwoA = helper.absolutePos(new BlockPos(25, 1, 1));
+        BlockPos homeTwoB = helper.absolutePos(new BlockPos(27, 1, 1));
+        BlockPos storageOne = helper.absolutePos(new BlockPos(5, 1, 1));
+        BlockPos storageTwo = helper.absolutePos(new BlockPos(23, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(23, 1, 1), Blocks.CHEST);
+
+        Villager ownerOne = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager partnerOne = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        Villager ownerTwo = helper.spawn(EntityType.VILLAGER, 25, 1, 1);
+        Villager partnerTwo = helper.spawn(EntityType.VILLAGER, 27, 1, 1);
+        for (Villager villager : List.of(ownerOne, partnerOne, ownerTwo, partnerTwo)) {
+            villager.setNoAi(true);
+        }
+        ownerOne.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeOneA));
+        partnerOne.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeOneB));
+        ownerTwo.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeTwoA));
+        partnerTwo.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeTwoB));
+
+        BlockPos centerOne = helper.absolutePos(new BlockPos(2, 1, 1));
+        BlockPos centerTwo = helper.absolutePos(new BlockPos(26, 1, 1));
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerOne, storageOne),
+            "The first chest must be owned by village one.");
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerTwo, storageTwo),
+            "The second chest must be owned by village two.");
+
+        helper.assertTrue(helper.getLevel().getBlockEntity(storageTwo) instanceof Container,
+            "The foreign chest must have a real container block entity.");
+        Container foreignStorage = (Container) helper.getLevel().getBlockEntity(storageTwo);
+        foreignStorage.setItem(0, new ItemStack(Items.OAK_PLANKS, 8));
+        foreignStorage.setChanged();
+
+        helper.assertTrue(!VillageReservations.tryReserveStoragePositions(
+            helper.getLevel(), ownerOne, List.of(storageTwo), "crafting"),
+            "A worker from village one must not reserve village two's physical chest.");
+        helper.assertTrue(!VillageReservations.reserveStoragesForItems(
+            helper.getLevel(), centerOne, ownerOne, "crafting", Map.of(Items.OAK_PLANKS, 4), 32),
+            "A recipe must not appear affordable by counting stock from a neighboring village.");
+        helper.assertTrue(VillageReservations.isStorageAvailable(
+            helper.getLevel(), storageTwo, ownerTwo),
+            "The failed foreign claim must leave the owning village's chest free.");
+        helper.assertTrue(VillageReservations.tryReserveStoragePositions(
+            helper.getLevel(), ownerTwo, List.of(storageTwo), "crafting"),
+            "The chest's actual village must still be able to reserve its own resources.");
         helper.succeed();
     }
 
