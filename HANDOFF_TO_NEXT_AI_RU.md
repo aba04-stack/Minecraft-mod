@@ -27,15 +27,15 @@
 
 ## Важные оговорки
 
-- Последний проверенный JAR опубликован GitHub Actions: [артефакт `livingvillages-0.15.0`](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40553636283/artifacts/12756606252). Он соответствует commit `708a655c8a4425f455e8bca7ff970ab31d5ef8a0`; после последующих изменений кода всегда выбирай артефакт соответствующего CI.
+- Последний проверенный JAR опубликован GitHub Actions: [артефакт `livingvillages-0.15.0`](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40558085625/artifacts/12758616292). Он соответствует commit `6325d2ff9aff69ad163303b0cb8ec6216986654e`; после последующих изменений кода всегда выбирай артефакт соответствующего CI.
 - `gradlew`/`gradlew.bat` в текущем проекте — checksum-проверяемый bootstrap, который загружает официальный Gradle 9.2.1 при наличии сети; это не стандартный wrapper с `gradle-wrapper.jar`. Для первой настоящей проверки необходимо интернет-соединение к `services.gradle.org` и репозиториям Gradle/Minecraft/NeoForge.
-- Полная CI-проверка для commit `708a655c8a4425f455e8bca7ff970ab31d5ef8a0` прошла: статические проверки, Gradle build, восемь GameTests, запуск dedicated server, headless client smoke-test и загрузка JAR — [результат](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40553636283). Восемь тестов включают проверку миграции legacy-реестра и не заменяют обычный игровой мир.
+- Полная CI-проверка для commit `6325d2ff9aff69ad163303b0cb8ec6216986654e` прошла: статические проверки, Gradle build, десять GameTests, запуск dedicated server, headless client smoke-test и загрузка JAR — [результат](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40558085625). Десять тестов включают миграцию legacy-реестра и сохранение HOME-less группы рядом с соседним поселением; они не заменяют обычный игровой мир.
 - Некоторые заявленные механики могли быть проверены только статическими тестами. Проведи честный аудит реального кода и не считай README доказательством работоспособности.
 
 ## Приоритеты следующей работы
 
 ### P0 — игровая проверка уже собираемой версии
-1. Последняя полная проверка кода — commit `708a655c8a4425f455e8bca7ff970ab31d5ef8a0`: статические проверки, `./gradlew build`, восемь внутриигровых GameTests, запуск dedicated server, headless client smoke-test до инициализации ресурсов и загрузка JAR прошли успешно. [CI](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40553636283).
+1. Последняя полная проверка кода — commit `6325d2ff9aff69ad163303b0cb8ec6216986654e`: статические проверки, `./gradlew build`, десять внутриигровых GameTests, запуск dedicated server, headless client smoke-test до инициализации ресурсов и загрузка JAR прошли успешно. [CI](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40558085625).
 2. Обычный headless `runClient` теперь проходит до инициализации ресурсов под Xvfb, но это не тест интерактивного UI. Следующий шаг — открыть/закрыть экран старосты, проверить server-side actions и взаимодействие клиента с dedicated server.
 3. Собрать два близких поселения в тестовом мире и проверить поведение жителей, заказов и интерфейса. Статические тесты не заменяют эту проверку.
 

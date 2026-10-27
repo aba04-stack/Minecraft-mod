@@ -18,6 +18,7 @@
 - [x] GitHub Actions GameTests confirm that two HOME groups do not claim each other's chests, beds or workstations.
 - [x] GitHub Actions GameTests confirm that a task cannot reuse a rival chest claim, and that removing/replacing a chest clears stale reservation/ownership.
 - [x] A village ID survives HOME-memory loss and resident relocation in a GameTest.
+- [x] HOME-less villagers keep their saved group when relocated next to another village; verified in GameTest on CI commit `6325d2ff9aff69ad163303b0cb8ec6216986654e`.
 - [x] A SavedData round-trip preserves village IDs, HOME aliases, known residents and storage/bed/work-block owners.
 - [x] A legacy SavedData payload without the HOME-alias section promotes its primary anchor into the new alias map.
 - [ ] Run two real resource tasks in a normal world and verify one cannot take from a chest claimed by the other.
