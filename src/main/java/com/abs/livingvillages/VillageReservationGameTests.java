@@ -3,6 +3,9 @@ package com.abs.livingvillages;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.GlobalPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.entity.EntityType;
@@ -16,7 +19,11 @@ import net.minecraft.world.level.block.state.properties.BedPart;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Server-side GameTests for the persisted physical storage-claim lifecycle.
@@ -282,6 +289,84 @@ public final class VillageReservationGameTests {
                 "A previously registered chest must remain owned by the same village after relocation.");
             helper.succeed();
         });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "registry_save_load_roundtrip")
+    public static void villageRegistryPreservesAssetOwnershipAcrossSaveLoadRoundTrip(GameTestHelper helper) {
+        placeFloor(helper);
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+
+        BlockPos bedFoot = helper.absolutePos(new BlockPos(7, 1, 1));
+        BlockState footState = Blocks.RED_BED.defaultBlockState()
+            .setValue(HorizontalDirectionalBlock.FACING, Direction.EAST)
+            .setValue(BedBlock.PART, BedPart.FOOT);
+        helper.setBlock(new BlockPos(7, 1, 1), footState);
+        helper.setBlock(new BlockPos(8, 1, 1), footState.setValue(BedBlock.PART, BedPart.HEAD));
+        helper.setBlock(new BlockPos(9, 1, 1), Blocks.CRAFTING_TABLE);
+
+        Villager first = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager second = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        first.setNoAi(true);
+        second.setNoAi(true);
+        first.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(1, 1, 1))));
+        second.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(3, 1, 1))));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        BlockPos storage = helper.absolutePos(new BlockPos(5, 1, 1));
+        BlockPos workBlock = helper.absolutePos(new BlockPos(9, 1, 1));
+        helper.assertTrue(VillageRegistry.villageId(helper.getLevel(), center) != null,
+            "A resident group must get a stable identity before it is saved.");
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), center, storage),
+            "The chest owner must be recorded.");
+        helper.assertTrue(VillageRegistry.isBedForVillage(helper.getLevel(), center, bedFoot),
+            "The bed owner must be recorded.");
+        helper.assertTrue(VillageRegistry.isWorkBlockForVillage(helper.getLevel(), center, workBlock),
+            "The work-block owner must be recorded.");
+
+        VillageRegistry live = VillageRegistry.get(helper.getLevel());
+        CompoundTag saved = live.save(new CompoundTag(), helper.getLevel().registryAccess());
+        VillageRegistry restored = VillageRegistry.load(saved, helper.getLevel().registryAccess());
+        CompoundTag roundTripped = restored.save(new CompoundTag(), helper.getLevel().registryAccess());
+
+        for (String key : List.of(
+            "villageAnchors", "knownHomes", "knownResidents",
+            "storageOwners", "bedOwners", "workBlockOwners")) {
+            Set<String> before = canonicalTagRows(saved, key);
+            Set<String> after = canonicalTagRows(roundTripped, key);
+            helper.assertTrue(!before.isEmpty(),
+                "The saved " + key + " registry section must contain test data.");
+            helper.assertTrue(before.equals(after),
+                "The " + key + " section must preserve all identities and ownership across SavedData load/save.");
+        }
+        helper.succeed();
+    }
+
+    private static Set<String> canonicalTagRows(CompoundTag root, String listName) {
+        ListTag entries = root.getList(listName, Tag.TAG_COMPOUND);
+        Set<String> rows = new HashSet<>();
+        for (int i = 0; i < entries.size(); i++) {
+            CompoundTag entry = entries.getCompound(i);
+            switch (listName) {
+                case "villageAnchors" ->
+                    rows.add(entry.getString("id") + "|" + entry.getLong("anchor"));
+                case "knownHomes" -> {
+                    long[] positions = entry.getLongArray("positions");
+                    Arrays.sort(positions);
+                    rows.add(entry.getString("id") + "|" + Arrays.toString(positions));
+                }
+                case "knownResidents" -> {
+                    ListTag members = entry.getList("members", Tag.TAG_STRING);
+                    List<String> ids = new ArrayList<>();
+                    for (int j = 0; j < members.size(); j++) ids.add(members.getString(j));
+                    ids.sort(String::compareTo);
+                    rows.add(entry.getString("id") + "|" + String.join(",", ids));
+                }
+                default -> rows.add(entry.getLong("pos") + "|" + entry.getString("village"));
+            }
+        }
+        return rows;
     }
 
     private static void placeFloor(GameTestHelper helper) {

@@ -277,7 +277,7 @@ public final class VillageRegistry extends SavedData {
         return dx * dx + dz * dz;
     }
 
-    private static VillageRegistry load(CompoundTag tag, HolderLookup.Provider registries) {
+    static VillageRegistry load(CompoundTag tag, HolderLookup.Provider registries) {
         VillageRegistry data = new VillageRegistry();
         ListTag villageTags = tag.getList("villageAnchors", Tag.TAG_COMPOUND);
         for (int i = 0; i < villageTags.size(); i++) {
