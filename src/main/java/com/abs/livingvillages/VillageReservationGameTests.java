@@ -293,7 +293,10 @@ public final class VillageReservationGameTests {
 
     @GameTest(template = "empty", timeoutTicks = 20, batch = "registry_save_load_roundtrip")
     public static void villageRegistryPreservesAssetOwnershipAcrossSaveLoadRoundTrip(GameTestHelper helper) {
-        placeFloor(helper);
+        for (int x = 0; x <= 12; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
         helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
 
         BlockPos bedFoot = helper.absolutePos(new BlockPos(7, 1, 1));

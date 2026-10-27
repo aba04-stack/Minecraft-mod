@@ -45,7 +45,7 @@ for marker in (
     '@GameTest(template = "empty", timeoutTicks = 20, batch = "registry_save_load_roundtrip")',
     "villageRegistryPreservesAssetOwnershipAcrossSaveLoadRoundTrip",
     "canonicalTagRows(saved, key)",
-    "The " + key + " section must preserve all identities and ownership across SavedData load/save.",
+    "SavedData load/save.",
     "Resident UUID overlap must preserve the village identity when HOME anchors disappear and residents relocate.",
     "A previously registered chest must remain owned by the same village after relocation.",
     "A removed container must not retain its reservation.",
