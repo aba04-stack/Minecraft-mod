@@ -22,7 +22,7 @@ for marker in (
     "tag.put(\"knownResidents\", knownResidentTags)",
     'tag.getList("knownHomes", Tag.TAG_COMPOUND)',
     'tag.getList("knownResidents", Tag.TAG_COMPOUND)',
-    "data.knownHomes.computeIfAbsent(entry.getKey(), ignored -> new HashSet<>()).add(entry.getValue().asLong())",
+    ".add(entry.getValue().asLong());",
     "if (!data.knownHomes.containsKey(entry.getKey()))",
     "A current save may legitimately contain an empty alias set when that group had no HOME memory.",
     "storageOwners",
