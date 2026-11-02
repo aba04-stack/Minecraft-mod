@@ -1213,6 +1213,56 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "specialist_mastery_and_agent_port")
+    public static void experiencedSpecialistPreferredForRoleAndAgentControlPortNavigatesInWorld(GameTestHelper helper) {
+        for (int x = 0; x <= 10; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        Villager candA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager candB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        candA.setNoAi(true);
+        candB.setNoAi(true);
+        candA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeA));
+        candB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeB));
+
+        // Identify the candidate whose UUID sorts later so that without XP priority they would lose tie-break.
+        Villager veteran = candA.getUUID().toString().compareTo(candB.getUUID().toString()) > 0 ? candA : candB;
+        Villager novice = veteran == candA ? candB : candA;
+        VillagerProgression.recordCompletedWork(
+            veteran,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER,
+            15,
+            true,
+            100L
+        );
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        VillagerRoles.assignRoles(helper.getLevel(), center);
+        helper.assertTrue(
+            VillagerRoles.isBuilder(veteran) && !VillagerRoles.isBuilder(novice),
+            "VillagerRoles.assignRoles must prefer the candidate with higher progression XP in the target role.");
+
+        // Verify AgentControlPort navigation and cleanup in-world (Stage 1.3).
+        var agentPort = VillageRegistry.createAgentControlPort(helper.getLevel());
+        String veteranId = veteran.getUUID().toString();
+        BlockPos navTarget = helper.absolutePos(new BlockPos(6, 1, 1));
+        helper.assertTrue(agentPort.isAgentAlive(veteranId),
+            "AgentControlPort must report living villager as alive.");
+        helper.assertTrue(
+            agentPort.navigateTo(veteranId, navTarget.getX(), navTarget.getY(), navTarget.getZ(), 0.55D)
+                && veteran.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET),
+            "AgentControlPort.navigateTo must set WALK_TARGET on the villager.");
+        agentPort.clearNavigation(veteranId);
+        helper.assertTrue(
+            !veteran.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET),
+            "AgentControlPort.clearNavigation must erase WALK_TARGET on the villager.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {

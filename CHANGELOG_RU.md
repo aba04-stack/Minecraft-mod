@@ -1,5 +1,14 @@
 # История изменений Living Villages
 
+## Полная реализация этапов Living Civilization (Этапы 1–5) — ноябрь 2026
+- Выделено платформо-независимое доменное ядро `com.abs.livingvillages.domain` (`VillagerProgressionModel`, `MonsterTacticalModel`, `TickBudgetModel`, `SettlementSimulationModel`, `SettlementPorts`) без импортов `net.minecraft.*` / `net.neoforged.*`.
+- Внедрена версионированная схема сохранений (`schema_version = 1`) и миграция `v0 → v1` с сохранением неизвестных полей и резервным тегом `_raw_backup_tag` в `VillageRegistry`, `VillagerProgression` и `VillagerSoul`.
+- Реализована прокачка профессий жителей (уровни `1–5` для 7 ролей, подтверждённое начисление XP во всех рабочих подсистемах, умеренное ускорение шагов строительства/ремесла, приоритетный выбор опытного мастера в `VillagerRoles.assignRoles`, отображение навыков в диалоге жителя и панели старосты).
+- Реализован тактический ИИ ванильных монстров (`VillageMonsterAI` + `MonsterTacticalModel`): честное восприятие по прямой видимости (`ClipContext.Block.COLLIDER`), квоты тика (`VillageTickBudget`), лимит `MAX_PATH_RETRIES = 3`, групповой натиск зомби, удержание дистанции скелетами, соблюдение `mobGriefing` криперами, вертикальный обход пауками, лечение/защита раненых союзников ведьмами (`REGENERATION` + `DAMAGE_RESISTANCE`) и организованное отступление рейдовых отрядов (`Raider`) при потере `>= 50%` состава.
+- Расширена оборона поселения (`VillageDefense`): оповещение о тревоге (`raiseVillageAlarm`), звон в колокол (`Blocks.BELL`), эвакуация мирных жителей к `HOME` и приоритетный заказ на ковку мечей (`setGuardEquipmentRequested` → `VillageCraftingJobs`).
+- Реализованы перехват осиротевших строек домов и ферм (`houseCheckpoints`, `farmCheckpoints`), параллельный крафт каменных и железных инструментов во время стройки, честная догоняющая плавка при повторном визите поселения (`recordVisitAndRunCatchUp`) и автоматическая межпоселенческая торговля излишками хлеба и досок `1:1` (`tryTradeWithKnownNeighbors`).
+- Внутриигровой набор `runGameTestServer` расширен до 20 `@GameTest`-методов; в headless-клиенте добавлена проверка round-trip сетевых кодеков `ElderPanelData.STREAM_CODEC` и `ElderAction.STREAM_CODEC`.
+
 ## Компактная панель старосты и проверка UI в CI — 27 октября 2026
 - Headless smoke-test теперь открывает реальный `ElderScreen`, а не просто ждёт инициализации ресурсов.
 - Проверяются наличие семи кнопок и границы панели/кнопок; тест обнаружил, что прежняя панель не помещалась в логическое окно `427×240`.

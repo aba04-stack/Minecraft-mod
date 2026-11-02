@@ -155,6 +155,12 @@ public final class VillagerRoles {
         else if (guards < desiredGuards) role = ROLE_GUARD;
         if (role == null) return;
 
+        final String targetRole = role;
+        candidates.sort(Comparator
+            .comparingInt((Villager v) -> VillagerProgression.getXp(v, targetRole))
+            .reversed()
+            .thenComparing(v -> v.getUUID().toString()));
+
         Villager selected = null;
         for (Villager candidate : candidates) {
             boolean canStart = ROLE_CRAFTSMAN.equals(role) || ROLE_BUILDER.equals(role)

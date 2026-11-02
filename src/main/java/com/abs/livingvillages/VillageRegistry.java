@@ -800,6 +800,51 @@ public final class VillageRegistry extends SavedData {
         };
     }
 
+    public static com.abs.livingvillages.domain.SettlementPorts.AgentControlPort createAgentControlPort(ServerLevel level) {
+        return new com.abs.livingvillages.domain.SettlementPorts.AgentControlPort() {
+            @Override
+            public boolean isAgentAlive(String agentId) {
+                if (level == null || agentId == null) return false;
+                UUID id = parseUuid(agentId);
+                if (id == null) return false;
+                net.minecraft.world.entity.Entity entity = level.getEntity(id);
+                return entity != null && entity.isAlive();
+            }
+
+            @Override
+            public boolean navigateTo(String agentId, int x, int y, int z, double speedModifier) {
+                if (level == null || agentId == null) return false;
+                UUID id = parseUuid(agentId);
+                if (id == null) return false;
+                net.minecraft.world.entity.Entity entity = level.getEntity(id);
+                if (!(entity instanceof net.minecraft.world.entity.Mob mob) || !mob.isAlive()) return false;
+                BlockPos target = new BlockPos(x, y, z);
+                float speed = (float) Math.max(0.2D, Math.min(1.5D, speedModifier));
+                if (mob instanceof Villager villager) {
+                    villager.getBrain().setMemory(
+                        MemoryModuleType.WALK_TARGET,
+                        new net.minecraft.world.entity.ai.memory.WalkTarget(target, speed, 1)
+                    );
+                    return true;
+                }
+                return mob.getNavigation().moveTo(x + 0.5D, y, z + 0.5D, speed);
+            }
+
+            @Override
+            public void clearNavigation(String agentId) {
+                if (level == null || agentId == null) return;
+                UUID id = parseUuid(agentId);
+                if (id == null) return;
+                net.minecraft.world.entity.Entity entity = level.getEntity(id);
+                if (entity instanceof Villager villager) {
+                    villager.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+                } else if (entity instanceof net.minecraft.world.entity.Mob mob) {
+                    mob.getNavigation().stop();
+                }
+            }
+        };
+    }
+
     private static Item resolvePortItem(String itemId) {
         if (itemId == null) return Items.AIR;
         return switch (itemId) {
