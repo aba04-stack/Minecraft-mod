@@ -1,6 +1,8 @@
 package com.abs.livingvillages;
 
+import com.abs.livingvillages.domain.TrustAndAnimalModel;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -8,15 +10,20 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.trading.MerchantOffer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
@@ -213,13 +220,18 @@ public final class VillagerSoul {
                 + " · Настроение: " + moodName(soul.getInt("mood"))
             : "Система характера и настроения отключена";
         if (hasMemory) {
+            int currentTrust = relationship.getInt("trust");
             status += " · Отношения: " + relationshipName(relationship)
-                + " · Доверие: " + relationship.getInt("trust") + "/100";
+                + " · " + formatTrustStatus(currentTrust);
         }
         if (LivingVillagesConfig.ENABLE_VILLAGER_PROGRESSION.get()) {
             status += " · Навык: " + VillagerProgression.describePrimarySkill(villager);
         }
         player.sendSystemMessage(Component.literal(status).withStyle(ChatFormatting.GRAY));
+
+        if (hasMemory) {
+            applyTrustBehaviorToVillager(villager, player);
+        }
 
         if (hasMemory && !relationship.getString("lastGift").isEmpty()
             && day - (relationship.contains("lastGiftDay") ? relationship.getLong("lastGiftDay") : -10L) <= 3L) {
@@ -320,13 +332,28 @@ public final class VillagerSoul {
             : new CompoundTag();
         if (hasMemory) {
             int fear = decayFearIfNeeded(relationship, day);
-            relationship.putInt("trust", clamp(relationship.getInt("trust") + giftValue, 0, 100));
+            boolean preferred = matchesVillagerPreference(villager, held);
+            boolean requestMet = matchesVillagerRequest(soul, held);
+            int eventType = requestMet
+                ? TrustAndAnimalModel.EVENT_REQUEST_FULFILLED
+                : TrustAndAnimalModel.EVENT_HELP_OR_GIFT;
+            int updatedTrust = TrustAndAnimalModel.evaluateTrustChange(
+                relationship.getInt("trust"),
+                eventType,
+                giftValue,
+                soul.getInt("personality"),
+                preferred
+            );
+            relationship.putInt("trust", updatedTrust);
             relationship.putInt("fear", Math.max(0, fear - Math.max(5, giftValue / 2)));
             relationship.putString("lastGift", giftName);
             relationship.putLong("lastGiftDay", day);
             relationship.putLong("fearDecayDay", day);
             relationship.putLong("lastSeenDay", day);
             relationship.putInt("giftCount", relationship.getInt("giftCount") + 1);
+            if (requestMet) {
+                soul.remove("activeRequestItem");
+            }
             saveRelationship(soul, player.getUUID(), relationship);
         }
         saveSoul(villager, soul);
@@ -334,8 +361,10 @@ public final class VillagerSoul {
         player.sendSystemMessage(Component.literal(soul.getString("name")).withStyle(ChatFormatting.GOLD)
             .append(Component.literal(": Спасибо за " + giftName + "! Мне очень приятно.").withStyle(ChatFormatting.WHITE)));
         if (hasMemory) {
-            player.sendSystemMessage(Component.literal("Отношения улучшились. Доверие: "
-                + relationship.getInt("trust") + "/100.").withStyle(ChatFormatting.GREEN));
+            int currentTrust = relationship.getInt("trust");
+            player.sendSystemMessage(Component.literal("Отношения улучшились. "
+                + formatTrustStatus(currentTrust) + ".").withStyle(ChatFormatting.GREEN));
+            applyTrustBehaviorToVillager(villager, player);
         }
         if (villager.level() instanceof ServerLevel serverLevel) {
             serverLevel.sendParticles(ParticleTypes.HAPPY_VILLAGER,
@@ -532,10 +561,182 @@ public final class VillagerSoul {
 
     private static String relationshipName(CompoundTag relationship) {
         if (relationship.getInt("fear") >= 25) return "настороженность";
+        return TrustAndAnimalModel.trustTierNameRu(relationship.getInt("trust"));
+    }
+
+    public static String formatTrustStatus(int trust) {
+        int clamped = TrustAndAnimalModel.clampTrust(trust);
+        return "Доверие: " + clamped + "/100 (" + TrustAndAnimalModel.trustTierNameRu(clamped)
+            + ") · Варианты взаимодействия: " + TrustAndAnimalModel.unlockedInteractionCount(clamped);
+    }
+
+    public static int getPlayerTrust(Villager villager, UUID playerId) {
+        if (villager == null || playerId == null) return 0;
+        CompoundTag soul = getSoul(villager);
+        CompoundTag relationship = getRelationship(soul, playerId, soul.getInt("personality"));
+        return TrustAndAnimalModel.clampTrust(relationship.getInt("trust"));
+    }
+
+    public static void setPlayerTrust(Villager villager, UUID playerId, int trust) {
+        if (villager == null || playerId == null) return;
+        CompoundTag soul = getSoul(villager);
+        CompoundTag relationship = getRelationship(soul, playerId, soul.getInt("personality"));
+        relationship.putInt("trust", TrustAndAnimalModel.clampTrust(trust));
+        saveRelationship(soul, playerId, relationship);
+        saveSoul(villager, soul);
+    }
+
+    public static int recordTrustEvent(
+            Villager villager,
+            UUID playerId,
+            int eventType,
+            int baseMagnitude,
+            boolean matchesPreference) {
+        if (villager == null || playerId == null) return 0;
+        CompoundTag soul = getSoul(villager);
+        int personality = soul.getInt("personality");
+        CompoundTag relationship = getRelationship(soul, playerId, personality);
+        int updated = TrustAndAnimalModel.evaluateTrustChange(
+            relationship.getInt("trust"),
+            eventType,
+            baseMagnitude,
+            personality,
+            matchesPreference
+        );
+        relationship.putInt("trust", updated);
+        if (eventType == TrustAndAnimalModel.EVENT_ATTACK_OR_HARM
+            || eventType == TrustAndAnimalModel.EVENT_THEFT) {
+            relationship.putInt("fear", clamp(relationship.getInt("fear") + baseMagnitude, 0, 100));
+        } else {
+            relationship.putInt("fear", Math.max(0, relationship.getInt("fear") - Math.max(3, baseMagnitude / 2)));
+        }
+        saveRelationship(soul, playerId, relationship);
+        saveSoul(villager, soul);
+        return updated;
+    }
+
+    public static boolean matchesVillagerPreference(Villager villager, ItemStack stack) {
+        if (villager == null || stack == null || stack.isEmpty()) return false;
+        int personality = getSoul(villager).getInt("personality");
+        return switch (Math.floorMod(personality, PERSONALITY_COUNT)) {
+            case 0 -> stack.is(Items.BREAD) || stack.is(Items.WHEAT);
+            case 1 -> stack.is(Items.POPPY) || stack.is(Items.DANDELION);
+            case 2 -> stack.is(Items.EMERALD) || stack.is(Items.GOLD_INGOT);
+            case 3 -> stack.is(Items.APPLE) || stack.is(Items.BREAD);
+            case 4 -> stack.is(Items.CARROT) || stack.is(Items.POTATO);
+            default -> stack.is(Items.CORNFLOWER) || stack.is(Items.EMERALD);
+        };
+    }
+
+    public static void assignVillagerRequest(Villager villager, String itemKey) {
+        if (villager == null || itemKey == null) return;
+        CompoundTag soul = getSoul(villager);
+        soul.putString("activeRequestItem", itemKey);
+        saveSoul(villager, soul);
+    }
+
+    private static boolean matchesVillagerRequest(CompoundTag soul, ItemStack stack) {
+        if (soul == null || stack == null || stack.isEmpty()) return false;
+        String req = soul.getString("activeRequestItem");
+        if (req.isEmpty()) return false;
+        return switch (req) {
+            case "bread" -> stack.is(Items.BREAD);
+            case "apple" -> stack.is(Items.APPLE);
+            case "carrot" -> stack.is(Items.CARROT);
+            case "emerald" -> stack.is(Items.EMERALD);
+            default -> false;
+        };
+    }
+
+    public static int recordVillageDefenseHelp(ServerLevel level, BlockPos threatPos, UUID playerId) {
+        if (level == null || threatPos == null || playerId == null) return 0;
+        AABB area = new AABB(threatPos).inflate(24.0D, 8.0D, 24.0D);
+        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
+        int affected = 0;
+        for (Villager villager : villagers) {
+            recordTrustEvent(villager, playerId, TrustAndAnimalModel.EVENT_VILLAGE_DEFENSE, 10, false);
+            affected++;
+        }
+        return affected;
+    }
+
+    public static int recordPlayerTheft(ServerLevel level, BlockPos chestPos, UUID playerId) {
+        if (level == null || chestPos == null || playerId == null) return 0;
+        AABB area = new AABB(chestPos).inflate(16.0D, 6.0D, 16.0D);
+        List<Villager> witnesses = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
+        int affected = 0;
+        for (Villager witness : witnesses) {
+            recordTrustEvent(witness, playerId, TrustAndAnimalModel.EVENT_THEFT, 12, false);
+            affected++;
+        }
+        return affected;
+    }
+
+    public static void onMonsterKilledByPlayer(LivingDeathEvent event) {
+        if (!(event.getEntity() instanceof Enemy victim) || victim.level().isClientSide()) {
+            return;
+        }
+        if (event.getSource().getEntity() instanceof Player player
+            && victim.level() instanceof ServerLevel serverLevel) {
+            recordVillageDefenseHelp(serverLevel, victim.blockPosition(), player.getUUID());
+        }
+    }
+
+    /**
+     * Applies behavioral changes and unlocks trust-tier benefits (trade price adjustments,
+     * personal requests, friend care, and close-person support) when interacting with a villager.
+     */
+    public static int applyTrustBehaviorToVillager(Villager villager, Player player) {
+        if (villager == null || player == null) return TrustAndAnimalModel.BEHAVIOR_CAUTIOUS_DISTANCE;
+        CompoundTag soul = getSoul(villager);
+        CompoundTag relationship = getRelationship(soul, player.getUUID(), soul.getInt("personality"));
         int trust = relationship.getInt("trust");
-        if (trust >= 70) return "друг";
-        if (trust >= 30) return "знакомый";
-        return "почти незнакомец";
+        int fear = relationship.getInt("fear");
+        int behavior = TrustAndAnimalModel.evaluateTrustBehavior(trust, fear);
+        int priceOffset = TrustAndAnimalModel.computeTrustPriceOffset(trust, fear);
+
+        for (MerchantOffer offer : villager.getOffers()) {
+            offer.setSpecialPriceDiff(priceOffset);
+        }
+
+        switch (behavior) {
+            case TrustAndAnimalModel.BEHAVIOR_CAUTIOUS_DISTANCE -> {
+                if (fear >= 25) {
+                    var away = villager.position().subtract(player.position());
+                    if (away.lengthSqr() > 0.01D) {
+                        var norm = away.normalize().scale(4.0D);
+                        villager.getNavigation().moveTo(
+                            villager.getX() + norm.x,
+                            villager.getY(),
+                            villager.getZ() + norm.z,
+                            1.0D
+                        );
+                    }
+                }
+            }
+            case TrustAndAnimalModel.BEHAVIOR_POLITE_GREETING -> {
+                villager.getLookControl().setLookAt(player);
+            }
+            case TrustAndAnimalModel.BEHAVIOR_OFFER_REQUEST -> {
+                villager.getLookControl().setLookAt(player);
+                if (soul.getString("activeRequestItem").isEmpty()) {
+                    soul.putString("activeRequestItem", "bread");
+                    saveSoul(villager, soul);
+                }
+            }
+            case TrustAndAnimalModel.BEHAVIOR_FRIEND_SUPPORT -> {
+                villager.getLookControl().setLookAt(player);
+                player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 80, 0));
+            }
+            case TrustAndAnimalModel.BEHAVIOR_CLOSE_COMPANION -> {
+                villager.getLookControl().setLookAt(player);
+                player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 140, 0));
+                player.addEffect(new MobEffectInstance(MobEffects.HERO_OF_THE_VILLAGE, 140, 0));
+            }
+            default -> {
+            }
+        }
+        return behavior;
     }
 
     private static int clamp(int value, int min, int max) {

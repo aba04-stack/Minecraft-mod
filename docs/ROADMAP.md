@@ -20,7 +20,7 @@
 - **Результат:** `./gradlew build` с JDK 21 (Temurin 21) и контрольной суммой Gradle `9.2.1` успешно компилирует проект и собирает `build/libs/livingvillages-0.15.0.jar`.
 
 ### Подэтап 0.3. Дымовая проверка в клиенте, на выделенном сервере и GameTestServer (`TESTED`)
-- **Результат:** в CI автоматически выполняются `./gradlew runGameTestServer` (22 внутриигровых `@GameTest`), запуск выделенного сервера (`./gradlew runServer`) и headless-клиента с программным OpenGL (`tools/smoke_test_client.sh`, проверяющий `ElderScreen` и сетевые `StreamCodec`).
+- **Результат:** в CI автоматически выполняются `./gradlew runGameTestServer` (23 внутриигровых `@GameTest`), запуск выделенного сервера (`./gradlew runServer`) и headless-клиента с программным OpenGL (`tools/smoke_test_client.sh`, проверяющий `ElderScreen` и сетевые `StreamCodec`).
 
 ---
 

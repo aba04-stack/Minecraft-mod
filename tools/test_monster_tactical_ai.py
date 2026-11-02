@@ -51,4 +51,30 @@ for marker in (
     assert marker in budget, f"VillageTickBudget.java missing {marker}"
 
 assert "monsterTacticalPerceptionRejectsHiddenTargetsAndCapsPathRetries" in gametests
+assert "enhancedMobBehaviorsPillagerAlertSearchPatrolSkeletonSpreadCreeperHoldWitchTriageAndGuardAidWorkInWorld" in gametests
+assert "villagerTrustTiersAnimalHerdParentalBreedingAndPillagerReloadWorkInWorld" in gametests
+assert "isPillagerReloadingCrossbow(" in monster_ai
+assert "alertNearbyZombies(" in monster_ai
+
+animal_ai = (JAVA / "VillageAnimalAI.java").read_text(encoding="utf-8")
+for marker in (
+    "alertHerdOnDanger(",
+    "evaluateAndApplyAnimalBehavior(",
+    "isValidSpeciesBreedingFood(",
+    "performPreBreedingCourtship(",
+    "registerOffspringFromParents(",
+    "stepOffspringGrowth(",
+):
+    assert marker in animal_ai, f"VillageAnimalAI.java missing {marker}"
+
+soul = (JAVA / "VillagerSoul.java").read_text(encoding="utf-8")
+for marker in (
+    "getPlayerTrust(",
+    "recordTrustEvent(",
+    "recordVillageDefenseHelp(",
+    "recordPlayerTheft(",
+    "applyTrustBehaviorToVillager(",
+):
+    assert marker in soul, f"VillagerSoul.java missing {marker}"
+
 print("MONSTER TACTICAL AI PASSED: honest LOS perception, bounded signals, path-retry cap, and tick quotas")

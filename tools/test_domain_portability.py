@@ -64,4 +64,13 @@ assert "public static int evaluateRaiderSquad(" in settlement_model
 assert "public static boolean canCraftInParallelWithConstruction(" in settlement_model
 assert "public static TradeExchangeResult evaluateTradeCaravan(" in settlement_model
 
+trust_animal_model = (DOMAIN_DIR / "TrustAndAnimalModel.java").read_text(encoding="utf-8")
+assert "public static int trustTierForScore(" in trust_animal_model
+assert "public static String trustTierNameRu(" in trust_animal_model
+assert "public static int evaluateTrustChange(" in trust_animal_model
+assert "public static int evaluateTrustBehavior(" in trust_animal_model
+assert "public static int evaluateAnimalBehavior(" in trust_animal_model
+assert "public static int deriveOffspringTrait(" in trust_animal_model
+assert "public static int computeMaturationTicks(" in trust_animal_model
+
 print("DOMAIN PORTABILITY PASSED: zero Minecraft/NeoForge imports in domain package; pure DTO contracts verified")

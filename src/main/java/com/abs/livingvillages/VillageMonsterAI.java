@@ -311,6 +311,46 @@ public final class VillageMonsterAI {
     }
 
     /**
+     * Broadcasts threat information from a Zombie to nearby Zombie allies within 12 blocks
+     * so the group coordinates a multi-angle approach and remembers the last known position.
+     */
+    public static int alertNearbyZombies(
+            Zombie source,
+            ServerLevel level,
+            LivingEntity target,
+            BlockPos threatPos) {
+        if (source == null || level == null || threatPos == null) return 0;
+        AABB alertBox = source.getBoundingBox().inflate(12.0D, 4.0D, 12.0D);
+        List<Zombie> allies = level.getEntitiesOfClass(Zombie.class, alertBox,
+            other -> other != source && other.isAlive() && !other.isRemoved());
+        int alerted = 0;
+        for (Zombie ally : allies) {
+            CompoundTag allyData = ally.getPersistentData();
+            recordLastKnownPosition(allyData, threatPos);
+            if (allyData.getInt(STATE_KEY) == MonsterTacticalModel.STATE_IDLE) {
+                allyData.putInt(STATE_KEY, MonsterTacticalModel.STATE_ALERTED);
+            }
+            if (target != null && ally.getTarget() == null) {
+                ally.setTarget(target);
+            }
+            alerted++;
+        }
+        return alerted;
+    }
+
+    public static boolean isPillagerReloadingCrossbow(Mob mob) {
+        if (!(mob instanceof net.minecraft.world.entity.monster.Pillager pillager)) {
+            return false;
+        }
+        if (pillager.isChargingCrossbow()) {
+            return true;
+        }
+        var mainHand = pillager.getMainHandItem();
+        return mainHand.getItem() instanceof net.minecraft.world.item.CrossbowItem
+            && !net.minecraft.world.item.CrossbowItem.isCharged(mainHand);
+    }
+
+    /**
      * Executes gradual search of the last known enemy position or returns a Pillager/Raider
      * to its small patrol route after combat ends.
      */
@@ -434,6 +474,16 @@ public final class VillageMonsterAI {
                     mobGriefing
                 );
             }
+            case MonsterTacticalModel.KIND_RAIDER -> {
+                int nearbyRaiders = level.getEntitiesOfClass(Raider.class, localBox,
+                    other -> other != mob && other.isAlive()).size();
+                yield MonsterTacticalModel.selectPillagerCombatAction(
+                    distSqr,
+                    isPillagerReloadingCrossbow(mob),
+                    hasLos,
+                    nearbyRaiders
+                );
+            }
             default -> baseAction;
         };
     }
@@ -536,14 +586,19 @@ public final class VillageMonsterAI {
         switch (action) {
             case MonsterTacticalModel.ACTION_GROUP_ADVANCE, MonsterTacticalModel.ACTION_INVESTIGATE_NOISE -> {
                 if (target != null) mob.setTarget(target);
-                mob.getNavigation().moveTo(destination.getX() + 0.5D, destination.getY(), destination.getZ() + 0.5D, 1.0D);
-                // Alert nearby zombies that have direct line of sight to this zombie.
-                List<Zombie> allies = level.getEntitiesOfClass(Zombie.class, localBox,
-                    z -> z != mob && z.isAlive() && z.getTarget() == null && hasClearLineOfSight(level, mob, z));
-                for (int i = 0; i < Math.min(2, allies.size()); i++) {
-                    Zombie ally = allies.get(i);
-                    recordLastKnownPosition(ally.getPersistentData(), destination);
-                    if (target != null) ally.setTarget(target);
+                int[] groupOffset = MonsterTacticalModel.computeFlankOffset(mob.getUUID().hashCode(), 1);
+                BlockPos advancePos = destination.offset(groupOffset[0], 0, groupOffset[1]);
+                BlockPos moveDest = level.hasChunkAt(advancePos) ? advancePos : destination;
+                mob.getNavigation().moveTo(moveDest.getX() + 0.5D, moveDest.getY(), moveDest.getZ() + 0.5D, 1.0D);
+                if (mob instanceof Zombie zombie) {
+                    alertNearbyZombies(zombie, level, target, destination);
+                }
+            }
+            case MonsterTacticalModel.ACTION_RELOAD_STRAFE -> {
+                int[] strafe = MonsterTacticalModel.computeFlankOffset(mob.getUUID().hashCode() + (int) (now / 20L), 3);
+                BlockPos strafePos = mob.blockPosition().offset(strafe[0], 0, strafe[1]);
+                if (level.hasChunkAt(strafePos)) {
+                    mob.getNavigation().moveTo(strafePos.getX() + 0.5D, strafePos.getY(), strafePos.getZ() + 0.5D, 1.05D);
                 }
             }
             case MonsterTacticalModel.ACTION_HOLD_RANGE_OR_STRAFE -> {

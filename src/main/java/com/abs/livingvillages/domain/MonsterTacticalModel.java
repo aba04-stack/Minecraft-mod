@@ -37,6 +37,7 @@ public final class MonsterTacticalModel {
     public static final int ACTION_AMBUSH_POUNCE = 10;
     public static final int ACTION_HOLD_FOR_ALLY_CLEARANCE = 11;
     public static final int ACTION_BUFF_VANGUARD = 12;
+    public static final int ACTION_RELOAD_STRAFE = 13;
 
     public static final int WITCH_SUPPORT_NONE = 0;
     public static final int WITCH_SUPPORT_CRITICAL_HEAL = 1;
@@ -195,6 +196,27 @@ public final class MonsterTacticalModel {
         int signX = Integer.compare(baseX, 0);
         int signZ = Integer.compare(baseZ, 0);
         return new int[]{signX * clampedRadius, signZ * clampedRadius};
+    }
+
+    /**
+     * Selects a Pillager's combat action: strafing/repositioning while reloading a crossbow,
+     * holding optimal firing range, or advancing with a raider squad.
+     */
+    public static int selectPillagerCombatAction(
+            double distanceSqr,
+            boolean reloadingCrossbow,
+            boolean hasLineOfSight,
+            int nearbyAllies) {
+        if (reloadingCrossbow) {
+            return ACTION_RELOAD_STRAFE;
+        }
+        if (distanceSqr < 36.0D) {
+            return ACTION_HOLD_RANGE_OR_STRAFE;
+        }
+        if (!hasLineOfSight || nearbyAllies > 0) {
+            return ACTION_GROUP_ADVANCE;
+        }
+        return ACTION_SCOUT_OR_RETREAT;
     }
 
     /**

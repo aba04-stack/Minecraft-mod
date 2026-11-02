@@ -1476,6 +1476,145 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "villager_trust_animal_herd_and_breeding")
+    public static void villagerTrustTiersAnimalHerdParentalBreedingAndPillagerReloadWorkInWorld(GameTestHelper helper) {
+        for (int x = 0; x <= 30; x++) {
+            for (int z = 0; z <= 2; z++) {
+                helper.setBlock(new BlockPos(x, 0, z), Blocks.GRASS_BLOCK);
+            }
+        }
+
+        // 1. Villager Trust System (0-100, 5 tiers, persistence, preferences, defense, theft, and behavior).
+        Villager citizen = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        citizen.setNoAi(true);
+        UUID playerUuid = UUID.nameUUIDFromBytes("trust-test-player".getBytes());
+
+        helper.assertTrue(
+            com.abs.livingvillages.domain.TrustAndAnimalModel.trustTierNameRu(10).equals("незнакомец")
+                && com.abs.livingvillages.domain.TrustAndAnimalModel.trustTierNameRu(25).equals("знакомый")
+                && com.abs.livingvillages.domain.TrustAndAnimalModel.trustTierNameRu(45).equals("доверяет")
+                && com.abs.livingvillages.domain.TrustAndAnimalModel.trustTierNameRu(65).equals("друг")
+                && com.abs.livingvillages.domain.TrustAndAnimalModel.trustTierNameRu(85).equals("близкий человек"),
+            "All 5 trust tiers (0-19, 20-39, 40-59, 60-79, 80-100) must match exact Russian labels.");
+
+        VillagerSoul.setPlayerTrust(citizen, playerUuid, 15);
+        int afterPreferredGift = VillagerSoul.recordTrustEvent(
+            citizen,
+            playerUuid,
+            com.abs.livingvillages.domain.TrustAndAnimalModel.EVENT_HELP_OR_GIFT,
+            10,
+            true
+        );
+        int afterDefense = VillagerSoul.recordTrustEvent(
+            citizen,
+            playerUuid,
+            com.abs.livingvillages.domain.TrustAndAnimalModel.EVENT_VILLAGE_DEFENSE,
+            12,
+            false
+        );
+        int afterRequest = VillagerSoul.recordTrustEvent(
+            citizen,
+            playerUuid,
+            com.abs.livingvillages.domain.TrustAndAnimalModel.EVENT_REQUEST_FULFILLED,
+            15,
+            true
+        );
+        helper.assertTrue(
+            afterPreferredGift > 20
+                && afterDefense > afterPreferredGift
+                && afterRequest >= 60
+                && VillagerSoul.formatTrustStatus(afterRequest).contains("друг")
+                && com.abs.livingvillages.domain.TrustAndAnimalModel.unlockedInteractionCount(85) == 5
+                && com.abs.livingvillages.domain.TrustAndAnimalModel.computeTrustPriceOffset(85, 0) < 0,
+            "Trust must increase for preferred gifts, village defense, and requests, unlocking interactions and discounts.");
+
+        // Verify trust persistence across NBT save/copy/restore and theft penalty.
+        net.minecraft.nbt.CompoundTag savedRoot = citizen.getPersistentData().copy();
+        Villager restoredCitizen = helper.spawn(EntityType.VILLAGER, 4, 1, 1);
+        restoredCitizen.setNoAi(true);
+        restoredCitizen.getPersistentData().put(
+            VillagerSoul.SOUL_KEY,
+            savedRoot.getCompound(VillagerSoul.SOUL_KEY).copy()
+        );
+        int persistedTrust = VillagerSoul.getPlayerTrust(restoredCitizen, playerUuid);
+        VillagerSoul.recordPlayerTheft(helper.getLevel(), restoredCitizen.blockPosition(), playerUuid);
+        int afterTheft = VillagerSoul.getPlayerTrust(restoredCitizen, playerUuid);
+        helper.assertTrue(
+            persistedTrust == afterRequest && afterTheft < persistedTrust,
+            "Villager trust must persist across NBT serialization and decrease after theft.");
+
+        // 2. Animal Herd Reaction & Species-Specific Flight.
+        net.minecraft.world.entity.animal.Sheep sheepA = helper.spawn(EntityType.SHEEP, 10, 1, 1);
+        net.minecraft.world.entity.animal.Sheep sheepB = helper.spawn(EntityType.SHEEP, 12, 1, 1);
+        sheepA.setNoAi(true);
+        sheepB.setNoAi(true);
+        int herdAlerted = VillageAnimalAI.alertHerdOnDanger(
+            sheepA,
+            helper.getLevel(),
+            helper.absolutePos(new BlockPos(9, 1, 1)),
+            200L
+        );
+        int sheepAction = VillageAnimalAI.evaluateAndApplyAnimalBehavior(sheepB, helper.getLevel(), 210L);
+        helper.assertTrue(
+            herdAlerted >= 1
+                && sheepAction == com.abs.livingvillages.domain.TrustAndAnimalModel.ANIMAL_ACTION_FLEE_THREAT,
+            "Attacking one animal must alert nearby herd members and trigger species flight.");
+
+        // 3. Parent-Offspring Interaction (Baby Following & Parental Protection) & Breeding/Maturation.
+        net.minecraft.world.entity.animal.Cow parentCowA = helper.spawn(EntityType.COW, 20, 1, 1);
+        net.minecraft.world.entity.animal.Cow parentCowB = helper.spawn(EntityType.COW, 21, 1, 1);
+        net.minecraft.world.entity.animal.Cow calf = helper.spawn(EntityType.COW, 22, 1, 1);
+        parentCowA.setNoAi(true);
+        parentCowB.setNoAi(true);
+        calf.setNoAi(true);
+        calf.setAge(-50); // Young calf close to maturation
+
+        helper.assertTrue(
+            VillageAnimalAI.isValidSpeciesBreedingFood(parentCowA, new ItemStack(Items.WHEAT))
+                && !VillageAnimalAI.isValidSpeciesBreedingFood(parentCowA, new ItemStack(Items.ROTTEN_FLESH)),
+            "Breeding food check must validate species-appropriate feed.");
+
+        parentCowA.setInLove(null);
+        parentCowB.setInLove(null);
+        boolean courtship = VillageAnimalAI.performPreBreedingCourtship(
+            parentCowA,
+            helper.getLevel(),
+            parentCowA.getBoundingBox().inflate(6.0D, 3.0D, 6.0D)
+        );
+        int offspringTrait = VillageAnimalAI.registerOffspringFromParents(parentCowA, parentCowB, calf, 300L);
+        parentCowA.resetLove();
+        parentCowB.resetLove();
+
+        int calfCalmAction = VillageAnimalAI.evaluateAndApplyAnimalBehavior(calf, helper.getLevel(), 310L);
+        helper.assertTrue(
+            courtship
+                && offspringTrait >= 1 && offspringTrait <= 4
+                && calfCalmAction == com.abs.livingvillages.domain.TrustAndAnimalModel.ANIMAL_ACTION_FOLLOW_PARENT
+                && !calf.isBaby(),
+            "Parents must perform pre-breeding courtship, pass an offspring trait, and calves following parents must mature.");
+
+        // Re-set calf to baby and spawn a threat nearby to verify parental protection.
+        calf.setAge(-2000);
+        net.minecraft.world.entity.monster.Zombie predator = helper.spawn(EntityType.ZOMBIE, 23, 1, 1);
+        predator.setNoAi(true);
+        int parentProtectAction = VillageAnimalAI.evaluateAndApplyAnimalBehavior(parentCowA, helper.getLevel(), 320L);
+        helper.assertTrue(
+            parentProtectAction == com.abs.livingvillages.domain.TrustAndAnimalModel.ANIMAL_ACTION_PROTECT_OFFSPRING,
+            "Adult herd parent must select ANIMAL_ACTION_PROTECT_OFFSPRING when a threat approaches its calf.");
+        predator.discard();
+
+        // 4. Pillager Crossbow Reload Movement & Zombie Group Coordination.
+        net.minecraft.world.entity.monster.Pillager pillager = helper.spawn(EntityType.PILLAGER, 26, 1, 1);
+        pillager.setNoAi(true);
+        pillager.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, new ItemStack(Items.CROSSBOW));
+        helper.assertTrue(
+            VillageMonsterAI.isPillagerReloadingCrossbow(pillager)
+                && com.abs.livingvillages.domain.MonsterTacticalModel.selectPillagerCombatAction(49.0D, true, true, 1)
+                    == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_RELOAD_STRAFE,
+            "A Pillager with an uncharged crossbow must select ACTION_RELOAD_STRAFE to reposition while reloading.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {
