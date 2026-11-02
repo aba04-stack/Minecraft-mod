@@ -5,7 +5,7 @@
 ## Последняя успешная проверка
 
 - Актуальная ветка: `arena/fbf16766-minecraft-mod` (включает `fix/living-villages-layout` + доменное ядро `com.abs.livingvillages.domain`, `VillagerProgression`, `VillageMonsterAI`, `VillageTickBudget` и 12 внутриигровых `GameTest`).
-- GitHub Actions CI: `python3 tools/validate_project.py` (13 регрессионных скриптов + `JavaSyntaxCheck`), `./gradlew build` и `./gradlew runGameTestServer` на `Temurin Java 21` (Minecraft `1.21.1` / NeoForge `21.1.264`) завершены со статусом `SUCCESS` (run `41431805194`).
+- GitHub Actions CI: `python3 tools/validate_project.py` (13 регрессионных скриптов + `JavaSyntaxCheck`), `./gradlew build` и `./gradlew runGameTestServer` на `Temurin Java 21` (Minecraft `1.21.1` / NeoForge `21.1.264`) завершены со статусом `SUCCESS` (run `41516562787`).
 - Все двадцать четыре настоящих Minecraft GameTests прошли, включая:
   1. запрет бронировать чужой сундук/считать его запасы и сохранение HOME-less группы после переезда рядом с другой деревней;
   2. `villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema` — миграцию схемы `v0 → v1` с сохранением неизвестных полей, начисление опыта только за подтверждённую работу, повышение уровня и сохранение опыта при смене роли (`miner → builder → miner`);
