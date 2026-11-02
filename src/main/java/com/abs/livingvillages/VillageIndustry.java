@@ -40,7 +40,7 @@ public final class VillageIndustry {
     private static final String ROUTE_X = P + "route_x", ROUTE_Y = P + "route_y", ROUTE_Z = P + "route_z";
     private static final String LAST_ROUTE = P + "last_route";
     private static final int BUILD_SCAN_RADIUS = 16;
-    private static final int LOCAL_STORAGE_RADIUS = 4;
+    private static final int LOCAL_STORAGE_RADIUS = 16;
     private static final float WALK_SPEED = 0.55F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     private static final List<Item> RAW_METALS = List.of(Items.RAW_IRON, Items.RAW_COPPER, Items.RAW_GOLD);
@@ -55,7 +55,10 @@ public final class VillageIndustry {
     /** Called on an interval by the active-area scheduler; only loaded, player-near areas are touched. */
     public static void tickArea(ServerLevel level, BlockPos center) {
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
-            || !LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()) return;
+            || !LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()) {
+            VillageRegistry.recordDiagnostic(level, center, "Промышленность", "Отключена система промышленности или авторазвития");
+            return;
+        }
 
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
         List<Villager> villagers = VillageArea.findVillagers(level, center);
@@ -65,24 +68,45 @@ public final class VillageIndustry {
         if (storages.isEmpty()) {
             // If physical chests exist but are reserved by active projects, do not mistake them
             // for a brand-new settlement and attempt duplicate storage bootstrap from inventory.
-            if (hasStorageBlock(level, center, radius)) return;
+            if (hasStorageBlock(level, center, radius)) {
+                VillageRegistry.recordDiagnostic(level, center, "Промышленность", "Все хранилища сейчас зарезервированы активными задачами");
+                return;
+            }
             // Bootstrap is itself a real recipe: two matching logs -> eight planks -> one chest.
             // All ingredients must be in a villager's own inventory; nothing is created for free.
             bootstrapStorage(level, center, villagers);
-            return;
+            storages = findStorages(level, center, radius);
+            if (storages.isEmpty()) {
+                VillageRegistry.recordDiagnostic(level, center, "Промышленность", "Нет хранилища: ожидание 2 брёвен (8 досок) у жителей для первого сундука");
+                return;
+            }
         }
 
         boolean hasCraftingTable = hasBlock(level, center, Blocks.CRAFTING_TABLE, radius);
         // Build the workshop as soon as four real planks are available. Do not delay this
         // milestone by manufacturing extra planks first.
         if (!hasCraftingTable) {
-            if (buildCraftingTable(level, center, storages, villagers)) return;
-            if (totalPlanks(storages) < 4 && craftPlanksFromStorage(storages, villagers)) return;
-            return;
+            if (totalPlanks(storages) < 4) {
+                craftPlanksFromStorage(storages, villagers);
+            }
+            if (buildCraftingTable(level, center, storages, villagers)) {
+                hasCraftingTable = true;
+                VillageRegistry.recordDiagnostic(level, center, "Промышленность", "Создан верстак поселения");
+            } else {
+                VillageRegistry.recordDiagnostic(level, center, "Промышленность", "Нет верстака: нужно 4 доски на складе и свободный житель");
+                return;
+            }
         }
 
-        // Convert logs to planks in small batches, but do not flood storage with intermediate goods.
-        if (totalPlanks(storages) < 24 && craftPlanksFromStorage(storages, villagers)) return;
+        // Convert logs in storage into planks up to a healthy settlement stock (enough for houses, doors, beds, and tools).
+        for (int batch = 0; batch < 4 && totalPlanks(storages) < 160; batch++) {
+            if (!craftPlanksFromStorage(storages, villagers)) break;
+        }
+
+        // Convert harvested wheat in storage into bread (3 wheat -> 1 bread) for villager nutrition.
+        while (totalItem(storages, Items.WHEAT) >= 3 && totalItem(storages, Items.BREAD) < 48) {
+            if (!craftRecipe(storages, Items.BREAD, 1, Map.of(Items.WHEAT, 3))) break;
+        }
 
         // In desert/sand-rich settlements without lumber, compress 4 sand -> 1 sandstone (vanilla 2x2 recipe).
         if (totalPlanks(storages) < 96 && totalItem(storages, Items.SANDSTONE) < 96) {
@@ -104,16 +128,22 @@ public final class VillageIndustry {
 
         // A furnace is built only when the village owns cobblestone, an ore to smelt, and real fuel.
         if (!hasBlock(level, center, Blocks.FURNACE, radius)
-            && hasRawMetal(storages) && hasAnyFuel(storages) && buildFurnace(level, center, storages, villagers)) return;
+            && hasRawMetal(storages) && hasAnyFuel(storages) && buildFurnace(level, center, storages, villagers)) {
+            VillageRegistry.recordDiagnostic(level, center, "Промышленность", "Построена плавильная печь");
+            return;
+        }
 
         // The vanilla furnace performs the actual smelting; this layer only moves real inputs/output.
         processFurnaces(level, center, villagers, radius);
+        VillageRegistry.recordDiagnostic(level, center, "Промышленность",
+            "Склады: " + storages.size() + ", досок: " + totalPlanks(storages) + ", верстак: есть");
     }
 
     /** Guides the assigned craftsman to a real workbench using ordinary villager navigation. */
     public static void onVillagerTick(net.neoforged.neoforge.event.tick.EntityTickEvent.Post event) {
         if (!(event.getEntity() instanceof Villager villager) || villager.level().isClientSide()
-            || !villager.isAlive() || villager.isBaby() || villager.tickCount % 20 != 0) return;
+            || !villager.isAlive() || villager.isBaby() || villager.isNoAi()
+            || VillageCraftingJobs.isBusy(villager) || villager.tickCount % 20 != 0) return;
         if (!(villager.level() instanceof ServerLevel level)) return;
         CompoundTag data = villager.getPersistentData();
         if (!VillagerRoles.isCraftsman(villager)) {
@@ -203,8 +233,11 @@ public final class VillageIndustry {
     }
 
     private static boolean isUnassignedAvailableAdult(Villager villager) {
-        if (!VillagerRoles.isUnemployedAdult(villager)
-            || !villager.getPersistentData().getString(VillagerRoles.ROLE_KEY).isEmpty()) return false;
+        if (!VillagerRoles.isEligibleAutonomousAdult(villager)) return false;
+        String role = villager.getPersistentData().getString(VillagerRoles.ROLE_KEY);
+        if (!role.isEmpty() && !(VillagerRoles.ROLE_BUILDER.equals(role) && !VillageBuilder.isProjectActive(villager))) {
+            return false;
+        }
         CompoundTag data = villager.getPersistentData();
         return !data.getBoolean("livingvillages_treework_active")
             && !data.getBoolean("livingvillages_treework_replant_active")
@@ -253,31 +286,37 @@ public final class VillageIndustry {
         for (Villager villager : villagers) {
             if (!isIdle(villager) || hasHigherPriorityTask(villager)) continue;
             var inventory = villager.getInventory();
-            // First, if eight actual planks are already carried, spend them on the first chest.
+            // Carry out up to two vanilla 1 log -> 4 planks recipes in the villager's inventory so 2 logs can form the first chest.
+            for (int pass = 0; pass < 2; pass++) {
+                for (int i = 0; i < inventory.getContainerSize(); i++) {
+                    ItemStack logs = inventory.getItem(i);
+                    Item planks = plankItemForLog(logs);
+                    if (planks == null || !inventoryCanFit(inventory, new ItemStack(planks, 4))) continue;
+                    logs.shrink(1);
+                    if (logs.isEmpty()) inventory.setItem(i, ItemStack.EMPTY);
+                    inventory.setChanged();
+                    insertIntoInventory(inventory, new ItemStack(planks, 4));
+                    break;
+                }
+            }
+            // If eight actual planks are carried, spend them on the first chest.
             for (int i = 0; i < inventory.getContainerSize(); i++) {
                 ItemStack planks = inventory.getItem(i);
                 if (planks.isEmpty() || !Block.byItem(planks.getItem()).defaultBlockState().is(BlockTags.PLANKS)
                     || planks.getCount() < 8) continue;
                 BlockPos site = findBuildSiteNear(level, villager.blockPosition(), 6);
                 if (site == null) continue;
+                BlockState atSite = level.getBlockState(site);
+                if (!atSite.isAir() && VillageBuilder.isAirOrReplaceableVegetation(atSite)) {
+                    level.destroyBlock(site, true);
+                }
                 if (level.setBlock(site, Blocks.CHEST.defaultBlockState(), 3)) {
                     planks.shrink(8);
                     if (planks.isEmpty()) inventory.setItem(i, ItemStack.EMPTY);
                     inventory.setChanged();
+                    VillageRegistry.isStorageForVillage(level, center, site);
                     return;
                 }
-            }
-
-            // Otherwise carry out one vanilla 1 log -> 4 planks recipe in the villager's inventory.
-            for (int i = 0; i < inventory.getContainerSize(); i++) {
-                ItemStack logs = inventory.getItem(i);
-                Item planks = plankItemForLog(logs);
-                if (planks == null || !inventoryCanFit(inventory, new ItemStack(planks, 4))) continue;
-                logs.shrink(1);
-                if (logs.isEmpty()) inventory.setItem(i, ItemStack.EMPTY);
-                inventory.setChanged();
-                insertIntoInventory(inventory, new ItemStack(planks, 4));
-                return;
             }
         }
     }
@@ -291,16 +330,21 @@ public final class VillageIndustry {
                 ItemStack stack = container.getItem(slot);
                 if (stack.isEmpty() || stack.getCount() < 4
                     || !Block.byItem(stack.getItem()).defaultBlockState().is(BlockTags.PLANKS)) continue;
-                BlockPos site = findBuildSiteNear(level, ref.pos(), 3);
+                BlockPos site = findBuildSiteNear(level, ref.pos(), 4);
                 if (site == null) continue;
                 Item plankItem = stack.getItem();
                 stack.shrink(4);
                 if (stack.isEmpty()) container.setItem(slot, ItemStack.EMPTY);
                 container.setChanged();
+                BlockState atSite = level.getBlockState(site);
+                if (!atSite.isAir() && VillageBuilder.isAirOrReplaceableVegetation(atSite)) {
+                    level.destroyBlock(site, true);
+                }
                 if (!level.setBlock(site, Blocks.CRAFTING_TABLE.defaultBlockState(), 3)) {
                     insertIntoContainer(container, new ItemStack(plankItem, 4));
                     return false;
                 }
+                VillageRegistry.isWorkBlockForVillage(level, center, site);
                 return true;
             }
         }
@@ -450,12 +494,19 @@ public final class VillageIndustry {
             if (!hasWorkerNear(villagers, ref.pos(), 5.0D)) continue;
             Container container = ref.container();
             if (countItem(container, Items.COBBLESTONE) < 8) continue;
-            BlockPos site = findBuildSiteNear(level, ref.pos(), 3);
+            BlockPos site = findBuildSiteNear(level, ref.pos(), 4);
             if (site == null) continue;
             List<StorageRef> local = findStorages(level, site, LOCAL_STORAGE_RADIUS);
             if (!hasRawMetal(local) || !hasAnyFuel(local)) continue;
             if (!takeItem(container, Items.COBBLESTONE, 8)) continue;
-            if (level.setBlock(site, Blocks.FURNACE.defaultBlockState(), 3)) return true;
+            BlockState atSite = level.getBlockState(site);
+            if (!atSite.isAir() && VillageBuilder.isAirOrReplaceableVegetation(atSite)) {
+                level.destroyBlock(site, true);
+            }
+            if (level.setBlock(site, Blocks.FURNACE.defaultBlockState(), 3)) {
+                VillageRegistry.isWorkBlockForVillage(level, center, site);
+                return true;
+            }
             insertIntoContainer(container, new ItemStack(Items.COBBLESTONE, 8));
             return false;
         }
@@ -538,7 +589,8 @@ public final class VillageIndustry {
     }
 
     private static boolean hasWorkerNear(List<Villager> villagers, BlockPos pos, double radius) {
-        double distanceSqr = radius * radius;
+        double effectiveRadius = Math.max(radius, 24.0D);
+        double distanceSqr = effectiveRadius * effectiveRadius;
         for (Villager villager : villagers) {
             if (isIdle(villager) && villager.distanceToSqr(Vec3.atCenterOf(pos)) <= distanceSqr) return true;
         }
@@ -546,8 +598,7 @@ public final class VillageIndustry {
     }
 
     private static boolean isIdle(Villager villager) {
-        if (villager.isBaby() || villager.isSleeping() || villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) return false;
-        CompoundTag data = villager.getPersistentData();
+        if (villager.isBaby() || villager.isSleeping() || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) return false;
         return !hasHigherPriorityTask(villager);
     }
 
@@ -612,7 +663,11 @@ public final class VillageIndustry {
             for (int dz = -scanRadius; dz <= scanRadius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (level.hasChunkAt(pos) && isStorage(level.getBlockState(pos))) return true;
+                    if (level.hasChunkAt(pos)
+                        && isStorage(level.getBlockState(pos))
+                        && VillageRegistry.isStorageForVillage(level, center, pos)) {
+                        return true;
+                    }
                 }
             }
         }
@@ -634,6 +689,7 @@ public final class VillageIndustry {
                 }
             }
         }
+        refs.sort(Comparator.comparingDouble(ref -> ref.pos().distSqr(center)));
         return refs;
     }
 
@@ -658,7 +714,8 @@ public final class VillageIndustry {
 
     private static boolean isBuildable(ServerLevel level, BlockPos pos) {
         if (!level.hasChunkAt(pos) || !level.hasChunkAt(pos.above()) || !level.hasChunkAt(pos.below())) return false;
-        if (!level.getBlockState(pos).isAir() || !level.getBlockState(pos.above()).isAir()
+        if (!VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos))
+            || !VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos.above()))
             || !level.getBlockState(pos.below()).blocksMotion() || !level.getFluidState(pos).isEmpty()) return false;
         return level.getBlockEntity(pos) == null;
     }
@@ -679,7 +736,8 @@ public final class VillageIndustry {
 
     private static boolean isSafeStand(ServerLevel level, BlockPos pos) {
         return level.hasChunkAt(pos) && level.hasChunkAt(pos.above()) && level.hasChunkAt(pos.below())
-            && level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir()
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos))
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos.above()))
             && level.getBlockState(pos.below()).blocksMotion();
     }
 

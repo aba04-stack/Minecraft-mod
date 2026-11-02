@@ -129,10 +129,11 @@ public final class VillageFarmBuilder {
             || !VillageReservations.isProjectSiteAvailable(level, site, 8, null)) return false;
 
         List<Villager> candidates = new ArrayList<>(VillageArea.findVillagers(level, center).stream().filter(v -> v.isAlive()
-            && VillagerRoles.isUnemployedAdult(v) && !v.isSleeping()
-            && v.getPersistentData().getString(VillagerRoles.ROLE_KEY).isEmpty()
+            && VillagerRoles.isEligibleAutonomousAdult(v) && !v.isSleeping()
+            && (v.getPersistentData().getString(VillagerRoles.ROLE_KEY).isEmpty()
+                || (VillagerRoles.isBuilder(v) && !VillageBuilder.isProjectActive(v)))
             && !hasOtherTask(v.getPersistentData())
-            && !v.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)).toList());
+            && !VillagerRoles.shouldYieldToVanillaVillagerAi(v)).toList());
         candidates.sort(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))));
         Villager worker = null;
         Item hoeItem = Items.AIR;
@@ -431,6 +432,10 @@ public final class VillageFarmBuilder {
                 data.putInt(PHASE, FETCH_HOE);
                 return;
             }
+            BlockState aboveSoil = level.getBlockState(step.pos().above());
+            if (!aboveSoil.isAir() && VillageBuilder.isAirOrReplaceableVegetation(aboveSoil)) {
+                level.destroyBlock(step.pos().above(), true);
+            }
             if (level.setBlock(step.pos(), Blocks.FARMLAND.defaultBlockState(), 3)) {
                 hoe.hurtAndBreak(1, worker, EquipmentSlot.MAINHAND);
                 worker.getInventory().setChanged();
@@ -445,6 +450,10 @@ public final class VillageFarmBuilder {
                 return;
             }
             if (removeItem(worker.getInventory(), Items.WATER_BUCKET, 1) != 1) return;
+            BlockState aboveWater = level.getBlockState(step.pos().above());
+            if (!aboveWater.isAir() && VillageBuilder.isAirOrReplaceableVegetation(aboveWater)) {
+                level.destroyBlock(step.pos().above(), true);
+            }
             if (!level.setBlock(step.pos(), Blocks.WATER.defaultBlockState(), 3)) {
                 addOrDrop(worker, level, Items.WATER_BUCKET, step.pos());
                 return;
@@ -459,6 +468,9 @@ public final class VillageFarmBuilder {
             if (countItem(worker.getInventory(), seed) < 1) {
                 data.putInt(PHASE, FETCH_SEEDS);
                 return;
+            }
+            if (!current.isAir() && VillageBuilder.isAirOrReplaceableVegetation(current)) {
+                level.destroyBlock(step.pos(), true);
             }
             if (!level.getBlockState(step.pos().below()).is(Blocks.FARMLAND)
                 || removeItem(worker.getInventory(), seed, 1) != 1) return;
@@ -476,11 +488,15 @@ public final class VillageFarmBuilder {
                 data.putInt(PHASE, FETCH_COMPOSTER);
                 return;
             }
+            if (!current.isAir() && VillageBuilder.isAirOrReplaceableVegetation(current)) {
+                level.destroyBlock(step.pos(), true);
+            }
             if (removeItem(worker.getInventory(), Items.COMPOSTER, 1) != 1) return;
             if (!level.setBlock(step.pos(), Blocks.COMPOSTER.defaultBlockState(), 3)) {
                 addOrDrop(worker, level, Items.COMPOSTER, worker.blockPosition());
                 return;
             }
+            VillageRegistry.isWorkBlockForVillage(level, worker.blockPosition(), step.pos());
             worker.getInventory().setChanged();
             worker.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
             advance(worker, data, now);
@@ -565,7 +581,7 @@ public final class VillageFarmBuilder {
     private static boolean isStepSiteStillUsable(ServerLevel level, FarmStep step, BlockState current) {
         return switch (step.kind()) {
             case WATER, TILL -> isFarmableGround(current) && !current.hasBlockEntity();
-            case PLANT, COMPOSTER -> current.isAir();
+            case PLANT, COMPOSTER -> VillageBuilder.isAirOrReplaceableVegetation(current);
         };
     }
 
@@ -719,7 +735,8 @@ public final class VillageFarmBuilder {
 
     private static boolean isSafeStand(ServerLevel level, BlockPos pos) {
         return level.hasChunkAt(pos) && level.hasChunkAt(pos.above()) && level.hasChunkAt(pos.below())
-            && level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir()
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos))
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos.above()))
             && level.getBlockState(pos.below()).blocksMotion();
     }
 

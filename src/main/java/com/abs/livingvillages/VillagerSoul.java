@@ -228,6 +228,10 @@ public final class VillagerSoul {
             status += " · Навык: " + VillagerProgression.describePrimarySkill(villager);
         }
         player.sendSystemMessage(Component.literal(status).withStyle(ChatFormatting.GRAY));
+        if (LivingVillagesConfig.ENABLE_VILLAGER_PROGRESSION.get()) {
+            player.sendSystemMessage(Component.literal(VillagerProgression.describeAllSkillsAndActivityRu(villager))
+                .withStyle(ChatFormatting.DARK_AQUA));
+        }
 
         if (hasMemory) {
             applyTrustBehaviorToVillager(villager, player);

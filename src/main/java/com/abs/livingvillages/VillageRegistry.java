@@ -65,6 +65,7 @@ public final class VillageRegistry extends SavedData {
     private final Map<String, Integer> diplomaticStandings = new HashMap<>();
     private final Map<UUID, Boolean> guardEquipmentRequests = new HashMap<>();
     private final Map<UUID, Long> villageLastVisitedTick = new HashMap<>();
+    private final Map<UUID, Map<String, String>> villageDiagnostics = new HashMap<>();
 
     private VillageRegistry() {}
 
@@ -1101,6 +1102,52 @@ public final class VillageRegistry extends SavedData {
                 }
             }
         }
+    }
+
+    public static List<BlockPos> knownLoadedVillageAnchors(ServerLevel level) {
+        if (level == null) return List.of();
+        VillageRegistry registry = get(level);
+        List<BlockPos> loaded = new ArrayList<>();
+        for (BlockPos anchor : registry.villageAnchors.values()) {
+            if (anchor != null && level.hasChunkAt(anchor)) {
+                loaded.add(anchor.immutable());
+            }
+        }
+        return loaded;
+    }
+
+    public static void recordDiagnostic(ServerLevel level, BlockPos center, String subsystem, String message) {
+        if (level == null || center == null || subsystem == null || subsystem.isBlank() || message == null) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        VillageRegistry registry = get(level);
+        Map<String, String> map = registry.villageDiagnostics.computeIfAbsent(id, ignored -> new java.util.LinkedHashMap<>());
+        map.put(subsystem, message);
+    }
+
+    public static String getDiagnostic(ServerLevel level, BlockPos center, String subsystem) {
+        if (level == null || center == null || subsystem == null) return "";
+        UUID id = villageId(level, center);
+        if (id == null) return "";
+        VillageRegistry registry = get(level);
+        Map<String, String> map = registry.villageDiagnostics.get(id);
+        return map == null ? "" : map.getOrDefault(subsystem, "");
+    }
+
+    public static String getDiagnosticsSummary(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return "";
+        UUID id = villageId(level, center);
+        if (id == null) return "";
+        VillageRegistry registry = get(level);
+        Map<String, String> map = registry.villageDiagnostics.get(id);
+        if (map == null || map.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            if (entry.getValue() == null || entry.getValue().isBlank()) continue;
+            if (!sb.isEmpty()) sb.append(" | ");
+            sb.append(entry.getKey()).append(": ").append(entry.getValue());
+        }
+        return sb.toString();
     }
 
     private static ListTag writeOwners(Map<Long, UUID> owners) {

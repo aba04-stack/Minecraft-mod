@@ -37,10 +37,10 @@ public final class VillageLogistics {
     private static final String STAND_X = P + "stand_x", STAND_Y = P + "stand_y", STAND_Z = P + "stand_z";
     private static final String STARTED = P + "started", LAST_ORDER = P + "last_order", NEXT_SCAN = P + "next_scan";
     private static final int TICK_STEP = 20;
-    private static final int SEARCH_RETRY_TICKS = 400;
-    private static final int SUCCESS_RETRY_TICKS = 1200;
+    private static final int SEARCH_RETRY_TICKS = 60;
+    private static final int SUCCESS_RETRY_TICKS = 80;
     private static final int TRIP_TIMEOUT_TICKS = 2400;
-    private static final int PICKUP_RADIUS = 3;
+    private static final int PICKUP_RADIUS = 4;
     private static final float WALK_SPEED = 0.55F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
 
@@ -69,11 +69,8 @@ public final class VillageLogistics {
         }
 
         if (hasHigherPriorityTask(data) || villager.isSleeping() || isNight(level)
-            || villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
+            || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)
             || level.getGameTime() < data.getLong(NEXT_SCAN)) return;
-
-        // Farmers already have a dedicated food-storage routine; do not compete with it.
-        if (villager.getVillagerData().getProfession() == VillagerProfession.FARMER) return;
 
         // Pick up only nearby physical drops, never items from an arbitrary distance.
         collectNearbyMaterials(villager, level);
@@ -84,8 +81,14 @@ public final class VillageLogistics {
 
         StorageTarget target = findNearestStorageWithRoom(villager, level);
         if (target == null) {
-            data.putLong(NEXT_SCAN, level.getGameTime() + SEARCH_RETRY_TICKS);
-            return;
+            if (LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()) {
+                VillageIndustry.tickArea(level, villager.blockPosition());
+                target = findNearestStorageWithRoom(villager, level);
+            }
+            if (target == null) {
+                data.putLong(NEXT_SCAN, level.getGameTime() + SEARCH_RETRY_TICKS);
+                return;
+            }
         }
 
         if (!VillageReservations.tryReserveStoragePositions(level, villager, List.of(target.storage()), "logistics_delivery")) {
@@ -264,14 +267,17 @@ public final class VillageLogistics {
         Block block = Block.byItem(stack.getItem());
         if (block != Blocks.AIR) {
             BlockState state = block.defaultBlockState();
-            if (state.is(BlockTags.LOGS) || state.is(BlockTags.PLANKS) || state.is(BlockTags.SAPLINGS)) return true;
+            if (state.is(BlockTags.LOGS) || state.is(BlockTags.PLANKS) || state.is(BlockTags.SAPLINGS)
+                || state.is(BlockTags.WOOL) || VillageBuilder.isSupportedStructuralBlock(block)) return true;
         }
         return stack.is(Items.STICK) || stack.is(Items.COAL) || stack.is(Items.CHARCOAL)
             || stack.is(Items.COBBLESTONE) || stack.is(Items.COBBLED_DEEPSLATE)
+            || stack.is(Items.SAND) || stack.is(Items.RED_SAND) || stack.is(Items.STONE)
             || stack.is(Items.RAW_IRON) || stack.is(Items.RAW_COPPER) || stack.is(Items.RAW_GOLD)
             || stack.is(Items.IRON_INGOT) || stack.is(Items.COPPER_INGOT) || stack.is(Items.GOLD_INGOT)
             || stack.is(Items.REDSTONE) || stack.is(Items.LAPIS_LAZULI) || stack.is(Items.DIAMOND)
-            || stack.is(Items.EMERALD) || stack.is(Items.WHEAT_SEEDS) || stack.is(Items.BEETROOT_SEEDS);
+            || stack.is(Items.EMERALD) || stack.is(Items.WHEAT) || stack.is(Items.WHEAT_SEEDS)
+            || stack.is(Items.BEETROOT_SEEDS);
     }
 
     private static boolean isStorage(BlockState state) {
@@ -280,7 +286,8 @@ public final class VillageLogistics {
 
     private static boolean isSafeStand(ServerLevel level, BlockPos pos) {
         return level.hasChunkAt(pos) && level.hasChunkAt(pos.above()) && level.hasChunkAt(pos.below())
-            && level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir()
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos))
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos.above()))
             && level.getBlockState(pos.below()).blocksMotion();
     }
 

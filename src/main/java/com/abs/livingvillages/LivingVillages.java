@@ -67,6 +67,7 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillagerTreeWork::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerMining::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageDefense::onVillagerTick);
+        NeoForge.EVENT_BUS.addListener(VillageIndustry::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageCraftingJobs::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageLogistics::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageBuilder::onVillagerTick);
@@ -105,9 +106,9 @@ public final class LivingVillages {
 
 
         List<ActiveArea> alreadyChecked = new ArrayList<>();
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            ServerLevel level = player.serverLevel();
-            BlockPos center = player.blockPosition();
+        for (CandidateCenter candidate : collectCandidateCenters(server)) {
+            ServerLevel level = candidate.level();
+            BlockPos center = candidate.center();
 
             List<Villager> villagers = findVillagers(level, center);
             if (isDuplicateArea(alreadyChecked, level, villagers)) {
@@ -115,6 +116,8 @@ public final class LivingVillages {
             }
             rememberActiveArea(alreadyChecked, level, villagers);
             if (villagers.size() < LivingVillagesConfig.MINIMUM_VILLAGERS.get()) {
+                VillageRegistry.recordDiagnostic(level, center, "Планировщик",
+                    "Недостаточно жителей (" + villagers.size() + "/" + LivingVillagesConfig.MINIMUM_VILLAGERS.get() + ")");
                 continue;
             }
 
@@ -134,6 +137,7 @@ public final class LivingVillages {
             if (villagers.stream().anyMatch(v -> v.getPersistentData().getBoolean(VillageCraftingJobs.ACTIVE_KEY)
                 || (LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get() && VillageBuilder.isProjectActive(v))
                 || (LivingVillagesConfig.ENABLE_FARM_PROJECTS.get() && VillageFarmBuilder.isProjectActive(v)))) {
+                VillageRegistry.recordDiagnostic(level, villageCenter, "Планировщик", "Ожидание завершения текущего проекта/ремесла");
                 continue;
             }
 
@@ -143,19 +147,20 @@ public final class LivingVillages {
                 if (result.success()) {
                     VillageElder.completeRequest(villagers, request, "Строительство дома началось.");
                     LOGGER.info("Village elder ordered a house at {}.", result.position());
-                    break;
+                    continue;
                 }
             } else if (request == VillageElder.REQUEST_FARM && LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
                 BuildResult result = tryBuildFarm(level, villageCenter);
                 if (result.success()) {
                     VillageElder.completeRequest(villagers, request, "Строительство фермы началось.");
                     LOGGER.info("Village elder ordered a farm at {}.", result.position());
-                    break;
+                    continue;
                 }
             }
 
             // Local elder control allows one village to pause or prioritize differently from others.
             if (!VillageElder.isAutomationEnabled(villagers)) {
+                VillageRegistry.recordDiagnostic(level, villageCenter, "Планировщик", "Авторазвитие приостановлено старостой");
                 continue;
             }
 
@@ -169,7 +174,7 @@ public final class LivingVillages {
                 BuildResult result = tryBuildFarm(level, villageCenter);
                 if (result.success()) {
                     LOGGER.info("Living Villages assigned a worker to create a farm at {}.", result.position());
-                    break;
+                    continue;
                 }
             }
 
@@ -177,17 +182,16 @@ public final class LivingVillages {
                 BuildResult result = tryBuild(level, villageCenter);
                 if (result.success()) {
                     LOGGER.info("Living Villages assigned a builder to construct a house at {}.", result.position());
-                    break;
+                    continue;
                 }
-                // Housing remains the default priority unless the elder explicitly chose food.
-                if (priority != VillageElder.PRIORITY_FOOD) continue;
+                if (priority == VillageElder.PRIORITY_HOUSING) continue;
             }
 
             if (foodProductionNeeded && LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
                 BuildResult result = tryBuildFarm(level, villageCenter);
                 if (result.success()) {
                     LOGGER.info("Living Villages created a farm at {}.", result.position());
-                    break;
+                    continue;
                 }
             }
         }
@@ -195,9 +199,9 @@ public final class LivingVillages {
 
     private void assignRolesInActiveAreas(MinecraftServer server) {
         List<ActiveArea> alreadyChecked = new ArrayList<>();
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            ServerLevel level = player.serverLevel();
-            BlockPos center = player.blockPosition();
+        for (CandidateCenter candidate : collectCandidateCenters(server)) {
+            ServerLevel level = candidate.level();
+            BlockPos center = candidate.center();
             List<Villager> villagers = findVillagers(level, center);
             if (villagers.isEmpty() || isDuplicateArea(alreadyChecked, level, villagers)) continue;
             rememberActiveArea(alreadyChecked, level, villagers);
@@ -215,9 +219,9 @@ public final class LivingVillages {
 
     private void runIndustryInActiveAreas(MinecraftServer server) {
         List<ActiveArea> alreadyChecked = new ArrayList<>();
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            ServerLevel level = player.serverLevel();
-            BlockPos playerPos = player.blockPosition();
+        for (CandidateCenter candidate : collectCandidateCenters(server)) {
+            ServerLevel level = candidate.level();
+            BlockPos playerPos = candidate.center();
             List<Villager> villagers = findVillagers(level, playerPos);
             if (villagers.isEmpty() || isDuplicateArea(alreadyChecked, level, villagers)) continue;
             rememberActiveArea(alreadyChecked, level, villagers);
@@ -233,9 +237,9 @@ public final class LivingVillages {
 
     private boolean hasPendingElderOrder(MinecraftServer server) {
         List<ActiveArea> checked = new ArrayList<>();
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            ServerLevel level = player.serverLevel();
-            BlockPos pos = player.blockPosition();
+        for (CandidateCenter candidate : collectCandidateCenters(server)) {
+            ServerLevel level = candidate.level();
+            BlockPos pos = candidate.center();
             List<Villager> villagers = findVillagers(level, pos);
             if (villagers.isEmpty() || isDuplicateArea(checked, level, villagers)) continue;
             rememberActiveArea(checked, level, villagers);
@@ -247,6 +251,55 @@ public final class LivingVillages {
         return false;
     }
 
+    private List<CandidateCenter> collectCandidateCenters(MinecraftServer server) {
+        List<CandidateCenter> candidates = new ArrayList<>();
+        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        if (players.isEmpty()) {
+            return candidates;
+        }
+        for (ServerPlayer player : players) {
+            candidates.add(new CandidateCenter(player.serverLevel(), player.blockPosition()));
+        }
+        for (ServerLevel level : server.getAllLevels()) {
+            for (BlockPos anchor : VillageRegistry.knownLoadedVillageAnchors(level)) {
+                candidates.add(new CandidateCenter(level, anchor));
+            }
+        }
+        return candidates;
+    }
+
+    /**
+     * Evaluates a single loaded settlement area (roles, industry, population, and house/farm planner).
+     */
+    public void tickSettlementArea(ServerLevel level, BlockPos center) {
+        if (level == null || center == null || !level.hasChunkAt(center)) return;
+        List<Villager> villagers = findVillagers(level, center);
+        if (villagers.isEmpty()) return;
+        BlockPos villageCenter = averageVillagerPosition(villagers, center);
+        VillageRegistry.cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        VillageElder.ensureElder(level, villageCenter, villagers);
+        if (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers)) {
+            VillagerRoles.assignRoles(level, villageCenter);
+            VillagePopulation.tickArea(level, villageCenter, villagers);
+            VillageIndustry.tickArea(level, villageCenter);
+        }
+        if (villagers.size() < LivingVillagesConfig.MINIMUM_VILLAGERS.get()) return;
+        if (villagers.stream().anyMatch(v -> v.getPersistentData().getBoolean(VillageCraftingJobs.ACTIVE_KEY)
+            || (LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get() && VillageBuilder.isProjectActive(v))
+            || (LivingVillagesConfig.ENABLE_FARM_PROJECTS.get() && VillageFarmBuilder.isProjectActive(v)))) {
+            return;
+        }
+        int beds = countBeds(level, villageCenter);
+        if (villagers.size() >= beds && LivingVillagesConfig.ENABLE_HOUSING_PROJECTS.get()) {
+            BuildResult house = tryBuild(level, villageCenter);
+            if (house.success()) return;
+        }
+        if (!hasEnoughFarmland(level, villageCenter, villagers.size())
+            && LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
+            tryBuildFarm(level, villageCenter);
+        }
+    }
+
     private BuildResult tryBuild(ServerLevel level, BlockPos center) {
         return tryBuild(level, center, false);
     }
@@ -254,14 +307,23 @@ public final class LivingVillages {
     private BuildResult tryBuild(ServerLevel level, BlockPos center, boolean elderOrdered) {
         List<Villager> villagers = findVillagers(level, center);
         if (villagers.size() < LivingVillagesConfig.MINIMUM_VILLAGERS.get()) {
-            return BuildResult.failure("Недостаточно жителей для запуска плана.");
+            String msg = "Недостаточно жителей для запуска плана.";
+            VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            return BuildResult.failure(msg);
         }
         int beds = countBeds(level, center);
         if (!elderOrdered && villagers.size() < beds) {
-            return BuildResult.failure("В поселении ещё есть свободная потенциальная кровать.");
+            String msg = "В поселении ещё есть свободная потенциальная кровать.";
+            VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            return BuildResult.failure(msg);
         }
 
         List<Container> containers = findResourceContainers(level, center);
+        if (containers.isEmpty()) {
+            String msg = "Нет хранилища (сундука/бочки) в радиусе поселения.";
+            VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            return BuildResult.failure(msg);
+        }
         Map<Block, Integer> plankCounts = countPlanks(containers);
         Block plankBlock = plankCounts.entrySet().stream()
             .filter(entry -> entry.getValue() >= HOUSE_PLANKS_REQUIRED)
@@ -270,60 +332,95 @@ public final class LivingVillages {
             .orElse(null);
 
         if (plankBlock == null) {
-            return BuildResult.failure("Не хватает материалов: нужно 96 строительных блоков одного вида (доски, песчаник, булыжник или каменный кирпич) в ближайших сундуках.");
+            String msg = "Не хватает материалов: нужно 96 строительных блоков одного вида (доски, песчаник, булыжник или каменный кирпич) в ближайших сундуках.";
+            VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            return BuildResult.failure(msg);
         }
         net.minecraft.world.item.Item bedItem = VillageBuilder.selectAvailableBedItem(containers);
         if (bedItem == Items.AIR) {
-            return BuildResult.failure("Не найдена кровать (любого цвета) в сундуках поблизости.");
+            String msg = "Не найдена кровать (любого цвета) в сундуках поблизости.";
+            VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            return BuildResult.failure(msg);
         }
         net.minecraft.world.item.Item doorItem = VillageBuilder.selectAvailableDoorItem(plankBlock, containers);
         if (doorItem == Items.AIR) {
-            return BuildResult.failure("Для выбранных блоков не найден подходящий настоящий дверной блок.");
+            String msg = "Для выбранных блоков не найден подходящий настоящий дверной блок.";
+            VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            return BuildResult.failure(msg);
         }
         if (countItem(containers, doorItem) < 1) {
-            return BuildResult.failure("Для закрытого дома нужна деревянная дверь. Ремесленник должен изготовить её из 6 досок или получить по обмену.");
+            String msg = "Для закрытого дома нужна деревянная дверь. Ремесленник должен изготовить её из 6 досок или получить по обмену.";
+            VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            return BuildResult.failure(msg);
         }
 
         BlockPos site = findBuildSite(level, center);
         if (site == null) {
-            return BuildResult.failure("Не найдено ровное свободное место в радиусе 20 блоков.");
+            String msg = "Не найдено ровное свободное место в радиусе 28 блоков.";
+            VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            return BuildResult.failure(msg);
         }
 
         // Do not consume anything here. The builder must physically walk to storage,
         // collect the already-existing items, and place each block at the site over time.
         if (!VillageBuilder.startHouseProject(level, center, site, plankBlock, doorItem, bedItem)) {
-            return BuildResult.failure("Строитель занят, не назначен или не может вместить материалы в инвентарь.");
+            String msg = "Строитель занят, не назначен или не может вместить материалы в инвентарь.";
+            VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            return BuildResult.failure(msg);
         }
-        return BuildResult.projectStarted(site, "Строитель начал собирать материалы и возводить хижину по блокам.");
+        String ok = "Строитель начал собирать материалы и возводить хижину по блокам.";
+        VillageRegistry.recordDiagnostic(level, center, "Дом", ok);
+        return BuildResult.projectStarted(site, ok);
     }
 
     private BuildResult tryBuildFarm(ServerLevel level, BlockPos center) {
         List<Container> containers = findResourceContainers(level, center);
+        if (containers.isEmpty()) {
+            String msg = "Нет хранилища для ресурсов фермы.";
+            VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            return BuildResult.failure(msg);
+        }
         CropPlan cropPlan = chooseCropPlan(containers);
         if (cropPlan == null) {
-            return BuildResult.failure("Для фермы нужны 24 одинаковых семени пшеницы, морковки, картофелины или семени свёклы в настоящих хранилищах.");
+            String msg = "Для фермы нужны 24 одинаковых семени пшеницы, морковки, картофелины или семени свёклы в настоящих хранилищах.";
+            VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            return BuildResult.failure(msg);
         }
         if (countItem(containers, Items.WATER_BUCKET) < 1) {
-            return BuildResult.failure("Для фермы нужно настоящее ведро воды в ближайшем хранилище.");
+            String msg = "Для фермы нужно настоящее ведро воды в ближайшем хранилище.";
+            VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            return BuildResult.failure(msg);
         }
         if (countItem(containers, Items.COMPOSTER) < 1) {
-            return BuildResult.failure("Для фермы нужен настоящий компостер в ближайшем хранилище.");
+            String msg = "Для фермы нужен настоящий компостер в ближайшем хранилище.";
+            VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            return BuildResult.failure(msg);
         }
         if (!VillageFarmBuilder.hasHoe(containers)) {
-            return BuildResult.failure("Для подготовки поля нужна настоящая мотыга в хранилище.");
+            String msg = "Для подготовки поля нужна настоящая мотыга в хранилище.";
+            VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            return BuildResult.failure(msg);
         }
         if (!canReturnEmptyBucket(containers)) {
-            return BuildResult.failure("Нет свободного места в хранилищах, чтобы вернуть пустое ведро.");
+            String msg = "Нет свободного места в хранилищах, чтобы вернуть пустое ведро.";
+            VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            return BuildResult.failure(msg);
         }
 
         BlockPos site = findFarmSite(level, center);
         if (site == null) {
-            return BuildResult.failure("Не найден ровный участок 5×5 в радиусе 20 блоков.");
+            String msg = "Не найден ровный участок 5×5 в радиусе 28 блоков.";
+            VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            return BuildResult.failure(msg);
         }
         if (!VillageFarmBuilder.startFarmProject(level, center, site, cropPlan.seedItem(), cropPlan.cropBlock())) {
-            return BuildResult.failure("Не найден свободный работник с местом в инвентаре для материалов фермы.");
+            String msg = "Не найден свободный работник с местом в инвентаре для материалов фермы.";
+            VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            return BuildResult.failure(msg);
         }
-        return BuildResult.projectStarted(site, "Рабочий начал собирать настоящие семена, воду, компостер и мотыгу. Ферма будет строиться поэтапно.");
+        String ok = "Рабочий начал собирать настоящие семена, воду, компостер и мотыгу. Ферма будет строиться поэтапно.";
+        VillageRegistry.recordDiagnostic(level, center, "Ферма", ok);
+        return BuildResult.projectStarted(site, ok);
     }
 
     private CropPlan chooseCropPlan(List<Container> containers) {
@@ -364,7 +461,7 @@ public final class LivingVillages {
     }
 
     private BlockPos findFarmSite(ServerLevel level, BlockPos center) {
-        for (int radius = 4; radius <= 20; radius += 2) {
+        for (int radius = 4; radius <= 28; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 for (int dz = -radius; dz <= radius; dz++) {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
@@ -399,8 +496,8 @@ public final class LivingVillages {
                 }
                 BlockPos groundPos = new BlockPos(x, baseY - 1, z);
                 if (!isFarmableGround(level.getBlockState(groundPos))
-                    || !level.getBlockState(new BlockPos(x, baseY, z)).isAir()
-                    || !level.getBlockState(new BlockPos(x, baseY + 1, z)).isAir()) {
+                    || !VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(new BlockPos(x, baseY, z)))
+                    || !VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(new BlockPos(x, baseY + 1, z)))) {
                     return false;
                 }
             }
@@ -413,7 +510,7 @@ public final class LivingVillages {
         }
         BlockPos composterGround = new BlockPos(composterX, baseY - 1, composterZ);
         return isFarmableGround(level.getBlockState(composterGround))
-            && level.getBlockState(new BlockPos(composterX, baseY, composterZ)).isAir();
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(new BlockPos(composterX, baseY, composterZ)));
     }
 
     private boolean isFarmableGround(BlockState state) {
@@ -553,7 +650,7 @@ public final class LivingVillages {
     }
 
     private BlockPos findBuildSite(ServerLevel level, BlockPos center) {
-        for (int radius = 4; radius <= 20; radius += 2) {
+        for (int radius = 4; radius <= 28; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 for (int dz = -radius; dz <= radius; dz++) {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
@@ -589,12 +686,15 @@ public final class LivingVillages {
 
                 BlockPos groundPos = new BlockPos(x, baseY - 1, z);
                 BlockState ground = level.getBlockState(groundPos);
-                if (!ground.isSolidRender(level, groundPos) || !ground.getFluidState().isEmpty()) {
+                if ((!ground.isSolidRender(level, groundPos)
+                        && !ground.is(Blocks.DIRT_PATH)
+                        && !ground.is(Blocks.FARMLAND))
+                    || !ground.getFluidState().isEmpty()) {
                     return false;
                 }
 
                 for (int dy = 0; dy <= 4; dy++) {
-                    if (!level.getBlockState(new BlockPos(x, baseY + dy, z)).isAir()) {
+                    if (!VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(new BlockPos(x, baseY + dy, z)))) {
                         return false;
                     }
                 }
@@ -617,6 +717,9 @@ public final class LivingVillages {
         private boolean overlaps(List<Villager> villagers) {
             return villagers.stream().anyMatch(v -> residentIds.contains(v.getUUID().toString()));
         }
+    }
+
+    private record CandidateCenter(ServerLevel level, BlockPos center) {
     }
 
     private record CropPlan(net.minecraft.world.item.Item seedItem, Block cropBlock, int available) {

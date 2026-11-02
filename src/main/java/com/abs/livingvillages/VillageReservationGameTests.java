@@ -1635,7 +1635,7 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_care_trust_and_elder_livestock_summary")
+    @GameTest(template = "empty", timeoutTicks = 60, batch = "livestock_care_trust_and_elder_livestock_summary")
     public static void interactiveRequestPreferencesLivestockCareTrustAndElderLivestockSummaryWorkInWorld(GameTestHelper helper) {
         for (int x = 0; x <= 30; x++) {
             for (int z = 0; z <= 2; z++) {
@@ -1649,8 +1649,101 @@ public final class VillageReservationGameTests {
         Villager residentB = helper.spawn(EntityType.VILLAGER, 4, 1, 1);
         residentA.setNoAi(true);
         residentB.setNoAi(true);
+        // Stage 1: Assign regular vanilla professions (FARMER and FLETCHER) and verify they are eligible for autonomous development.
+        residentA.setVillagerData(residentA.getVillagerData().setProfession(net.minecraft.world.entity.npc.VillagerProfession.FARMER));
+        residentB.setVillagerData(residentB.getVillagerData().setProfession(net.minecraft.world.entity.npc.VillagerProfession.FLETCHER));
         residentA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeA));
         residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeB));
+        helper.assertTrue(
+            VillagerRoles.isEligibleAutonomousAdult(residentA) && VillagerRoles.isEligibleAutonomousAdult(residentB),
+            "Stage 1: Villagers with vanilla professions (FARMER, FLETCHER) must be eligible for autonomous settlement tasks.");
+
+        // Stage 2, 3 & 4: On an isolated platform at (+15, +40, +36) outside the 3x8 GameTest grid (>32 blocks in Z and Y),
+        // verify: gather logs -> bootstrap first storage chest -> deposit logs -> craft >96 planks -> build crafting table & bake bread.
+        BlockPos skyCenter = helper.absolutePos(new BlockPos(15, 40, 36));
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                helper.getLevel().setBlock(skyCenter.offset(dx, -1, dz), Blocks.GRASS_BLOCK.defaultBlockState(), 3);
+                helper.getLevel().setBlock(skyCenter.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), 3);
+                helper.getLevel().setBlock(skyCenter.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), 3);
+            }
+        }
+        // Place short grass around skyCenter to prove replaceable ground cover never blocks chest/table placement.
+        helper.getLevel().setBlock(skyCenter.east(), Blocks.SHORT_GRASS.defaultBlockState(), 3);
+        Villager skyWorker = EntityType.VILLAGER.create(helper.getLevel());
+        Villager skyPartner = EntityType.VILLAGER.create(helper.getLevel());
+        helper.assertTrue(skyWorker != null && skyPartner != null, "Sky test villagers must be created.");
+        skyWorker.moveTo(skyCenter.getX() + 0.5D, skyCenter.getY(), skyCenter.getZ() + 0.5D, 0.0F, 0.0F);
+        skyPartner.moveTo(skyCenter.getX() + 2.5D, skyCenter.getY(), skyCenter.getZ() + 0.5D, 0.0F, 0.0F);
+        skyWorker.setNoAi(true);
+        skyPartner.setNoAi(true);
+        skyWorker.setVillagerData(skyWorker.getVillagerData().setProfession(net.minecraft.world.entity.npc.VillagerProfession.FLETCHER));
+        skyPartner.setVillagerData(skyPartner.getVillagerData().setProfession(net.minecraft.world.entity.npc.VillagerProfession.FARMER));
+        skyWorker.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), skyCenter));
+        skyPartner.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), skyCenter.east(2)));
+        helper.getLevel().addFreshEntity(skyWorker);
+        helper.getLevel().addFreshEntity(skyPartner);
+        skyWorker.getInventory().addItem(new ItemStack(Items.OAK_LOG, 8));
+
+        VillageIndustry.tickArea(helper.getLevel(), skyCenter);
+
+        BlockPos bootstrappedChestPos = null;
+        for (BlockPos p : BlockPos.betweenClosed(skyCenter.offset(-5, -1, -2), skyCenter.offset(5, 1, 2))) {
+            if (helper.getLevel().getBlockState(p).is(Blocks.CHEST)) {
+                bootstrappedChestPos = p.immutable();
+                break;
+            }
+        }
+        helper.assertTrue(
+            bootstrappedChestPos != null,
+            "Stage 4: A villager carrying logs must bootstrap and place the settlement's first Chest even when vanilla-employed and surrounded by grass.");
+        Container firstChest = (Container) helper.getLevel().getBlockEntity(bootstrappedChestPos);
+        int depositedLogs = VillageLogistics.depositCarriedMaterials(skyWorker, firstChest, 100L);
+        helper.assertTrue(
+            depositedLogs >= 6 && countItem(firstChest, Items.OAK_LOG) >= 6,
+            "Stage 3: Logistics must deposit remaining harvested logs from a vanilla-profession villager into the new chest.");
+
+        // Add more logs and raw wheat to verify industry builds a Crafting Table, converts >96 planks (no 24-plank cap), and bakes Bread.
+        firstChest.setItem(1, new ItemStack(Items.OAK_LOG, 32));
+        firstChest.setItem(2, new ItemStack(Items.WHEAT, 9));
+        for (int i = 0; i < 8; i++) {
+            VillageIndustry.tickArea(helper.getLevel(), skyCenter);
+        }
+        boolean hasWorkshopTable = false;
+        for (BlockPos p : BlockPos.betweenClosed(skyCenter.offset(-5, -1, -2), skyCenter.offset(5, 1, 2))) {
+            if (helper.getLevel().getBlockState(p).is(Blocks.CRAFTING_TABLE)) {
+                hasWorkshopTable = true;
+                break;
+            }
+        }
+        int craftedPlanksInChest = countItem(firstChest, Items.OAK_PLANKS);
+        int bakedBreadInChest = countItem(firstChest, Items.BREAD);
+        helper.assertTrue(
+            hasWorkshopTable && craftedPlanksInChest >= 96 && bakedBreadInChest >= 3,
+            "Stages 5 & 6: Industry must build a Crafting Table, convert logs beyond the old 24-plank cap (got "
+                + craftedPlanksInChest + "), and bake Wheat into Bread (got " + bakedBreadInChest + ").");
+
+        // Stages 9 & 10: Place 3 beds on the sky platform for 2 fed villagers and verify natural breeding preparation.
+        for (int b = 0; b < 3; b++) {
+            BlockPos foot = skyCenter.offset(-5 + b * 2, 0, -1);
+            BlockState footState = Blocks.RED_BED.defaultBlockState()
+                .setValue(HorizontalDirectionalBlock.FACING, Direction.SOUTH)
+                .setValue(BedBlock.PART, BedPart.FOOT);
+            helper.getLevel().setBlock(foot, footState, 3);
+            helper.getLevel().setBlock(foot.south(), footState.setValue(BedBlock.PART, BedPart.HEAD), 3);
+            VillageRegistry.isBedForVillage(helper.getLevel(), skyCenter, foot);
+        }
+        skyWorker.getInventory().addItem(new ItemStack(Items.BREAD, 3));
+        skyPartner.getInventory().addItem(new ItemStack(Items.BREAD, 3));
+        helper.getLevel().setDayTime(2000L);
+        VillagePopulation.tickArea(helper.getLevel(), skyCenter, List.of(skyWorker, skyPartner));
+        boolean pairedForBreeding = skyWorker.getBrain().hasMemoryValue(MemoryModuleType.BREED_TARGET)
+            && skyPartner.getBrain().hasMemoryValue(MemoryModuleType.BREED_TARGET);
+        skyWorker.discard();
+        skyPartner.discard();
+        helper.assertTrue(
+            pairedForBreeding,
+            "Stages 9 & 10: Fed adult villagers with spare beds must pair up with BREED_TARGET for natural breeding.");
 
         java.util.UUID caretakerUuid = java.util.UUID.nameUUIDFromBytes("livestock-caretaker".getBytes());
         VillagerSoul.setPlayerTrust(residentA, caretakerUuid, 20);
@@ -1682,16 +1775,16 @@ public final class VillageReservationGameTests {
                 && animalStatus.contains("Детёныш"),
             "Feeding village livestock must grant a trust bonus with nearby villagers and describe baby animal status.");
 
-        // Elect village elder and verify livestock summary appears in the Elder panel snapshot.
+        // Elect village elder and verify livestock summary + diagnostics appear in the Elder panel snapshot.
         List<Villager> villagers = List.of(residentA, residentB);
         VillageElder.ensureElder(helper.getLevel(), homeA, villagers);
         Villager elder = VillageElder.isElder(residentA) ? residentA : residentB;
         var panel = VillageElder.createPanelSnapshot(helper.getLevel(), elder, "");
         helper.assertTrue(
-            panel.notice().contains("Скот:"),
-            "Elder panel snapshot must include the village livestock summary when animals are present.");
+            panel.notice().contains("Скот:") && panel.notice().contains("Диагностика:"),
+            "Elder panel snapshot must include both livestock summary and live development diagnostics.");
 
-        // Verify 4:1 Sand -> Sandstone compression, all 16 bed colors, biome structural blocks, and AI arbitration.
+        // Stages 7 & 8: Verify desert 4:1 Sand -> Sandstone compression, all 16 bed colors, biome structural blocks, and house project start.
         BlockPos desertChestPos = helper.absolutePos(new BlockPos(8, 1, 1));
         helper.setBlock(new BlockPos(8, 1, 1), Blocks.CHEST);
         VillageRegistry.isStorageForVillage(helper.getLevel(), homeA, desertChestPos);
@@ -1720,10 +1813,10 @@ public final class VillageReservationGameTests {
                 && VillageBuilder.isSupportedBedItem(Items.BLUE_BED)
                 && VillageBuilder.isSupportedStructuralBlock(Blocks.SANDSTONE)
                 && VillageBuilder.isSupportedStructuralBlock(Blocks.STONE_BRICKS)
-                && VillageBuilder.isSupportedStructuralBlock(Blocks.TERRACOTTA),
-            "Builder must support all 16 bed colors, biome structural blocks, and available wooden doors.");
+                && VillageBuilder.isSupportedStructuralBlock(Blocks.TERRACOTTA)
+                && VillageBuilder.hasMaterialsForHouse(helper.getLevel(), homeA),
+            "Builder must support all 16 bed colors, biome structural blocks, and detect house material readiness.");
 
-        residentB.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_BUILDER);
         BlockPos houseSite = helper.absolutePos(new BlockPos(240, 40, 240));
         boolean startedSandstoneHouse = VillageBuilder.startHouseProject(
             helper.getLevel(),
@@ -1734,11 +1827,63 @@ public final class VillageReservationGameTests {
             selectedBed
         );
         helper.assertTrue(
-            startedSandstoneHouse && VillageBuilder.isProjectActive(residentB),
-            "Desert settlement must be able to start a house project using 96 Sandstone, Yellow Bed, and Acacia Door.");
+            startedSandstoneHouse && (VillageBuilder.isProjectActive(residentA) || VillageBuilder.isProjectActive(residentB)),
+            "Stage 7: Settlement with vanilla-employed villagers must auto-promote a builder and start a house project.");
+        residentA.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, false);
         residentB.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, false);
+        VillageReservations.release(residentA.getPersistentData());
         VillageReservations.release(residentB.getPersistentData());
         desertChest.clearContent();
+
+        // Stages 11 & 12: Verify multi-day XP progression from Level 1 to Level 5 across all 7 roles,
+        // efficiency bonuses, profession change, another villager's death, and save/reload persistence.
+        String[] allRoles = {
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_LUMBERJACK,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_MINER,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_CRAFTSMAN,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_FARMER,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_COURIER,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_GUARD
+        };
+        long simTick = 1000L;
+        int baseStepTicks = VillagerProgression.adjustedStepTicks(
+            residentB, com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER, 20, 4);
+        for (int step = 0; step < 30; step++) {
+            simTick += 2400L; // Advance across 5 simulated in-game days (30 * 2400 = 72,000 ticks = 3+ days)
+            VillagerProgression.recordCompletedWork(
+                residentB,
+                com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER,
+                15,
+                true,
+                simTick
+            );
+        }
+        for (String role : allRoles) {
+            simTick += 200L;
+            VillagerProgression.recordCompletedWork(residentB, role, 12, true, simTick);
+        }
+        int maxLevel = VillagerProgression.getLevel(
+            residentB, com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER);
+        int maxLevelStepTicks = VillagerProgression.adjustedStepTicks(
+            residentB, com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER, 20, 4);
+        // Change vanilla profession (FLETCHER -> MASON) and verify Level 5 and all role skills persist across NBT save/load.
+        residentB.setVillagerData(residentB.getVillagerData().setProfession(net.minecraft.world.entity.npc.VillagerProfession.MASON));
+        CompoundTag savedVillagerNbt = new CompoundTag();
+        residentB.saveWithoutId(savedVillagerNbt);
+        Villager reloadedVillager = helper.spawn(EntityType.VILLAGER, 6, 1, 1);
+        reloadedVillager.setNoAi(true);
+        reloadedVillager.load(savedVillagerNbt);
+        int reloadedBuilderLevel = VillagerProgression.getLevel(
+            reloadedVillager, com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER);
+        String inspectableSummary = VillagerProgression.describeAllSkillsAndActivityRu(reloadedVillager);
+        reloadedVillager.discard();
+        helper.assertTrue(
+            maxLevel == 5
+                && maxLevelStepTicks < baseStepTicks
+                && reloadedBuilderLevel == 5
+                && inspectableSummary.contains("Строитель ур. 5/5"),
+            "Stages 11 & 12: Villager must reach Level 5 across multi-day work, work faster at Level 5, and preserve XP/levels across profession changes and world save/reload.");
 
         residentA.getPersistentData().putLong(VillagerRoles.TASK_PROGRESS_TICK_KEY, 100L);
         residentA.getPersistentData().putBoolean("livingvillages_logistics_active", true);

@@ -63,11 +63,15 @@ public final class VillageCraftingJobs {
     private static final int CRAFT_DURATION_TICKS = 40;
     private static final int JOB_TIMEOUT_TICKS = 48000;
     private static final int ROUTE_REISSUE_TICKS = 40;
-    private static final int RETRY_TICKS = 200;
+    private static final int RETRY_TICKS = 40;
     private static final float WALK_SPEED = 0.55F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
 
     private VillageCraftingJobs() {}
+
+    public static boolean isBusy(Villager villager) {
+        return villager != null && villager.getPersistentData().getBoolean(ACTIVE_KEY);
+    }
 
     public static void onVillagerTick(EntityTickEvent.Post event) {
         if (!(event.getEntity() instanceof Villager villager) || villager.level().isClientSide()
@@ -75,7 +79,10 @@ public final class VillageCraftingJobs {
         if (!(villager.level() instanceof ServerLevel level)) return;
 
         CompoundTag data = villager.getPersistentData();
-        if (!VillagerRoles.isCraftsman(villager)) {
+        boolean eligibleCrafter = VillagerRoles.isCraftsman(villager)
+            || (VillagerRoles.isBuilder(villager) && !VillageBuilder.isProjectActive(villager)
+                && VillageArea.findVillagers(level, villager.blockPosition()).stream().noneMatch(VillagerRoles::isCraftsman));
+        if (!eligibleCrafter) {
             if (data.getBoolean(ACTIVE_KEY)) {
                 clearOwnedRoute(villager, data);
                 clearJob(data);
@@ -116,7 +123,10 @@ public final class VillageCraftingJobs {
 
         if (!data.getBoolean(ACTIVE_KEY)) {
             if (now < data.getLong(NEXT_JOB) || hasOtherTask(data)
-                || villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) return;
+                || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) return;
+            if (data.getBoolean("livingvillages_industry_route_active")) {
+                data.putBoolean("livingvillages_industry_route_active", false);
+            }
             startBestJob(villager, level, data, now);
             return;
         }
@@ -198,19 +208,28 @@ public final class VillageCraftingJobs {
         data.putInt(TABLE_Z, table.getZ());
     }
 
-    /** Demand-driven priority: mining tool first, then an axe, then village defense equipment. */
+    /** Demand-driven priority: mining tool first, then an axe, then housing/farm essentials and defense equipment. */
     private static Recipe chooseRecipe(ServerLevel level, BlockPos center, Villager crafter,
                                        List<StorageRef> storages, List<Villager> villagers) {
-        // If housing is needed, reserve the full 96-plank house bill and make a matching
-        // door from six additional physical planks (vanilla recipe yields three doors).
-        // Without the surplus, never consume materials reserved for the house itself.
-        if (VillageBuilder.housingNeeded(level, center, villagers.size())) {
+        boolean housingNeeded = VillageBuilder.housingNeeded(level, center, villagers.size());
+        if (housingNeeded) {
             Item housePlanks = bestStoredHousePlanks(storages, VillageBuilder.housePlanksRequired() + 6);
-            if (housePlanks != null) {
+            if (housePlanks == null && totalStructuralBlocks(storages) >= VillageBuilder.housePlanksRequired()) {
+                housePlanks = bestPlanks(storages, crafter, 6);
+            }
+            if (housePlanks != null && countAllDoors(storages, crafter) == 0) {
                 Item door = VillageBuilder.doorItemForPlanks(Block.byItem(housePlanks));
                 if (door != Items.AIR && totalItem(storages, door) == 0) {
                     return new Recipe("door|" + BuiltInRegistries.ITEM.getKey(housePlanks), door, 3,
                         List.of(new Ingredient(housePlanks, 6)));
+                }
+            }
+            if (countAllBeds(storages, crafter) == 0) {
+                Item bedPlanks = bestPlanks(storages, crafter, 3);
+                Item wool = bestWool(storages, crafter, 3);
+                if (bedPlanks != null && wool != null) {
+                    Recipe bedRecipe = bedRecipe(bedPlanks, wool);
+                    if (bedRecipe != null) return bedRecipe;
                 }
             }
         }
@@ -262,10 +281,46 @@ public final class VillageCraftingJobs {
             }
         }
 
+        // Farm tools & workstation: hoe and composter so new farms can be built without waiting on manual items.
+        if (countHoes(storages, villagers) == 0 && pickaxes > 0) {
+            Recipe hoe = null;
+            if (cobble >= 2) {
+                hoe = fixed("stone_hoe", Items.STONE_HOE, 1,
+                    List.of(new Ingredient(Items.COBBLESTONE, 2), new Ingredient(Items.STICK, 2)));
+            } else {
+                Item planks = bestPlanks(storages, crafter, 2);
+                if (planks != null) hoe = plankTool("wooden_hoe", Items.WOODEN_HOE, planks, 2, 2);
+            }
+            if (hoe != null) {
+                if (sticks < 2) {
+                    int plankReserve = hoe.output() == Items.WOODEN_HOE ? 4 : 2;
+                    Item plankForSticks = bestPlanks(storages, crafter, plankReserve);
+                    return plankForSticks == null ? null : sticksRecipe(plankForSticks);
+                }
+                return hoe;
+            }
+        }
+
+        if (availableCount(storages, crafter, Items.COMPOSTER) == 0 && pickaxes > 0) {
+            Item composterPlanks = bestPlanks(storages, crafter, 7);
+            if (composterPlanks != null) {
+                return composterRecipe(composterPlanks);
+            }
+        }
+
+        // Prepare a door in advance once the settlement has surplus planks or structural stone/sandstone.
+        if (countAllDoors(storages, crafter) == 0) {
+            Item doorPlanks = bestPlanks(storages, crafter, 6);
+            if (doorPlanks != null && (totalStructuralBlocks(storages) >= 24 || bestPlanks(storages, crafter, 16) != null)) {
+                Recipe d = doorRecipe(doorPlanks);
+                if (d != null) return d;
+            }
+        }
+
         long adults = villagers.stream().filter(v -> v.isAlive() && !v.isBaby()).count();
         int swords = countTools(storages, villagers, VillageCraftingJobs::isSword, ToolUse.GUARD);
         boolean guardRequestedSword = VillageRegistry.isGuardEquipmentRequested(level, center);
-        if ((adults >= 5 || guardRequestedSword) && swords == 0) {
+        if ((adults >= 3 || guardRequestedSword) && swords == 0) {
             Recipe sword = null;
             if (iron >= 2) {
                 sword = fixed("iron_sword", Items.IRON_SWORD, 1,
@@ -571,16 +626,28 @@ public final class VillageCraftingJobs {
         int separator = id.indexOf('|');
         if (separator > 0) {
             String kind = id.substring(0, separator);
-            String itemId = id.substring(separator + 1);
-            ResourceLocation key = ResourceLocation.tryParse(itemId);
+            String remainder = id.substring(separator + 1);
+            if ("bed".equals(kind)) {
+                int secondSep = remainder.indexOf('|');
+                if (secondSep <= 0) return null;
+                ResourceLocation plankKey = ResourceLocation.tryParse(remainder.substring(0, secondSep));
+                ResourceLocation woolKey = ResourceLocation.tryParse(remainder.substring(secondSep + 1));
+                if (plankKey == null || woolKey == null) return null;
+                Item plankItem = BuiltInRegistries.ITEM.get(plankKey);
+                Item woolItem = BuiltInRegistries.ITEM.get(woolKey);
+                return bedRecipe(plankItem, woolItem);
+            }
+            ResourceLocation key = ResourceLocation.tryParse(remainder);
             if (key == null) return null;
             Item material = BuiltInRegistries.ITEM.get(key);
             if (material == Items.AIR || !Block.byItem(material).defaultBlockState().is(BlockTags.PLANKS)) return null;
             return switch (kind) {
                 case "sticks" -> sticksRecipe(material);
                 case "door" -> doorRecipe(material);
+                case "composter" -> composterRecipe(material);
                 case "wooden_pickaxe" -> plankTool(kind, Items.WOODEN_PICKAXE, material, 3, 2);
                 case "wooden_axe" -> plankTool(kind, Items.WOODEN_AXE, material, 3, 2);
+                case "wooden_hoe" -> plankTool(kind, Items.WOODEN_HOE, material, 2, 2);
                 case "wooden_sword" -> plankTool(kind, Items.WOODEN_SWORD, material, 2, 1);
                 default -> null;
             };
@@ -590,6 +657,7 @@ public final class VillageCraftingJobs {
             case "iron_pickaxe" -> fixed(id, Items.IRON_PICKAXE, 1, List.of(new Ingredient(Items.IRON_INGOT, 3), new Ingredient(Items.STICK, 2)));
             case "stone_axe" -> fixed(id, Items.STONE_AXE, 1, List.of(new Ingredient(Items.COBBLESTONE, 3), new Ingredient(Items.STICK, 2)));
             case "iron_axe" -> fixed(id, Items.IRON_AXE, 1, List.of(new Ingredient(Items.IRON_INGOT, 3), new Ingredient(Items.STICK, 2)));
+            case "stone_hoe" -> fixed(id, Items.STONE_HOE, 1, List.of(new Ingredient(Items.COBBLESTONE, 2), new Ingredient(Items.STICK, 2)));
             case "stone_sword" -> fixed(id, Items.STONE_SWORD, 1, List.of(new Ingredient(Items.COBBLESTONE, 2), new Ingredient(Items.STICK, 1)));
             case "iron_sword" -> fixed(id, Items.IRON_SWORD, 1, List.of(new Ingredient(Items.IRON_INGOT, 2), new Ingredient(Items.STICK, 1)));
             default -> null;
@@ -601,6 +669,109 @@ public final class VillageCraftingJobs {
         if (door == Items.AIR) return null;
         return new Recipe("door|" + BuiltInRegistries.ITEM.getKey(planks), door, 3,
             List.of(new Ingredient(planks, 6)));
+    }
+
+    private static Recipe composterRecipe(Item planks) {
+        if (planks == null || planks == Items.AIR) return null;
+        return new Recipe("composter|" + BuiltInRegistries.ITEM.getKey(planks), Items.COMPOSTER, 1,
+            List.of(new Ingredient(planks, 7)));
+    }
+
+    private static Recipe bedRecipe(Item planks, Item wool) {
+        if (planks == null || planks == Items.AIR || wool == null || wool == Items.AIR) return null;
+        Item bedItem = matchingBedForWool(wool);
+        if (bedItem == Items.AIR) return null;
+        return new Recipe(
+            "bed|" + BuiltInRegistries.ITEM.getKey(planks) + "|" + BuiltInRegistries.ITEM.getKey(wool),
+            bedItem,
+            1,
+            List.of(new Ingredient(planks, 3), new Ingredient(wool, 3))
+        );
+    }
+
+    private static Item matchingBedForWool(Item wool) {
+        if (wool == null || wool == Items.AIR) return Items.AIR;
+        ResourceLocation woolId = BuiltInRegistries.ITEM.getKey(wool);
+        String path = woolId.getPath();
+        if (!path.endsWith("_wool")) return Items.AIR;
+        String bedPath = path.substring(0, path.length() - "_wool".length()) + "_bed";
+        ResourceLocation bedId = ResourceLocation.tryParse(woolId.getNamespace() + ":" + bedPath);
+        if (bedId == null) return Items.AIR;
+        Item bed = BuiltInRegistries.ITEM.get(bedId);
+        return VillageBuilder.isSupportedBedItem(bed) ? bed : Items.AIR;
+    }
+
+    private static Item bestWool(List<StorageRef> storages, Villager crafter, int minimum) {
+        Map<Item, Integer> totals = new LinkedHashMap<>();
+        for (StorageRef ref : storages) {
+            Container container = ref.container();
+            for (int i = 0; i < container.getContainerSize(); i++) {
+                ItemStack stack = container.getItem(i);
+                if (!stack.isEmpty() && Block.byItem(stack.getItem()).defaultBlockState().is(BlockTags.WOOL)) {
+                    totals.merge(stack.getItem(), stack.getCount(), Integer::sum);
+                }
+            }
+        }
+        Container inventory = crafter.getInventory();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (!stack.isEmpty() && Block.byItem(stack.getItem()).defaultBlockState().is(BlockTags.WOOL)) {
+                totals.merge(stack.getItem(), stack.getCount(), Integer::sum);
+            }
+        }
+        return totals.entrySet().stream().filter(entry -> entry.getValue() >= minimum)
+            .max(Map.Entry.comparingByValue()).map(Map.Entry::getKey).orElse(null);
+    }
+
+    private static int countAllDoors(List<StorageRef> storages, Villager crafter) {
+        int total = 0;
+        for (Item door : VillageBuilder.ALL_WOODEN_DOORS) {
+            total += availableCount(storages, crafter, door);
+        }
+        return total;
+    }
+
+    private static int countAllBeds(List<StorageRef> storages, Villager crafter) {
+        int total = 0;
+        for (Item bed : VillageBuilder.ALL_BED_ITEMS) {
+            total += availableCount(storages, crafter, bed);
+        }
+        return total;
+    }
+
+    private static int countHoes(List<StorageRef> storages, List<Villager> villagers) {
+        Predicate<ItemStack> isHoe = stack -> stack.is(Items.WOODEN_HOE) || stack.is(Items.STONE_HOE)
+            || stack.is(Items.IRON_HOE) || stack.is(Items.GOLDEN_HOE)
+            || stack.is(Items.DIAMOND_HOE) || stack.is(Items.NETHERITE_HOE);
+        int total = 0;
+        for (StorageRef ref : storages) {
+            Container c = ref.container();
+            for (int i = 0; i < c.getContainerSize(); i++) {
+                if (isHoe.test(c.getItem(i))) total += c.getItem(i).getCount();
+            }
+        }
+        for (Villager v : villagers) {
+            if (!VillagerRoles.isEligibleAutonomousAdult(v)) continue;
+            if (isHoe.test(v.getMainHandItem())) total += v.getMainHandItem().getCount();
+            for (int i = 0; i < v.getInventory().getContainerSize(); i++) {
+                if (isHoe.test(v.getInventory().getItem(i))) total += v.getInventory().getItem(i).getCount();
+            }
+        }
+        return total;
+    }
+
+    private static int totalStructuralBlocks(List<StorageRef> storages) {
+        int total = 0;
+        for (StorageRef ref : storages) {
+            Container c = ref.container();
+            for (int i = 0; i < c.getContainerSize(); i++) {
+                ItemStack stack = c.getItem(i);
+                if (!stack.isEmpty() && VillageBuilder.isSupportedStructuralBlock(Block.byItem(stack.getItem()))) {
+                    total += stack.getCount();
+                }
+            }
+        }
+        return total;
     }
 
     private static Item bestStoredHousePlanks(List<StorageRef> storages, int minimum) {
@@ -669,11 +840,11 @@ public final class VillageCraftingJobs {
         for (Villager other : villagers) {
             String role = other.getPersistentData().getString(VillagerRoles.ROLE_KEY);
             boolean relevant = switch (use) {
-                case MINER -> VillagerRoles.isMiner(other) || (role.isEmpty() && VillagerRoles.isUnemployedAdult(other));
-                case GUARD -> VillagerRoles.isGuard(other) || (role.isEmpty() && VillagerRoles.isUnemployedAdult(other));
-                case LUMBERJACK -> role.isEmpty() && (VillagerRoles.isUnemployedAdult(other)
+                case MINER -> VillagerRoles.isMiner(other) || (role.isEmpty() && VillagerRoles.isEligibleAutonomousAdult(other));
+                case GUARD -> VillagerRoles.isGuard(other) || (role.isEmpty() && VillagerRoles.isEligibleAutonomousAdult(other));
+                case LUMBERJACK -> (role.isEmpty() || VillagerRoles.isBuilder(other)) && (VillagerRoles.isEligibleAutonomousAdult(other)
                     || other.getPersistentData().getBoolean("livingvillages_treework_active")
-            || other.getPersistentData().getBoolean(VillagePopulation.ACTIVE_KEY));
+                    || other.getPersistentData().getBoolean(VillagePopulation.ACTIVE_KEY));
             };
             if (!relevant) continue;
             if (predicate.test(other.getMainHandItem())) total += other.getMainHandItem().getCount();
@@ -952,7 +1123,8 @@ public final class VillageCraftingJobs {
 
     private static boolean isSafeStand(ServerLevel level, BlockPos pos) {
         return level.hasChunkAt(pos) && level.hasChunkAt(pos.above()) && level.hasChunkAt(pos.below())
-            && level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir()
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos))
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos.above()))
             && level.getBlockState(pos.below()).blocksMotion();
     }
 

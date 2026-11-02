@@ -168,6 +168,39 @@ public final class VillagerProgression {
         return roleLabelRu(targetRole) + " ур. " + level + " (" + xp + " XP)";
     }
 
+    public static String describeAllSkillsAndActivityRu(Villager villager) {
+        if (villager == null) return "";
+        int maxLevel = LivingVillagesConfig.MAX_PROFESSION_LEVEL.get();
+        java.util.List<String> learned = new java.util.ArrayList<>();
+        for (String role : VillagerProgressionModel.SUPPORTED_ROLES) {
+            int xp = getXp(villager, role);
+            if (xp > 0) {
+                int lvl = getLevel(villager, role);
+                learned.add(roleLabelRu(role) + " ур. " + lvl + "/" + maxLevel + " (" + xp + " XP)");
+            }
+        }
+        String skillsPart = learned.isEmpty()
+            ? "Опыт ролей: пока 0 XP"
+            : "Навыки: " + String.join(", ", learned);
+        return skillsPart + " · Задача: " + describeCurrentTaskRu(villager);
+    }
+
+    public static String describeCurrentTaskRu(Villager villager) {
+        if (villager == null) return "Нет";
+        var data = villager.getPersistentData();
+        if (data.getBoolean(VillageBuilder.ACTIVE_KEY)) return "Строит дом";
+        if (data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)) return "Строит ферму";
+        if (data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)) return "Работает на верстаке";
+        if (data.getBoolean("livingvillages_treework_active")) return "Рубит дерево";
+        if (data.getBoolean("livingvillages_treework_replant_active")) return "Сажает саженец";
+        if (data.getBoolean("livingvillages_mining_active")) return "Добывает камень/руду";
+        if (data.getBoolean("livingvillages_logistics_active")) return "Несёт ресурсы на склад";
+        if (data.getBoolean(VillagePopulation.ACTIVE_KEY)) return "Доставляет еду жителям";
+        if (data.getBoolean("livingvillages_autonomy_target_active")) return "Сдаёт урожай на склад";
+        if (data.getBoolean("livingvillages_defense_has_route")) return "Охраняет поселение";
+        return "Свободен";
+    }
+
     private static String bestLearnedRole(Villager villager) {
         String bestRole = VillagerProgressionModel.ROLE_LUMBERJACK;
         int bestXp = -1;

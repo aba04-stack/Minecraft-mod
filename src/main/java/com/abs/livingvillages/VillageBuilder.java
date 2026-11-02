@@ -126,6 +126,44 @@ public final class VillageBuilder {
     /** Number of planks used by the current fixed house blueprint. */
     public static int housePlanksRequired() { return PLANKS_REQUIRED; }
 
+    /**
+     * Checks whether the village storages currently hold at least 96 blocks of a single
+     * supported structural material, 1 compatible wooden door, and 1 bed of any color.
+     */
+    public static boolean hasMaterialsForHouse(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return false;
+        int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
+        List<Container> containers = new ArrayList<>();
+        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -8, -radius), center.offset(radius, 8, radius))) {
+            if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+            if (!VillageRegistry.isStorageForVillage(level, center, pos)
+                || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
+            if (level.getBlockEntity(pos) instanceof Container container) {
+                containers.add(container);
+            }
+        }
+        if (containers.isEmpty()) return false;
+        if (selectAvailableBedItem(containers) == Items.AIR) return false;
+        java.util.Map<Block, Integer> structural = new java.util.HashMap<>();
+        for (Container container : containers) {
+            for (int i = 0; i < container.getContainerSize(); i++) {
+                ItemStack stack = container.getItem(i);
+                if (stack.isEmpty()) continue;
+                Block block = Block.byItem(stack.getItem());
+                if (isSupportedStructuralBlock(block)) {
+                    structural.merge(block, stack.getCount(), Integer::sum);
+                }
+            }
+        }
+        for (java.util.Map.Entry<Block, Integer> entry : structural.entrySet()) {
+            if (entry.getValue() >= PLANKS_REQUIRED
+                && selectAvailableDoorItem(entry.getKey(), containers) != Items.AIR) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static boolean isSupportedStructuralBlock(Block block) {
         if (block == null || block == Blocks.AIR) return false;
         return block.defaultBlockState().is(BlockTags.PLANKS) || BIOME_STRUCTURAL_BLOCKS.contains(block);
@@ -326,11 +364,29 @@ public final class VillageBuilder {
     }
 
     private static Villager findAvailableBuilder(ServerLevel level, BlockPos center) {
-        return VillageArea.findVillagers(level, center).stream()
+        List<Villager> villagers = VillageArea.findVillagers(level, center);
+        Villager existingBuilder = villagers.stream()
             .filter(v -> v.isAlive() && !v.isBaby() && isBuilder(v) && !isProjectActive(v)
                 && !hasOtherActiveTask(v.getPersistentData()))
             .min(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))))
             .orElse(null);
+        if (existingBuilder != null) return existingBuilder;
+
+        Villager promoted = villagers.stream()
+            .filter(v -> VillagerRoles.isEligibleAutonomousAdult(v) && !VillageElder.isElder(v)
+                && v.getPersistentData().getString(VillagerRoles.ROLE_KEY).isEmpty()
+                && !isProjectActive(v) && !hasOtherActiveTask(v.getPersistentData()))
+            .min(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))))
+            .orElse(null);
+        if (promoted != null) {
+            CompoundTag data = promoted.getPersistentData();
+            data.putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_BUILDER);
+            data.putLong(VillagerRoles.ROLE_ASSIGNED_TICK_KEY, level.getGameTime());
+            data.putInt(VillagerRoles.HOME_X, center.getX());
+            data.putInt(VillagerRoles.HOME_Y, center.getY());
+            data.putInt(VillagerRoles.HOME_Z, center.getZ());
+        }
+        return promoted;
     }
 
     private static void fetchRequiredItem(Villager villager, ServerLevel level, CompoundTag data,
@@ -451,8 +507,9 @@ public final class VillageBuilder {
             }
             return;
         }
-        if (!current.isAir() || (step.secondPos() != null && !level.getBlockState(step.secondPos()).isAir())) {
-            // Never overwrite a player block or remove an obstruction. The owner can clear it later.
+        if (!isAirOrReplaceableVegetation(current)
+            || (step.secondPos() != null && !isAirOrReplaceableVegetation(level.getBlockState(step.secondPos())))) {
+            // Never overwrite a player block or remove a solid obstruction. The owner can clear it later.
             clearOwnedRoute(villager, data);
             data.putLong(NEXT_ACTION, now + WORK_RETRY_TICKS);
             return;
@@ -473,7 +530,14 @@ public final class VillageBuilder {
         }
 
         clearOwnedRoute(villager, data);
+        if (!current.isAir() && isAirOrReplaceableVegetation(current)) {
+            level.destroyBlock(step.pos(), true);
+        }
         if (step.secondPos() != null) {
+            BlockState secondStateNow = level.getBlockState(step.secondPos());
+            if (!secondStateNow.isAir() && isAirOrReplaceableVegetation(secondStateNow)) {
+                level.destroyBlock(step.secondPos(), true);
+            }
             if (countItem(villager.getInventory(), step.item()) < 1) {
                 data.putInt(PHASE, isSupportedBedItem(step.item()) ? FETCH_BED : FETCH_DOOR);
                 return;
@@ -490,6 +554,9 @@ public final class VillageBuilder {
             }
             level.sendBlockUpdated(step.pos(), Blocks.AIR.defaultBlockState(), step.state(), 3);
             level.sendBlockUpdated(step.secondPos(), Blocks.AIR.defaultBlockState(), step.secondState(), 3);
+            if (isSupportedBedItem(step.item())) {
+                VillageRegistry.isBedForVillage(level, villager.blockPosition(), step.pos());
+            }
         } else {
             if (countItem(villager.getInventory(), step.item()) < 1) {
                 data.putInt(PHASE, FETCH_PLANKS);
@@ -755,8 +822,24 @@ public final class VillageBuilder {
 
     private static boolean isSafeStand(ServerLevel level, BlockPos pos) {
         return level.hasChunkAt(pos) && level.hasChunkAt(pos.above()) && level.hasChunkAt(pos.below())
-            && level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir()
+            && isAirOrReplaceableVegetation(level.getBlockState(pos))
+            && isAirOrReplaceableVegetation(level.getBlockState(pos.above()))
             && level.getBlockState(pos.below()).blocksMotion();
+    }
+
+    public static boolean isAirOrReplaceableVegetation(BlockState state) {
+        if (state == null) return false;
+        if (state.isAir()) return true;
+        if (!state.getFluidState().isEmpty() || state.blocksMotion()) return false;
+        return state.canBeReplaced()
+            || state.is(BlockTags.REPLACEABLE)
+            || state.is(BlockTags.FLOWERS)
+            || state.is(Blocks.SHORT_GRASS)
+            || state.is(Blocks.TALL_GRASS)
+            || state.is(Blocks.FERN)
+            || state.is(Blocks.LARGE_FERN)
+            || state.is(Blocks.DEAD_BUSH)
+            || state.is(Blocks.SNOW);
     }
 
     private static int countItem(Container container, Item item) {

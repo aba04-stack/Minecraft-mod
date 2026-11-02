@@ -53,8 +53,8 @@ public final class VillagerMining {
     private static final int TARGET_QUARRY = 1;
 
     private static final int TICK_STEP = 5;
-    private static final int SEARCH_RETRY_TICKS = 600;
-    private static final int SUCCESS_RETRY_TICKS = 80;
+    private static final int SEARCH_RETRY_TICKS = 80;
+    private static final int SUCCESS_RETRY_TICKS = 40;
     private static final int ROUTE_RETRY_TICKS = 60;
     private static final int TASK_TIMEOUT_TICKS = 12000;
     private static final float WALK_SPEED = 0.62F;
@@ -110,8 +110,8 @@ public final class VillagerMining {
         if (now < data.getLong(NEXT_SEARCH) || villager.getHealth() < villager.getMaxHealth() * 0.35F) {
             return;
         }
-        if (villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
-            data.putLong(NEXT_SEARCH, now + 100L);
+        if (VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {
+            data.putLong(NEXT_SEARCH, now + 40L);
             return;
         }
 
@@ -258,7 +258,7 @@ public final class VillagerMining {
         int radius = LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get();
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
-        int minY = Math.max(level.getMinBuildHeight() + 1, origin.getY() - 20);
+        int minY = Math.max(level.getMinBuildHeight() + 1, origin.getY() - 8);
         int maxY = Math.min(level.getMaxBuildHeight() - 2, origin.getY() + 3);
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
@@ -267,36 +267,26 @@ public final class VillagerMining {
                     BlockPos pos = new BlockPos(origin.getX() + dx, y, origin.getZ() + dz);
                     if (!level.hasChunkAt(pos)) continue;
                     BlockState state = level.getBlockState(pos);
-                    if (isOre(state) && toolCanMine(tool, state) && !isReservedByAnotherMiner(level, villager, pos)) {
-                        // No x-ray mining: a new job is only accepted when this ore is exposed
-                        // to the villager's real line of sight. A later obstruction is handled
-                        // locally by continueTask, one reachable block at a time.
-                        BlockPos obstruction = blockBlockingOre(villager, level, pos);
-                        if (pos.equals(obstruction) && isSafeMineTarget(level, villager, pos, state)) {
-                            candidates.add(pos.immutable());
-                        }
+                    if (isOre(state) && toolCanMine(tool, state) && !isReservedByAnotherMiner(level, villager, pos)
+                        && isSafeMineTarget(level, villager, pos, state)
+                        && hasExposedFace(level, pos)
+                        && findWorkPosition(level, villager, pos) != null) {
+                        candidates.add(pos.immutable());
                     }
                 }
             }
         }
         candidates.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
-        // The miner deliberately does not identify hidden ores through solid terrain.
-        for (BlockPos candidate : candidates) {
-            BlockPos obstacle = blockBlockingOre(villager, level, candidate);
-            if (obstacle != null && isSafeMineTarget(level, villager, obstacle, level.getBlockState(obstacle))) {
-                return candidate;
-            }
-        }
-        return null;
+        return candidates.isEmpty() ? null : candidates.get(0);
     }
 
-    /** True only while the real shared/local stock is below the amount needed for tools and a furnace. */
+    /** True while the settlement's stone/sandstone stock is below the amount needed for tools, a furnace, and structural expansion. */
     private static boolean needsCobblestone(ServerLevel level, Villager miner) {
-        int cobblestone = 0;
+        int stoneStock = 0;
         var inventory = miner.getInventory();
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
-            if (stack.is(Items.COBBLESTONE)) cobblestone += stack.getCount();
+            if (isCountedQuarryMaterial(stack)) stoneStock += stack.getCount();
         }
         BlockPos origin = VillagerRoles.getHome(miner);
         if (origin == null) origin = miner.blockPosition();
@@ -311,42 +301,55 @@ public final class VillagerMining {
                     if (!(level.getBlockEntity(pos) instanceof Container container)) continue;
                     for (int slot = 0; slot < container.getContainerSize(); slot++) {
                         ItemStack stack = container.getItem(slot);
-                        if (stack.is(Items.COBBLESTONE)) cobblestone += stack.getCount();
+                        if (isCountedQuarryMaterial(stack)) stoneStock += stack.getCount();
                     }
                 }
             }
         }
-        return cobblestone < 16;
+        return stoneStock < 112;
     }
 
-    /** Quarry only exposed, natural-looking stone blocks; the normal pickaxe, reach and drop rules still apply. */
+    private static boolean isCountedQuarryMaterial(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        return stack.is(Items.COBBLESTONE) || stack.is(Items.SANDSTONE)
+            || stack.is(Items.RED_SANDSTONE) || stack.is(Items.TERRACOTTA)
+            || stack.is(Items.STONE_BRICKS);
+    }
+
+    /** Quarry only exposed, natural-looking stone/sandstone blocks; the normal pickaxe, reach and drop rules still apply. */
     private static BlockPos findNearestQuarryBlock(ServerLevel level, Villager villager, ItemStack tool) {
-        int radius = Math.min(6, LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get());
+        int radius = Math.min(16, LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 if (dx * dx + dz * dz > radius * radius) continue;
-                for (int dy = -1; dy <= 1; dy++) {
+                for (int dy = -4; dy <= 3; dy++) {
                     BlockPos pos = origin.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos)) continue;
                     BlockState state = level.getBlockState(pos);
                     if (!isQuarryBlock(state) || !toolCanMine(tool, state)
                         || !isSafeMineTarget(level, villager, pos, state)
                         || isReservedByAnotherMiner(level, villager, pos)) continue;
-                    // Require an exposed face; the miner will not start by digging blind into a sealed wall.
-                    int exposedSides = 0;
-                    for (Direction direction : Direction.values()) {
-                        if (level.getBlockState(pos.relative(direction)).isAir()) exposedSides++;
+                    if (!hasExposedFace(level, pos)) continue;
+                    if (findWorkPosition(level, villager, pos) != null) {
+                        candidates.add(pos.immutable());
                     }
-                    if (exposedSides < 1) continue;
-                    BlockPos obstruction = blockBlockingOre(villager, level, pos);
-                    if (pos.equals(obstruction)) candidates.add(pos.immutable());
                 }
             }
         }
         candidates.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
         return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    private static boolean hasExposedFace(ServerLevel level, BlockPos pos) {
+        for (Direction direction : Direction.values()) {
+            BlockPos adj = pos.relative(direction);
+            if (level.hasChunkAt(adj) && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(adj))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isQuarryBlock(BlockState state) {
@@ -385,8 +388,8 @@ public final class VillagerMining {
     private static boolean isSafeMineTarget(ServerLevel level, Villager villager, BlockPos pos, BlockState state) {
         if (!level.hasChunkAt(pos) || state.isAir() || state.getDestroySpeed(level, pos) < 0.0F
             || state.hasBlockEntity() || !level.getFluidState(pos).isEmpty()) return false;
-        if (pos.getY() < villager.blockPosition().getY() - 1
-            || pos.getY() > villager.blockPosition().getY() + 1) return false;
+        if (pos.getY() < villager.blockPosition().getY() - 4
+            || pos.getY() > villager.blockPosition().getY() + 3) return false;
         // Never dig the block immediately underneath the worker. This prevents the basic AI
         // from opening a pit under itself while chasing a vein.
         if (pos.getX() == villager.blockPosition().getX() && pos.getZ() == villager.blockPosition().getZ()
@@ -603,7 +606,8 @@ public final class VillagerMining {
 
     private static boolean isSafeStand(ServerLevel level, BlockPos feet) {
         return level.hasChunkAt(feet) && level.hasChunkAt(feet.above()) && level.hasChunkAt(feet.below())
-            && level.getBlockState(feet).isAir() && level.getBlockState(feet.above()).isAir()
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(feet))
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(feet.above()))
             && level.getBlockState(feet.below()).blocksMotion();
     }
 

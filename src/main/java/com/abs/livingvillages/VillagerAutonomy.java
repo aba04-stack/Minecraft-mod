@@ -42,8 +42,8 @@ public final class VillagerAutonomy {
     private static final String NEXT_SEARCH = PREFIX + "next_search";
 
     private static final int SEARCH_STAGGER_TICKS = 400;
-    private static final int RETRY_DELAY_TICKS = 600;
-    private static final int SUCCESS_DELAY_TICKS = 2400;
+    private static final int RETRY_DELAY_TICKS = 80;
+    private static final int SUCCESS_DELAY_TICKS = 120;
     private static final int FAILED_TRIP_TIMEOUT_TICKS = 1200;
     private static final int FOOD_RESERVE_POINTS = 12;
     private static final int MIN_FOOD_POINTS_TO_START = 16;
@@ -61,13 +61,19 @@ public final class VillagerAutonomy {
             || villager.level().isClientSide()
             || !villager.isAlive()
             || villager.isBaby()
-            || villager.getVillagerData().getProfession() != VillagerProfession.FARMER
             || villager.tickCount % 20 != 0) {
             return;
         }
 
         CompoundTag data = villager.getPersistentData();
-        if (data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)) return;
+        if (data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
+            || data.getBoolean(VillageBuilder.ACTIVE_KEY)
+            || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
+            || data.getBoolean(VillagePopulation.ACTIVE_KEY)
+            || data.getBoolean("livingvillages_treework_active")
+            || data.getBoolean("livingvillages_treework_replant_active")
+            || data.getBoolean("livingvillages_mining_active")
+            || data.getBoolean("livingvillages_logistics_active")) return;
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_FARMER_STOCKPILING.get()) {
             if (data.getBoolean(TARGET_ACTIVE)) {
@@ -101,13 +107,15 @@ public final class VillagerAutonomy {
             return; // Storage runs are work-hour errands, not a reason to miss sleep.
         }
 
-        if (now < data.getLong(NEXT_SEARCH)) {
+        // Harvest nearby mature crops and bake carried wheat into bread (3 wheat -> 1 bread).
+        tryHarvestMatureCropAndBakeBread(villager, level, now);
+
+        if (villager.getVillagerData().getProfession() != VillagerProfession.FARMER
+            && foodPoints(villager) < MIN_FOOD_POINTS_TO_START) {
             return;
         }
 
-        // Spread scans across time so that many farmers do not search all chests on the same tick.
-        long stagger = Math.floorMod(villager.getUUID().hashCode(), SEARCH_STAGGER_TICKS);
-        if (Math.floorMod(now, SEARCH_STAGGER_TICKS) != stagger) {
+        if (now < data.getLong(NEXT_SEARCH)) {
             return;
         }
 
@@ -116,8 +124,7 @@ public final class VillagerAutonomy {
             return;
         }
 
-        // Do not commandeer a villager who already has a vanilla movement task.
-        if (villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
+        if (VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {
             data.putLong(NEXT_SEARCH, now + RETRY_DELAY_TICKS);
             return;
         }
@@ -245,11 +252,111 @@ public final class VillagerAutonomy {
     }
 
     private static boolean isSafeStandPosition(ServerLevel level, BlockPos pos) {
-        if (!level.hasChunkAt(pos) || !level.getBlockState(pos).isAir()
-            || !level.getBlockState(pos.above()).isAir()) {
+        if (!level.hasChunkAt(pos) || !VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos))
+            || !VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos.above()))) {
             return false;
         }
         return !level.getBlockState(pos.below()).isAir();
+    }
+
+    private static void tryHarvestMatureCropAndBakeBread(Villager villager, ServerLevel level, long nowTick) {
+        if (!level.getGameRules().getBoolean( net.minecraft.world.level.GameRules.RULE_MOBGRIEFING)) return;
+        BlockPos origin = villager.blockPosition();
+        BlockPos bestMature = null;
+        double bestDist = Double.MAX_VALUE;
+        for (int dx = -8; dx <= 8; dx++) {
+            for (int dz = -8; dz <= 8; dz++) {
+                for (int dy = -2; dy <= 2; dy++) {
+                    BlockPos pos = origin.offset(dx, dy, dz);
+                    if (!level.hasChunkAt(pos)) continue;
+                    BlockState state = level.getBlockState(pos);
+                    if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop && crop.isMaxAge(state)) {
+                        double d = villager.distanceToSqr(Vec3.atCenterOf(pos));
+                        if (d < bestDist) {
+                            bestDist = d;
+                            bestMature = pos.immutable();
+                        }
+                    }
+                }
+            }
+        }
+        if (bestMature != null) {
+            if (bestDist <= 9.0D) {
+                BlockState state = level.getBlockState(bestMature);
+                if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop && crop.isMaxAge(state)) {
+                    List<ItemStack> drops = Block.getDrops(state, level, bestMature, null, villager, ItemStack.EMPTY);
+                    for (ItemStack drop : drops) {
+                        ItemStack remainder = villager.getInventory().addItem(drop.copy());
+                        if (!remainder.isEmpty()) Block.popResource(level, bestMature, remainder);
+                    }
+                    net.minecraft.world.item.Item seedItem = seedItemForCrop(crop);
+                    if (seedItem != Items.AIR && consumeOneItem(villager.getInventory(), seedItem)) {
+                        level.setBlock(bestMature, crop.getStateForAge(0), 3);
+                    } else {
+                        level.setBlock(bestMature, Blocks.AIR.defaultBlockState(), 3);
+                    }
+                    villager.getInventory().setChanged();
+                    VillagerProgression.recordCompletedWork(
+                        villager,
+                        com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_FARMER,
+                        2,
+                        true,
+                        nowTick
+                    );
+                }
+            } else if (!VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {
+                villager.getBrain().setMemory(
+                    MemoryModuleType.WALK_TARGET,
+                    new WalkTarget(bestMature, WALK_SPEED, 1)
+                );
+            }
+        }
+
+        // Convert carried wheat into bread (3 wheat -> 1 bread) in the villager's inventory.
+        var inv = villager.getInventory();
+        int wheatCount = 0;
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack s = inv.getItem(i);
+            if (s.is(Items.WHEAT)) wheatCount += s.getCount();
+        }
+        while (wheatCount >= 3) {
+            if (!consumeItems(inv, Items.WHEAT, 3)) break;
+            ItemStack remainder = inv.addItem(new ItemStack(Items.BREAD, 1));
+            if (!remainder.isEmpty()) villager.spawnAtLocation(remainder);
+            inv.setChanged();
+            wheatCount -= 3;
+        }
+    }
+
+    private static net.minecraft.world.item.Item seedItemForCrop(Block crop) {
+        if (crop == Blocks.WHEAT) return Items.WHEAT_SEEDS;
+        if (crop == Blocks.CARROTS) return Items.CARROT;
+        if (crop == Blocks.POTATOES) return Items.POTATO;
+        if (crop == Blocks.BEETROOTS) return Items.BEETROOT_SEEDS;
+        return Items.AIR;
+    }
+
+    private static boolean consumeOneItem(Container inv, net.minecraft.world.item.Item item) {
+        return consumeItems(inv, item, 1);
+    }
+
+    private static boolean consumeItems(Container inv, net.minecraft.world.item.Item item, int count) {
+        int available = 0;
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            if (inv.getItem(i).is(item)) available += inv.getItem(i).getCount();
+        }
+        if (available < count) return false;
+        int rem = count;
+        for (int i = 0; i < inv.getContainerSize() && rem > 0; i++) {
+            ItemStack s = inv.getItem(i);
+            if (!s.is(item)) continue;
+            int take = Math.min(rem, s.getCount());
+            s.shrink(take);
+            rem -= take;
+            if (s.isEmpty()) inv.setItem(i, ItemStack.EMPTY);
+        }
+        inv.setChanged();
+        return rem == 0;
     }
 
     private static boolean canStoreAnySurplus(Villager villager, Container container) {

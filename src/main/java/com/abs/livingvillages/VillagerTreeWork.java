@@ -63,11 +63,12 @@ public final class VillagerTreeWork {
     private static final int TICK_STEP = 5;
     private static final int LOG_CHOP_STEPS = 12; // roughly 3 seconds
     private static final int LEAF_CLEAR_STEPS = 4; // roughly 1 second
-    private static final int SEARCH_RETRY_TICKS = 1200;
-    private static final int SUCCESS_RETRY_TICKS = 100;
+    private static final int SEARCH_RETRY_TICKS = 120;
+    private static final int SUCCESS_RETRY_TICKS = 40;
     private static final int ROUTE_RETRY_TICKS = 60;
     private static final int TASK_TIMEOUT_TICKS = 2400;
-    private static final long REPLANT_RETRY_TICKS = 100L;
+    private static final long REPLANT_RETRY_TICKS = 40L;
+    private static final long REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS = 100L;
     private static final double BREAK_REACH_SQR = 4.0D * 4.0D;
     private static final float WALK_SPEED = 0.55F;
 
@@ -128,10 +129,10 @@ public final class VillagerTreeWork {
         }
         if (now < data.getLong(NEXT_SEARCH) || !isAvailableWorker(villager)) return;
 
-        // Do not interrupt vanilla Brain tasks or the existing farmer storage trip.
+        // Do not interrupt active farmer storage trips or emergency vanilla states (sleeping/trading/panic).
         if (data.getBoolean("livingvillages_autonomy_target_active")
-            || villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
-            data.putLong(NEXT_SEARCH, now + 100L);
+            || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {
+            data.putLong(NEXT_SEARCH, now + 40L);
             return;
         }
 
@@ -163,11 +164,14 @@ public final class VillagerTreeWork {
     }
 
     private static boolean isAvailableWorker(Villager villager) {
-        VillagerProfession profession = villager.getVillagerData().getProfession();
-        // Avoid interrupting villagers with a working profession in this first lumbering milestone.
+        if (!VillagerRoles.isEligibleAutonomousAdult(villager) || VillageElder.isElder(villager)) {
+            return false;
+        }
         String role = villager.getPersistentData().getString(VillagerRoles.ROLE_KEY);
         CompoundTag data = villager.getPersistentData();
-        boolean roleAllowsForestWork = role.isEmpty()
+        boolean roleAllowsForestWork = (role.isEmpty()
+                || (VillagerRoles.ROLE_BUILDER.equals(role) && !VillageBuilder.isProjectActive(villager))
+                || (VillagerRoles.ROLE_CRAFTSMAN.equals(role) && !VillageCraftingJobs.isBusy(villager)))
             && !data.getBoolean(VillagePopulation.ACTIVE_KEY)
             && !data.getBoolean(VillageBuilder.ACTIVE_KEY)
             && !data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
@@ -175,12 +179,9 @@ public final class VillagerTreeWork {
             && !data.getBoolean("livingvillages_logistics_active")
             && !data.getBoolean("livingvillages_mining_active")
             && !data.getBoolean("livingvillages_defense_has_route");
-        boolean canUseForestJob = (profession == VillagerProfession.NONE || profession == VillagerProfession.NITWIT)
-            && roleAllowsForestWork
+        return roleAllowsForestWork
             && !(LivingVillagesConfig.ENABLE_MINER_ROLE.get() && VillagerRoles.isMiner(villager))
-            && !(LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get() && VillagerRoles.isGuard(villager))
-            && !VillagerRoles.isCraftsman(villager);
-        return canUseForestJob;
+            && !(LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get() && VillagerRoles.isGuard(villager));
     }
 
     private static void continueTask(Villager villager, ServerLevel level, CompoundTag data, long now) {
@@ -407,7 +408,8 @@ public final class VillagerTreeWork {
 
     private static boolean isSafeStand(ServerLevel level, BlockPos feet) {
         if (!level.hasChunkAt(feet) || !level.hasChunkAt(feet.above()) || !level.hasChunkAt(feet.below())) return false;
-        return level.getBlockState(feet).isAir() && level.getBlockState(feet.above()).isAir()
+        return VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(feet))
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(feet.above()))
             && level.getBlockState(feet.below()).blocksMotion();
     }
 
@@ -626,6 +628,11 @@ public final class VillagerTreeWork {
                 }
             }
             if (tryFetchSaplingFromStorage(villager, level, data, source, expectedSapling, allowAnySpecies, now)) return;
+            if (now - started >= REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS) {
+                cancelReplantTask(villager, data);
+                data.putLong(NEXT_SEARCH, now + SUCCESS_RETRY_TICKS);
+                return;
+            }
             clearOwnedRoute(villager, data);
             data.putLong(REPLANT_NEXT_ATTEMPT, now + REPLANT_RETRY_TICKS);
             return;
@@ -647,6 +654,11 @@ public final class VillagerTreeWork {
             clearOwnedRoute(villager, data);
             site = findReplantSite(level, source, saplingState);
             if (site == null) {
+                if (now - started >= REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS) {
+                    cancelReplantTask(villager, data);
+                    data.putLong(NEXT_SEARCH, now + SUCCESS_RETRY_TICKS);
+                    return;
+                }
                 data.putBoolean(REPLANT_SITE_SET, false);
                 data.putLong(REPLANT_NEXT_ATTEMPT, now + REPLANT_RETRY_TICKS);
                 return;
@@ -670,6 +682,10 @@ public final class VillagerTreeWork {
             return;
         }
         villager.getLookControl().setLookAt(site.getX() + 0.5D, site.getY() + 0.2D, site.getZ() + 0.5D);
+        BlockState currentAtSite = level.getBlockState(site);
+        if (!currentAtSite.isAir() && VillageBuilder.isAirOrReplaceableVegetation(currentAtSite)) {
+            level.destroyBlock(site, true);
+        }
         if (level.setBlock(site, saplingState, 3)) {
             var inventory = villager.getInventory();
             ItemStack seed = inventory.getItem(saplingSlot);
@@ -875,7 +891,7 @@ public final class VillagerTreeWork {
 
     private static boolean isSuitableReplantSite(ServerLevel level, BlockPos pos, BlockState saplingState) {
         if (!level.hasChunkAt(pos) || !level.hasChunkAt(pos.below()) || !level.hasChunkAt(pos.above(4))) return false;
-        if (!level.getBlockState(pos).isAir() || !saplingState.canSurvive(level, pos)) return false;
+        if (!VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos)) || !saplingState.canSurvive(level, pos)) return false;
         // Leave growing room above the sapling; a single air block is not enough for a viable tree.
         for (int dy = 1; dy <= 4; dy++) {
             if (!level.getBlockState(pos.above(dy)).isAir()) return false;

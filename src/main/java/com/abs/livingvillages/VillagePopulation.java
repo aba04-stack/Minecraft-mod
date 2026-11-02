@@ -59,7 +59,7 @@ public final class VillagePopulation {
     private static final int ROUTE_REISSUE_TICKS = 40;
     private static final int TARGET_STAND_REACH_SQR = 4;
     private static final long TASK_TIMEOUT_TICKS = 12000L;
-    private static final long RETRY_DELAY_TICKS = 1200L;
+    private static final long RETRY_DELAY_TICKS = 40L;
     private static final float WALK_SPEED = 0.55F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     private static final Item[] ROOT_FOODS = {Items.CARROT, Items.POTATO, Items.BEETROOT};
@@ -79,15 +79,29 @@ public final class VillagePopulation {
         }
 
         List<Villager> adults = villagers.stream().filter(v -> v.isAlive() && !v.isBaby()).toList();
-        if (adults.size() < 2 || countPotentialBeds(level, center) <= villagers.size()) return;
+        int beds = countPotentialBeds(level, center);
+        if (adults.size() < 2 || beds <= villagers.size()) {
+            VillageRegistry.recordDiagnostic(level, center, "Население",
+                adults.size() < 2 ? "Недостаточно взрослых (" + adults.size() + "/2)"
+                    : "Нет свободных кроватей для роста (" + villagers.size() + "/" + beds + ")");
+            return;
+        }
         if (villagers.stream().anyMatch(v -> v.getPersistentData().getBoolean(ACTIVE_KEY))) return;
 
         long foodReadyAdults = adults.stream().filter(v -> foodPoints(v) >= BREEDING_FOOD_POINTS).count();
-        if (foodReadyAdults >= 2) return; // Vanilla handles pairing and the actual birth.
+        if (foodReadyAdults >= 2) {
+            encourageNaturalBreedingPair(level, center, adults);
+            VillageRegistry.recordDiagnostic(level, center, "Население",
+                "Готовы к размножению (" + foodReadyAdults + " сытых взрослых, кроватей: " + beds + ")");
+            return; // Vanilla handles pairing and the actual birth.
+        }
 
         long now = level.getGameTime();
         List<Container> storages = findStorages(level, center, null);
         if (storages.isEmpty() || storedFoodPoints(storages) <= LivingVillagesConfig.POPULATION_FOOD_RESERVE_POINTS.get()) {
+            VillageRegistry.recordDiagnostic(level, center, "Население",
+                storages.isEmpty() ? "Нет хранилища еды"
+                    : "Недостаточно запаса еды на складе (" + storedFoodPoints(storages) + " очк.)");
             return;
         }
 
@@ -95,7 +109,10 @@ public final class VillagePopulation {
             .filter(v -> isAvailableCourier(v, now))
             .sorted(Comparator.comparing(v -> v.getUUID().toString()))
             .toList();
-        if (couriers.isEmpty()) return;
+        if (couriers.isEmpty()) {
+            VillageRegistry.recordDiagnostic(level, center, "Население", "Нет свободного курьера для доставки еды");
+            return;
+        }
 
         for (Villager courier : couriers) {
             for (Villager recipient : adults.stream()
@@ -106,9 +123,28 @@ public final class VillagePopulation {
                 if (target == null) continue;
                 if (!VillageReservations.tryReserveStoragePositions(level, courier, List.of(target.chest()), "food_delivery")) continue;
                 startTrip(courier, center, recipient, target, now);
+                VillageRegistry.recordDiagnostic(level, center, "Население", "Курьер несёт еду жителю");
                 return; // One physical food trip at a time per active village area.
             }
         }
+    }
+
+    private static void encourageNaturalBreedingPair(ServerLevel level, BlockPos center, List<Villager> adults) {
+        List<Villager> ready = adults.stream()
+            .filter(v -> v.isAlive() && !v.isBaby() && !v.isSleeping()
+                && v.getAge() == 0 && foodPoints(v) >= BREEDING_FOOD_POINTS
+                && !hasOtherTask(v.getPersistentData()))
+            .sorted(Comparator.comparing(v -> v.getUUID().toString()))
+            .toList();
+        if (ready.size() < 2) return;
+        Villager first = ready.get(0);
+        Villager second = ready.get(1);
+        if (first.distanceToSqr(second) > 4.0D) {
+            setWalkTarget(first, second.blockPosition());
+            setWalkTarget(second, first.blockPosition());
+        }
+        first.getBrain().setMemory(MemoryModuleType.BREED_TARGET, second);
+        second.getBrain().setMemory(MemoryModuleType.BREED_TARGET, first);
     }
 
     /** Advances a food delivery already in progress. */
@@ -159,12 +195,14 @@ public final class VillagePopulation {
     }
 
     private static boolean isAvailableCourier(Villager villager, long now) {
-        if (!villager.isAlive() || villager.isBaby()) return false;
-        VillagerProfession profession = villager.getVillagerData().getProfession();
-        if (profession != VillagerProfession.NONE && profession != VillagerProfession.NITWIT) return false;
+        if (!VillagerRoles.isEligibleAutonomousAdult(villager)) return false;
         CompoundTag data = villager.getPersistentData();
-        if (!data.getString(VillagerRoles.ROLE_KEY).isEmpty() || data.getBoolean(ACTIVE_KEY)
-            || now < data.getLong(NEXT_TRIP) || villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) return false;
+        String role = data.getString(VillagerRoles.ROLE_KEY);
+        boolean roleAllowsCourier = role.isEmpty()
+            || (VillagerRoles.isBuilder(villager) && !VillageBuilder.isProjectActive(villager))
+            || (VillagerRoles.isCraftsman(villager) && !VillageCraftingJobs.isBusy(villager));
+        if (!roleAllowsCourier || data.getBoolean(ACTIVE_KEY)
+            || now < data.getLong(NEXT_TRIP) || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) return false;
         return !hasOtherTask(data) && !VillageBuilder.isProjectActive(villager);
     }
 
@@ -663,7 +701,8 @@ public final class VillagePopulation {
 
     private static boolean isSafeStand(ServerLevel level, BlockPos pos) {
         return level.hasChunkAt(pos) && level.hasChunkAt(pos.above()) && level.hasChunkAt(pos.below())
-            && level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir()
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos))
+            && VillageBuilder.isAirOrReplaceableVegetation(level.getBlockState(pos.above()))
             && level.getBlockState(pos.below()).blocksMotion();
     }
 

@@ -57,6 +57,14 @@ public final class VillagerRoles {
         return profession == VillagerProfession.NONE || profession == VillagerProfession.NITWIT;
     }
 
+    /**
+     * Any living adult villager can perform autonomous settlement tasks and hold a behavioral
+     * specialist role without losing their vanilla VillagerProfession or trading offers.
+     */
+    public static boolean isEligibleAutonomousAdult(Villager villager) {
+        return villager != null && villager.isAlive() && !villager.isBaby();
+    }
+
     /** Assign roles after reconciling disabled/stale assignments first. */
     public static void assignRoles(ServerLevel level, BlockPos center) {
         assignRolesInternal(level, center, false);
@@ -69,6 +77,7 @@ public final class VillagerRoles {
 
     private static void assignRolesInternal(ServerLevel level, BlockPos center, boolean reconciliationOnly) {
         List<Villager> all = VillageArea.findVillagers(level, center);
+        if (all.isEmpty()) return;
 
         int availablePickaxes = VillageIndustry.countAvailablePickaxes(level, center);
         int availableSwords = VillageIndustry.countAvailableSwords(level, center);
@@ -85,7 +94,6 @@ public final class VillagerRoles {
             if (role.isEmpty()) continue;
 
             boolean activeBuilderProject = VillageBuilder.isProjectActive(villager);
-            boolean activeRoleTask = roleTaskActive(villager, role);
             boolean roleDisabled = switch (role) {
                 case ROLE_MINER -> !LivingVillagesConfig.ENABLE_MINER_ROLE.get();
                 case ROLE_GUARD -> !LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get();
@@ -96,25 +104,36 @@ public final class VillagerRoles {
 
             boolean missingRequiredTool = (ROLE_MINER.equals(role) && availablePickaxes == 0)
                 || (ROLE_GUARD.equals(role) && availableSwords == 0);
-            boolean professionChanged = !isUnemployedAdult(villager) && !activeRoleTask && !activeBuilderProject;
             boolean builderNoLongerNeeded = ROLE_BUILDER.equals(role) && !activeBuilderProject && !housingNeeded;
 
-            if (roleDisabled || missingRequiredTool || professionChanged || builderNoLongerNeeded) {
+            if (roleDisabled || missingRequiredTool || builderNoLongerNeeded) {
                 releaseRole(villager);
             }
         }
 
         // A global pause stops assigning new work, but the role-specific event handlers decide
         // whether an in-flight job is paused or cancelled without deleting carried resources.
-        if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get() || reconciliationOnly
-            || (!VillageElder.isAutomationEnabled(all) && !VillageElder.hasPendingRequest(all))) return;
+        if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()) {
+            VillageRegistry.recordDiagnostic(level, center, "Роли", "Отключена система авторазвития");
+            return;
+        }
+        if (reconciliationOnly || (!VillageElder.isAutomationEnabled(all) && !VillageElder.hasPendingRequest(all))) {
+            VillageRegistry.recordDiagnostic(level, center, "Роли", "Авторазвитие приостановлено старостой");
+            return;
+        }
         if (!LivingVillagesConfig.ENABLE_MINER_ROLE.get()
             && !LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get()
             && !LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()
-            && !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) return;
+            && !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) {
+            VillageRegistry.recordDiagnostic(level, center, "Роли", "Все специализированные роли отключены в настройках");
+            return;
+        }
 
         long adultPopulation = all.stream().filter(v -> !v.isBaby()).count();
-        if (adultPopulation < 2) return;
+        if (adultPopulation < 2) {
+            VillageRegistry.recordDiagnostic(level, center, "Роли", "Недостаточно взрослых жителей (" + adultPopulation + "/2)");
+            return;
+        }
 
         int builders = (int) all.stream().filter(VillagerRoles::isBuilder).count();
         int craftspeople = (int) all.stream().filter(VillagerRoles::isCraftsman).count();
@@ -122,17 +141,17 @@ public final class VillagerRoles {
         int guards = (int) all.stream().filter(VillagerRoles::isGuard).count();
 
         int desiredBuilders = housingNeeded ? 1 : 0;
-        // A tiny village may need a craftsman to make the door/tool needed for the next house.
-        int desiredCraftspeople = workshopExists && (adultPopulation >= 4 || housingNeeded) ? 1 : 0;
-        int desiredMiners = LivingVillagesConfig.ENABLE_MINER_ROLE.get() && adultPopulation >= 4
-            ? Math.min(Math.max(1, (int) adultPopulation / 6), availablePickaxes) : 0;
-        int guardDivisor = VillageElder.priorityForVillagers(all) == VillageElder.PRIORITY_DEFENSE ? 5 : 8;
-        int desiredGuards = LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get() && adultPopulation >= 5
+        // A village with a crafting table needs a craftsman to produce tools, doors, beds, and composters.
+        int desiredCraftspeople = workshopExists ? 1 : 0;
+        int desiredMiners = LivingVillagesConfig.ENABLE_MINER_ROLE.get() && adultPopulation >= 2
+            ? Math.min(Math.max(1, (int) adultPopulation / 4), availablePickaxes) : 0;
+        int guardDivisor = VillageElder.priorityForVillagers(all) == VillageElder.PRIORITY_DEFENSE ? 4 : 6;
+        int desiredGuards = LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get() && adultPopulation >= 3
             ? Math.min(Math.max(1, (int) adultPopulation / guardDivisor), availableSwords) : 0;
 
         List<Villager> candidates = new ArrayList<>();
         for (Villager villager : all) {
-            if (!isUnemployedAdult(villager) || VillageElder.isElder(villager)) continue;
+            if (!isEligibleAutonomousAdult(villager) || VillageElder.isElder(villager)) continue;
             var data = villager.getPersistentData();
             if (!data.getString(ROLE_KEY).isEmpty()) continue;
             if (data.getBoolean(TREE_TASK_ACTIVE) || data.getBoolean(REPLANT_TASK_ACTIVE)
@@ -147,20 +166,29 @@ public final class VillagerRoles {
             candidates.add(villager);
         }
         candidates.sort(Comparator.comparing(v -> v.getUUID().toString()));
-        if (candidates.isEmpty()) return;
+        if (candidates.isEmpty()) {
+            VillageRegistry.recordDiagnostic(level, center, "Роли",
+                "Активны: строит.=" + builders + ", ремесл.=" + craftspeople + ", шахт.=" + miners + ", охр.=" + guards + " (нет свободных кандидатов)");
+            return;
+        }
 
         String role = null;
-        // Housing and the basic workshop have priority over optional extraction and defense roles.
+        // Housing (when materials are ready) and the workshop have priority over extraction and defense roles.
         if (builders < desiredBuilders) role = ROLE_BUILDER;
         else if (craftspeople < desiredCraftspeople) role = ROLE_CRAFTSMAN;
         else if (miners < desiredMiners) role = ROLE_MINER;
         else if (guards < desiredGuards) role = ROLE_GUARD;
-        if (role == null) return;
+        if (role == null) {
+            VillageRegistry.recordDiagnostic(level, center, "Роли",
+                "Распределены: строит.=" + builders + ", ремесл.=" + craftspeople + ", шахт.=" + miners + ", охр.=" + guards);
+            return;
+        }
 
         final String targetRole = role;
         candidates.sort(Comparator
             .comparingInt((Villager v) -> VillagerProgression.getXp(v, targetRole))
             .reversed()
+            .thenComparing(v -> !isUnemployedAdult(v))
             .thenComparing(v -> v.getUUID().toString()));
 
         Villager selected = null;
@@ -170,7 +198,10 @@ public final class VillagerRoles {
                 || (ROLE_GUARD.equals(role) && VillageIndustry.hasSwordAccessibleTo(candidate));
             if (canStart) { selected = candidate; break; }
         }
-        if (selected == null) return;
+        if (selected == null) {
+            VillageRegistry.recordDiagnostic(level, center, "Роли", "Нет инструмента в доступе для роли " + role);
+            return;
+        }
 
         BlockPos home = averageAdultPosition(all, center);
         var data = selected.getPersistentData();
@@ -179,6 +210,7 @@ public final class VillagerRoles {
         data.putInt(HOME_X, home.getX());
         data.putInt(HOME_Y, home.getY());
         data.putInt(HOME_Z, home.getZ());
+        VillageRegistry.recordDiagnostic(level, center, "Роли", "Назначена роль: " + role);
     }
 
     /**

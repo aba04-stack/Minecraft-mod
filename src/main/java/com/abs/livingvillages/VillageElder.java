@@ -391,6 +391,11 @@ public final class VillageElder {
         if (!livestock.isBlank() && !currentNotice.contains("Скот:")) {
             currentNotice = currentNotice.isBlank() ? livestock : currentNotice + " " + livestock;
         }
+        String diagnostics = VillageRegistry.getDiagnosticsSummary(level, origin);
+        if (!diagnostics.isBlank() && !currentNotice.contains("Диагностика:")) {
+            String diagNote = "Диагностика: " + diagnostics + ".";
+            currentNotice = currentNotice.isBlank() ? diagNote : currentNotice + " " + diagNote;
+        }
         return new ElderPanelData(
             elder.getUUID().toString(), villagers.size(), adults, children, beds, food,
             Math.max(PRIORITY_BALANCED, Math.min(PRIORITY_DEFENSE, data.getInt(PRIORITY_KEY))),
