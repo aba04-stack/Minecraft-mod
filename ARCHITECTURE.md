@@ -1,4 +1,11 @@
-# Living Villages — архитектура и материальный баланс (0.15.0)
+# Living Villages / Living Civilization — архитектура и материальный баланс (0.15.0)
+
+> **Статус кода 0.15.0:** `PROTOTYPE` (исходный код присутствует в репозитории, но полная компиляция с зависимостями Minecraft/NeoForge и проверка в `runClient` имеют статус `BLOCKED` / `UNVERIFIED`; см. [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md)).
+>
+> **Связанные документы целевой архитектуры Living Civilization:**
+> - [Целевая слоистая архитектура, границы модулей и контракты (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md)
+> - [Техническое задание (`docs/PROJECT_SPEC.md`)](docs/PROJECT_SPEC.md) · [Переносимость языка (`docs/LANGUAGE_PORTABILITY.md`)](docs/LANGUAGE_PORTABILITY.md) · [Адаптеры версий (`docs/VERSION_ADAPTERS.md`)](docs/VERSION_ADAPTERS.md)
+> - [ИИ жителей (`docs/AI_BEHAVIOR.md`)](docs/AI_BEHAVIOR.md) · [Прокачка профессий (`docs/PROGRESSION.md`)](docs/PROGRESSION.md) · [Сохранения (`docs/SAVE_DATA.md`)](docs/SAVE_DATA.md)
 
 ## Принцип экономики
 

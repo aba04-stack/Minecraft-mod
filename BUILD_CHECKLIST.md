@@ -1,4 +1,7 @@
 ## 0.15.0 — regression checks
+
+> **Связанные документы:** [Стратегия тестирования (`docs/TESTING.md`)](docs/TESTING.md) · [Качество релизов (`docs/RELEASE_QUALITY.md`)](docs/RELEASE_QUALITY.md) · [Известные проблемы (`docs/KNOWN_ISSUES.md`)](docs/KNOWN_ISSUES.md)
+
 - [x] Farm supports explicit vanilla seed/crop pairs for wheat, carrots, potatoes and beetroot.
 - [x] Food courier selects the hungriest eligible adult first, with deterministic tie-break.
 - [x] POSIX/Windows Gradle bootstrap pins version 9.2.1 and verifies distribution SHA-256.

@@ -1,6 +1,12 @@
-# Living Villages 0.15.0 — логичная автономная деревня
+# Living Villages 0.15.0 (Living Civilization) — логичная автономная деревня
 
-**Целевая версия:** Minecraft Java Edition 1.21.1 · NeoForge 21.1.x · Java 21.
+**Целевая версия в конфигурации (`gradle.properties`):** Minecraft Java Edition 1.21.1 · NeoForge 21.1.264 · Java 21 · Gradle 9.2.1.  
+**Статус кода 0.15.0:** `PROTOTYPE` (сборка и запуск в текущем репозитории имеют статус `BLOCKED` / `UNVERIFIED`, см. [`docs/VERSION_COMPATIBILITY.md`](docs/VERSION_COMPATIBILITY.md) и [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md)).
+
+> **Полная техническая документация проекта Living Civilization:**
+> - [Главный обзор и навигация (`README.md`)](README.md) · [Техническое задание (`docs/PROJECT_SPEC.md`)](docs/PROJECT_SPEC.md) · [Дорожная карта (`docs/ROADMAP.md`)](docs/ROADMAP.md)
+> - [Целевая архитектура (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md) · [Прокачка профессий (`docs/PROGRESSION.md`)](docs/PROGRESSION.md) · [Опасный мир и ИИ монстров (`docs/MONSTERS.md`)](docs/MONSTERS.md)
+> - [Производительность (`docs/PERFORMANCE.md`)](docs/PERFORMANCE.md) · [Сохранения (`docs/SAVE_DATA.md`)](docs/SAVE_DATA.md) · [Тестирование (`docs/TESTING.md`)](docs/TESTING.md) · [Качество релизов (`docs/RELEASE_QUALITY.md`)](docs/RELEASE_QUALITY.md)
 
 Это проект исходного кода мода, не предварительно собранный JAR. Полная компиляция и запуск должны пройти на компьютере с Gradle и доступом к репозиториям Minecraft/NeoForge перед использованием в серьёзном мире.
 

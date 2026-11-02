@@ -1,5 +1,7 @@
 # Отчёт проверки Living Villages 0.15.0
 
+> **Связанные документы:** [Полный регламент тестирования и результаты аудита репозитория (`docs/TESTING.md`)](docs/TESTING.md) · [Критерии допуска релиза (`docs/RELEASE_QUALITY.md`)](docs/RELEASE_QUALITY.md) · [Известные проблемы и блокеры (`docs/KNOWN_ISSUES.md`)](docs/KNOWN_ISSUES.md)
+
 ## Проверки, выполненные в текущей среде
 
 - `python3 tools/validate_project.py` — успешно.
