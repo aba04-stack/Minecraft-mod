@@ -30,7 +30,16 @@ jobs:
       - name: Build with checksum-pinned Gradle bootstrap
         run: ./gradlew build
       - name: Run in-world reservation GameTests
-        run: ./gradlew runGameTestServer
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build
+          if ! ./gradlew runGameTestServer 2>&1 | tee build/gametest.log; then
+            grep -E "FAILED|GameTestAssertException|Exception|Caused by" build/gametest.log | tail -n 15 | while IFS= read -r line; do
+              echo "::error title=GameTest Failure::$line"
+            done
+            exit 1
+          fi
       - name: Smoke-test dedicated server startup
         if: github.event_name == 'pull_request' || startsWith(github.ref_name, 'arena/')
         shell: bash

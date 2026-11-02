@@ -1771,6 +1771,8 @@ public final class VillageReservationGameTests {
             "Desert settlement must be able to start a house project using 96 Sandstone, Yellow Bed, and Acacia Door.");
         desertBuilder.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, false);
         VillageReservations.release(desertBuilder.getPersistentData());
+        desertChest.clearContent();
+        forestChest.clearContent();
 
         // 5. AI Arbitration, Task Anti-Hang Watchdog & Role Stability (Points 2, 3, 4, 5).
         desertA.getPersistentData().putLong(VillagerRoles.TASK_PROGRESS_TICK_KEY, 100L);
