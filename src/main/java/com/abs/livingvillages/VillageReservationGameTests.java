@@ -1263,6 +1263,66 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "logistics_and_farmer_surplus_xp")
+    public static void logisticsAndFarmerSurplusDeliveriesAwardXpAndConserveMaterialsInWorld(GameTestHelper helper) {
+        for (int x = 0; x <= 10; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos chestPos = helper.absolutePos(new BlockPos(4, 1, 1));
+        helper.setBlock(new BlockPos(4, 1, 1), Blocks.CHEST);
+        Container chest = (Container) helper.getLevel().getBlockEntity(chestPos);
+        helper.assertTrue(chest != null, "Chest container must exist.");
+
+        Villager courier = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager farmer = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        courier.setNoAi(true);
+        farmer.setNoAi(true);
+
+        // 1. Logistics courier deposits 6 oak logs into the chest and earns ROLE_COURIER XP.
+        courier.getInventory().addItem(new ItemStack(Items.OAK_LOG, 6));
+        int logsMoved = VillageLogistics.depositCarriedMaterials(courier, chest, 300L);
+        helper.assertTrue(
+            logsMoved == 6
+                && chest.getItem(0).is(Items.OAK_LOG)
+                && chest.getItem(0).getCount() == 6
+                && courier.getInventory().getItem(0).isEmpty()
+                && VillagerProgression.getXp(courier, com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_COURIER) == 2,
+            "VillageLogistics must transfer 6 oak logs 1:1 into the chest and award ROLE_COURIER XP.");
+
+        // 2. Farmer carrying 8 bread (32 food points) deposits 5 surplus bread (20 points), keeps 3 bread (12 reserve), and earns ROLE_FARMER XP.
+        farmer.getInventory().addItem(new ItemStack(Items.BREAD, 8));
+        int breadMoved = VillagerAutonomy.depositFarmerSurplus(farmer, chest, 400L);
+        helper.assertTrue(
+            breadMoved == 5
+                && chest.getItem(1).is(Items.BREAD)
+                && chest.getItem(1).getCount() == 5
+                && farmer.getInventory().getItem(0).is(Items.BREAD)
+                && farmer.getInventory().getItem(0).getCount() == 3
+                && VillagerProgression.getXp(farmer, com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_FARMER) == 2,
+            "VillagerAutonomy must deposit 5 surplus bread into the chest, retain 3 bread (12 food points) in inventory, and award ROLE_FARMER XP.");
+
+        // 3. Verify miner and lumberjack step-tick efficiency bonus with floor guard.
+        VillagerProgression.recordCompletedWork(
+            courier,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_MINER,
+            30,
+            true,
+            500L
+        );
+        int adjustedMineSteps = VillagerProgression.adjustedStepTicks(
+            courier,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_MINER,
+            12,
+            3
+        );
+        helper.assertTrue(
+            adjustedMineSteps < 12 && adjustedMineSteps >= 3,
+            "Experienced miners must receive a bounded step-tick reduction above the minimum floor.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {

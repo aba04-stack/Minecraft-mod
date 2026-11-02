@@ -121,7 +121,7 @@ public final class VillageLogistics {
         }
 
         if (villager.distanceToSqr(Vec3.atCenterOf(standPos)) <= 2.8D * 2.8D) {
-            int moved = depositMaterials(villager, container);
+            int moved = depositCarriedMaterials(villager, container, now);
             cancelTrip(villager, data);
             data.putLong(NEXT_SCAN, now + (moved > 0 ? SUCCESS_RETRY_TICKS : SEARCH_RETRY_TICKS));
             return;
@@ -185,6 +185,21 @@ public final class VillageLogistics {
             if (hasSpaceFor(container, source)) return true;
         }
         return false;
+    }
+
+    public static int depositCarriedMaterials(Villager villager, Container destination, long nowTick) {
+        if (villager == null || destination == null) return 0;
+        int moved = depositMaterials(villager, destination);
+        if (moved > 0) {
+            VillagerProgression.recordCompletedWork(
+                villager,
+                com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_COURIER,
+                2,
+                true,
+                nowTick
+            );
+        }
+        return moved;
     }
 
     private static int depositMaterials(Villager villager, Container destination) {

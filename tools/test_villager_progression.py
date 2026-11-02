@@ -37,6 +37,8 @@ for worker_file in (
     "VillageCraftingJobs.java",
     "VillageDefense.java",
     "VillagePopulation.java",
+    "VillageLogistics.java",
+    "VillagerAutonomy.java",
 ):
     source = (JAVA / worker_file).read_text(encoding="utf-8")
     assert "VillagerProgression.recordCompletedWork(" in source, (

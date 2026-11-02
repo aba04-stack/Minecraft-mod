@@ -175,7 +175,7 @@ public final class VillagerAutonomy {
         double dy = villager.getY() - standPos.getY();
         double dz = villager.getZ() - (standPos.getZ() + 0.5D);
         if (dx * dx + dy * dy + dz * dz <= 4.0D) {
-            int moved = depositSurplus(villager, container);
+            int moved = depositFarmerSurplus(villager, container, now);
             cancelTrip(villager, data);
             data.putLong(NEXT_SEARCH, now + (moved > 0 ? SUCCESS_DELAY_TICKS : RETRY_DELAY_TICKS));
             if (moved > 0) {
@@ -283,6 +283,21 @@ public final class VillagerAutonomy {
             }
         }
         return false;
+    }
+
+    public static int depositFarmerSurplus(Villager villager, Container destination, long nowTick) {
+        if (villager == null || destination == null) return 0;
+        int moved = depositSurplus(villager, destination);
+        if (moved > 0) {
+            VillagerProgression.recordCompletedWork(
+                villager,
+                com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_FARMER,
+                2,
+                true,
+                nowTick
+            );
+        }
+        return moved;
     }
 
     private static int depositSurplus(Villager villager, Container destination) {

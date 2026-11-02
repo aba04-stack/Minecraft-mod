@@ -1,6 +1,6 @@
 # Минимальная система прокачки и профессионального опыта (`PROGRESSION`)
 
-> **Текущий статус подсистемы:** `PLANNED` (в исходном коде `0.15.0` собственная система опыта рабочих ролей ещё не реализована; ванильные торговые уровни жителей сохраняются без изменений).
+> **Текущий статус подсистемы:** `TESTED` (реализованы `VillagerProgressionModel` и `VillagerProgression`, подключённые ко всем 9 рабочим подсистемам: `VillagerTreeWork`, `VillagerMining`, `VillageBuilder`, `VillageFarmBuilder`, `VillageCraftingJobs`, `VillageDefense`, `VillagePopulation`, `VillageLogistics` и `VillagerAutonomy`; покрыты внутриигровыми `@GameTest` в `VillageReservationGameTests`).
 >
 > **Связанные документы:** [Техническое задание (`PROJECT_SPEC.md`)](PROJECT_SPEC.md) · [ИИ и поведение жителей (`AI_BEHAVIOR.md`)](AI_BEHAVIOR.md) · [Сохранения и миграции (`SAVE_DATA.md`)](SAVE_DATA.md) · [Тестирование (`TESTING.md`)](TESTING.md)
 

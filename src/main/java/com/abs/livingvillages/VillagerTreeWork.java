@@ -496,8 +496,16 @@ public final class VillagerTreeWork {
         ItemStack tool = villager.getItemBySlot(EquipmentSlot.MAINHAND);
         float hardness = state.getDestroySpeed(level, target);
         float speed = Math.max(1.0F, tool.getDestroySpeed(state));
-        int required = Math.max(leaves ? LEAF_CLEAR_STEPS : LOG_CHOP_STEPS,
+        int baseRequired = Math.max(leaves ? LEAF_CLEAR_STEPS : LOG_CHOP_STEPS,
             Math.max(1, (int) Math.ceil(30.0D * Math.max(0.1F, hardness) / speed / TICK_STEP)));
+        int required = leaves
+            ? baseRequired
+            : VillagerProgression.adjustedStepTicks(
+                villager,
+                com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_LUMBERJACK,
+                baseRequired,
+                4
+            );
         level.destroyBlockProgress(-villager.getId(), target, Math.min(9, (progress * 10) / required));
         if (progress % 2 == 0) {
             level.sendParticles(ParticleTypes.CRIT, target.getX() + 0.5D, target.getY() + 0.5D,

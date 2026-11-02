@@ -20,7 +20,7 @@
 - **Результат:** `./gradlew build` с JDK 21 (Temurin 21) и контрольной суммой Gradle `9.2.1` успешно компилирует проект и собирает `build/libs/livingvillages-0.15.0.jar`.
 
 ### Подэтап 0.3. Дымовая проверка в клиенте, на выделенном сервере и GameTestServer (`TESTED`)
-- **Результат:** в CI автоматически выполняются `./gradlew runGameTestServer` (20 внутриигровых `@GameTest`), запуск выделенного сервера (`./gradlew runServer`) и headless-клиента с программным OpenGL (`tools/smoke_test_client.sh`, проверяющий `ElderScreen` и сетевые `StreamCodec`).
+- **Результат:** в CI автоматически выполняются `./gradlew runGameTestServer` (21 внутриигровой `@GameTest`), запуск выделенного сервера (`./gradlew runServer`) и headless-клиента с программным OpenGL (`tools/smoke_test_client.sh`, проверяющий `ElderScreen` и сетевые `StreamCodec`).
 
 ---
 
@@ -69,7 +69,7 @@
 - **Результат:** `VillagerProgression.ensureMigratedTag` мигрирует старые записи `v0 -> v1` без потери неизвестных полей и с резервным сохранением повреждённых тегов в `_raw_backup_tag`.
 
 ### Подэтап 3.3. Начисление опыта за подтверждённые рабочие задачи (`TESTED`)
-- **Результат:** `VillagerProgression.recordCompletedWork` подключён во всех 7 рабочих классах (`VillagerTreeWork`, `VillagerMining`, `VillageBuilder`, `VillageFarmBuilder`, `VillageCraftingJobs`, `VillageDefense`, `VillagePopulation`).
+- **Результат:** `VillagerProgression.recordCompletedWork` подключён во всех 9 рабочих классах (`VillagerTreeWork`, `VillagerMining`, `VillageBuilder`, `VillageFarmBuilder`, `VillageCraftingJobs`, `VillageDefense`, `VillagePopulation`, `VillageLogistics`, `VillagerAutonomy`).
 
 ### Подэтап 3.4. Малые объяснимые бонусы мастерства и отображение в UI (`TESTED`)
 - **Результат:** `VillagerProgression.adjustedStepTicks` умеренно ускоряет шаги строительства и ремесла (без создания бесплатных предметов), `guardRetreatRatio` корректирует порог тактического отступления стражи, а уровень мастера отображается как в диалоге жителя (`VillagerSoul`), так и в сводке панели старосты (`VillageElder.createPanelSnapshot`).

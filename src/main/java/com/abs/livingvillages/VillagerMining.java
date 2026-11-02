@@ -209,7 +209,13 @@ public final class VillagerMining {
 
         float hardness = state.getDestroySpeed(level, pos);
         float speed = Math.max(0.1F, tool.getDestroySpeed(state));
-        int required = Math.max(4, (int) Math.ceil((30.0D * Math.max(0.1F, hardness) / speed) / TICK_STEP));
+        int baseRequired = Math.max(4, (int) Math.ceil((30.0D * Math.max(0.1F, hardness) / speed) / TICK_STEP));
+        int required = VillagerProgression.adjustedStepTicks(
+            villager,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_MINER,
+            baseRequired,
+            3
+        );
         level.destroyBlockProgress(-villager.getId(), pos, Math.min(9, progress * 10 / required));
         if (progress % 2 == 0) {
             level.sendParticles(ParticleTypes.CRIT, pos.getX() + 0.5D, pos.getY() + 0.5D,
