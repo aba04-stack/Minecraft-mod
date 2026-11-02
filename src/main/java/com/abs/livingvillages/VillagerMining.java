@@ -350,9 +350,9 @@ public final class VillagerMining {
     }
 
     private static boolean isQuarryBlock(BlockState state) {
-        // Only these common blocks reliably add the resource used by the village's vanilla stone-tool recipes.
-        // Other rock types may be cleared as safe obstructions, but they are not the quarry target.
-        return state.is(Blocks.STONE) || state.is(Blocks.COBBLESTONE);
+        return state.is(Blocks.STONE) || state.is(Blocks.COBBLESTONE)
+            || state.is(Blocks.SANDSTONE) || state.is(Blocks.RED_SANDSTONE)
+            || state.is(Blocks.TERRACOTTA);
     }
 
     private static boolean isReservedByAnotherMiner(ServerLevel level, Villager self, BlockPos candidate) {
@@ -395,6 +395,8 @@ public final class VillagerMining {
             || state.is(Blocks.DIORITE) || state.is(Blocks.ANDESITE) || state.is(Blocks.TUFF)
             || state.is(Blocks.CALCITE) || state.is(Blocks.DRIPSTONE_BLOCK)
             || state.is(Blocks.COBBLESTONE) || state.is(Blocks.COBBLED_DEEPSLATE)
+            || state.is(Blocks.SANDSTONE) || state.is(Blocks.RED_SANDSTONE)
+            || state.is(Blocks.TERRACOTTA) || state.is(Blocks.SAND) || state.is(Blocks.RED_SAND)
             || state.is(Blocks.DIRT) || state.is(Blocks.COARSE_DIRT) || state.is(Blocks.ROOTED_DIRT)
             || state.is(Blocks.GRAVEL) || isOre(state)) {
             // Don't open a block with lava directly on the other side.

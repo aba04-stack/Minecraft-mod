@@ -106,5 +106,12 @@
 - **Проверка:** внутриигровой тест `catchUpSmeltingRaiderSquadRetreatAndGuardEquipmentRequestWorkInWorld`.
 
 ### Подэтап 5.3. Межпоселенческое взаимодействие и дипломатия (`TESTED`)
-- **Результат:** `VillageRegistry.tryTradeWithKnownNeighbors` (вызываемый в `LivingVillages.runIndustryInActiveAreas`) и `executeNeighborTradeIfEligible` выполняют честный обмен излишками хлеба и досок `1:1` между сундуками мирных соседних деревень и обновляют дипломатический рейтинг `diplomaticStandings` в `SavedData`.
-- **Проверка:** внутриигровые тесты `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade` и `portsAdapterSoulMigrationElderSkillSummaryAndAutoNeighborTradeWorkInWorld`.
+- **Результат:** `VillageRegistry.tryTradeWithKnownNeighbors` (вызываемый в `LivingVillages.runIndustryInActiveAreas`), `executeNeighborTradeIfEligible` и `executeBiomeResourceTradeIfEligible` выполняют честный обмен излишками хлеба и досок `1:1`, а также биомными строительными ресурсами (`SANDSTONE` / `COBBLESTONE` ↔ `OAK_PLANKS`) между сундуками мирных соседних деревень и обновляют дипломатический рейтинг `diplomaticStandings` в `SavedData`.
+- **Проверка:** внутриигровые тесты `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade`, `portsAdapterSoulMigrationElderSkillSummaryAndAutoNeighborTradeWorkInWorld` и `desertBiomeSandstoneConstructionAllColorBedsInterVillageBiomeTradeAndAiArbitrationWorkInWorld`.
+
+### Этап 6. Полный аудит (30 пунктов), биомная адаптация, 16 цветов кроватей и стабилизация ИИ (`TESTED`)
+- **Результат:**
+  - Поддержка строительства домов из биомных блоков (`SANDSTONE`, `CUT_SANDSTONE`, `RED_SANDSTONE`, `COBBLESTONE`, `STONE_BRICKS`, `TERRACOTTA`, `MUD_BRICKS`, `SNOW_BLOCK`) и всех 16 цветов кроватей (`ALL_BED_ITEMS`, `selectAvailableBedItem`, `selectAvailableDoorItem`).
+  - Развитие поселений в пустыне без деревьев: честное сжатие `4 SAND -> 1 SANDSTONE` (`VillageIndustry.compressSandToSandstoneIfEligible`), добыча песчаника и терракоты шахтёрами (`VillagerMining`) и межпоселенческий обмен песчаника/булыжника на доски (`VillageRegistry.executeBiomeResourceTradeIfEligible`).
+  - Арбитраж с ванильным ИИ (`shouldYieldToVanillaVillagerAi`, `shouldYieldToVanillaAnimalAi`), защита от зависания задач (`VillagerRoles.recoverIfTaskStuck`, `MAX_TASK_STUCK_TICKS = 400`) и защита от метания между профессиями (`MIN_ROLE_TENURE_TICKS = 600`).
+- **Проверка:** внутриигровой тест `desertBiomeSandstoneConstructionAllColorBedsInterVillageBiomeTradeAndAiArbitrationWorkInWorld` (всего 25 внутриигровых `@GameTest`).

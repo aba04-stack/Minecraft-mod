@@ -63,6 +63,11 @@ assert "public static CatchUpResult evaluateFurnaceCatchUp(" in settlement_model
 assert "public static int evaluateRaiderSquad(" in settlement_model
 assert "public static boolean canCraftInParallelWithConstruction(" in settlement_model
 assert "public static TradeExchangeResult evaluateTradeCaravan(" in settlement_model
+assert "public static int selectBiomeStructuralCategory(" in settlement_model
+assert "public static int evaluateSandToSandstoneCompression(" in settlement_model
+assert "public static boolean shouldYieldToVanillaVillagerAi(" in settlement_model
+assert "public static boolean isTaskStuck(" in settlement_model
+assert "public static boolean canSwitchSpecialistRole(" in settlement_model
 
 trust_animal_model = (DOMAIN_DIR / "TrustAndAnimalModel.java").read_text(encoding="utf-8")
 assert "public static int trustTierForScore(" in trust_animal_model

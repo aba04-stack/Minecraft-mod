@@ -17,6 +17,19 @@ public final class SettlementSimulationModel {
     public static final int SQUAD_ADVANCE = 1;
     public static final int SQUAD_RETREAT = 2;
 
+    public static final int BIOME_FOREST_OR_PLAINS = 0;
+    public static final int BIOME_DESERT_OR_BADLANDS = 1;
+    public static final int BIOME_SNOWY_OR_TAIGA = 2;
+    public static final int BIOME_MOUNTAIN_OR_ROCKY = 3;
+
+    public static final int MATERIAL_NONE = 0;
+    public static final int MATERIAL_PLANKS = 1;
+    public static final int MATERIAL_SANDSTONE = 2;
+    public static final int MATERIAL_STONE_OR_CLAY = 3;
+
+    public static final long MAX_TASK_STUCK_TICKS = 400L;
+    public static final long MIN_ROLE_TENURE_TICKS = 600L;
+
     private SettlementSimulationModel() {}
 
     /**
@@ -163,5 +176,81 @@ public final class SettlementSimulationModel {
         int planksMoved = bundles * 8;
         int nextStanding = Math.min(100, clampedStanding + bundles * 5);
         return new TradeExchangeResult(true, foodMoved, planksMoved, nextStanding);
+    }
+
+    /**
+     * Selects the structural material category for a 96-block house based on the settlement's
+     * biome and actual stored resources, enabling treeless desert and highland progression.
+     */
+    public static int selectBiomeStructuralCategory(
+        int biomeKind,
+        int availablePlanks,
+        int availableSandstone,
+        int availableStoneOrClay,
+        int requiredBlocks
+    ) {
+        int req = Math.max(1, requiredBlocks);
+        if (biomeKind == BIOME_DESERT_OR_BADLANDS) {
+            if (availableSandstone >= req) return MATERIAL_SANDSTONE;
+            if (availableStoneOrClay >= req) return MATERIAL_STONE_OR_CLAY;
+            if (availablePlanks >= req) return MATERIAL_PLANKS;
+            return MATERIAL_NONE;
+        }
+        if (biomeKind == BIOME_MOUNTAIN_OR_ROCKY) {
+            if (availableStoneOrClay >= req) return MATERIAL_STONE_OR_CLAY;
+            if (availablePlanks >= req) return MATERIAL_PLANKS;
+            if (availableSandstone >= req) return MATERIAL_SANDSTONE;
+            return MATERIAL_NONE;
+        }
+        if (availablePlanks >= req) return MATERIAL_PLANKS;
+        if (availableSandstone >= req) return MATERIAL_SANDSTONE;
+        if (availableStoneOrClay >= req) return MATERIAL_STONE_OR_CLAY;
+        return MATERIAL_NONE;
+    }
+
+    /**
+     * Evaluates honest 4:1 compression of stored sand into sandstone (vanilla 2x2 recipe)
+     * so desert settlements without trees can produce structural sandstone blocks.
+     */
+    public static int evaluateSandToSandstoneCompression(int availableSand, int availableOutputSpace) {
+        if (availableSand < 4 || availableOutputSpace <= 0) return 0;
+        return Math.min(Math.min(availableSand / 4, availableOutputSpace), 16);
+    }
+
+    /**
+     * Determines whether autonomous villager work AI must yield to vanilla AI
+     * (sleeping, player trading, recent damage panic, or active village alarm evacuation).
+     */
+    public static boolean shouldYieldToVanillaVillagerAi(
+        boolean isSleeping,
+        boolean isTrading,
+        boolean recentlyHurtPanic,
+        boolean villageAlarmEvacuating
+    ) {
+        return isSleeping || isTrading || recentlyHurtPanic || villageAlarmEvacuating;
+    }
+
+    /**
+     * Detects whether an active worker task has made zero progress for at least {@code maxStuckTicks}.
+     */
+    public static boolean isTaskStuck(long lastProgressTick, long currentTick, long maxStuckTicks) {
+        if (lastProgressTick <= 0L || currentTick <= lastProgressTick) return false;
+        return (currentTick - lastProgressTick) >= Math.max(40L, maxStuckTicks);
+    }
+
+    /**
+     * Prevents unnecessary role thrashing by enforcing a minimum tenure unless the role is disabled
+     * or invalid.
+     */
+    public static boolean canSwitchSpecialistRole(
+        long roleAssignedTick,
+        long currentTick,
+        boolean currentRoleDisabledOrInvalid,
+        boolean hasActiveTask
+    ) {
+        if (hasActiveTask) return false;
+        if (currentRoleDisabledOrInvalid) return true;
+        if (roleAssignedTick <= 0L || currentTick < roleAssignedTick) return true;
+        return (currentTick - roleAssignedTick) >= MIN_ROLE_TENURE_TICKS;
     }
 }

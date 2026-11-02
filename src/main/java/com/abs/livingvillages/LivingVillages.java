@@ -270,17 +270,18 @@ public final class LivingVillages {
             .orElse(null);
 
         if (plankBlock == null) {
-            return BuildResult.failure("Не хватает материалов: нужно 96 досок одного вида в ближайших сундуках.");
+            return BuildResult.failure("Не хватает материалов: нужно 96 строительных блоков одного вида (доски, песчаник, булыжник или каменный кирпич) в ближайших сундуках.");
         }
-        if (countItem(containers, Items.RED_BED) < 1) {
-            return BuildResult.failure("Не найдена красная кровать в сундуках поблизости.");
+        net.minecraft.world.item.Item bedItem = VillageBuilder.selectAvailableBedItem(containers);
+        if (bedItem == Items.AIR) {
+            return BuildResult.failure("Не найдена кровать (любого цвета) в сундуках поблизости.");
         }
-        net.minecraft.world.item.Item doorItem = VillageBuilder.doorItemForPlanks(plankBlock);
+        net.minecraft.world.item.Item doorItem = VillageBuilder.selectAvailableDoorItem(plankBlock, containers);
         if (doorItem == Items.AIR) {
-            return BuildResult.failure("Для выбранных досок не найден подходящий настоящий дверной блок.");
+            return BuildResult.failure("Для выбранных блоков не найден подходящий настоящий дверной блок.");
         }
         if (countItem(containers, doorItem) < 1) {
-            return BuildResult.failure("Для закрытого дома нужна дверь из того же вида древесины. Ремесленник должен изготовить её из 6 досок.");
+            return BuildResult.failure("Для закрытого дома нужна деревянная дверь. Ремесленник должен изготовить её из 6 досок или получить по обмену.");
         }
 
         BlockPos site = findBuildSite(level, center);
@@ -290,7 +291,7 @@ public final class LivingVillages {
 
         // Do not consume anything here. The builder must physically walk to storage,
         // collect the already-existing items, and place each block at the site over time.
-        if (!VillageBuilder.startHouseProject(level, center, site, plankBlock, doorItem)) {
+        if (!VillageBuilder.startHouseProject(level, center, site, plankBlock, doorItem, bedItem)) {
             return BuildResult.failure("Строитель занят, не назначен или не может вместить материалы в инвентарь.");
         }
         return BuildResult.projectStarted(site, "Строитель начал собирать материалы и возводить хижину по блокам.");
@@ -530,7 +531,7 @@ public final class LivingVillages {
                     continue;
                 }
                 Block block = Block.byItem(stack.getItem());
-                if (block != Blocks.AIR && block.defaultBlockState().is(net.minecraft.tags.BlockTags.PLANKS)) {
+                if (VillageBuilder.isSupportedStructuralBlock(block)) {
                     counts.merge(block, stack.getCount(), Integer::sum);
                 }
             }

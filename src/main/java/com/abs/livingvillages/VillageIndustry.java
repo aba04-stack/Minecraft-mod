@@ -84,6 +84,13 @@ public final class VillageIndustry {
         // Convert logs to planks in small batches, but do not flood storage with intermediate goods.
         if (totalPlanks(storages) < 24 && craftPlanksFromStorage(storages, villagers)) return;
 
+        // In desert/sand-rich settlements without lumber, compress 4 sand -> 1 sandstone (vanilla 2x2 recipe).
+        if (totalPlanks(storages) < 96 && totalItem(storages, Items.SANDSTONE) < 96) {
+            for (StorageRef ref : storages) {
+                if (compressSandToSandstoneIfEligible(ref.container()) > 0) break;
+            }
+        }
+
         // Tools are produced by a villager who reaches the actual table, not by a background free-item generator.
         BlockPos tablePos = findNearestBlock(level, center, Blocks.CRAFTING_TABLE, radius);
         List<StorageRef> workshopStorage = tablePos == null ? List.of() : findStorages(level, tablePos, LOCAL_STORAGE_RADIUS);
@@ -872,6 +879,31 @@ public final class VillageIndustry {
             }
         }
         inventory.setChanged();
+    }
+
+    /**
+     * Compresses stored Sand into Sandstone using the vanilla 4:1 (2x2) recipe so desert
+     * settlements without trees can accumulate structural sandstone blocks.
+     */
+    public static int compressSandToSandstoneIfEligible(Container container) {
+        if (container == null) return 0;
+        int sandCount = countItem(container, Items.SAND);
+        ItemStack probe = new ItemStack(Items.SANDSTONE, 16);
+        int room = inventoryCanFit(container, probe) ? 16 : (inventoryCanFit(container, new ItemStack(Items.SANDSTONE, 1)) ? 1 : 0);
+        int produced = com.abs.livingvillages.domain.SettlementSimulationModel.evaluateSandToSandstoneCompression(
+            sandCount,
+            room
+        );
+        if (produced <= 0) return 0;
+        int neededSand = produced * 4;
+        int removed = removeItem(container, Items.SAND, neededSand);
+        if (removed != neededSand) {
+            if (removed > 0) insertIntoContainer(container, new ItemStack(Items.SAND, removed));
+            return 0;
+        }
+        insertIntoContainer(container, new ItemStack(Items.SANDSTONE, produced));
+        container.setChanged();
+        return produced;
     }
 
     private record StorageRef(BlockPos pos, Container container) {}

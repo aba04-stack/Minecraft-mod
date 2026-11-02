@@ -12,6 +12,7 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.Container;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.BedBlock;
@@ -1671,6 +1672,127 @@ public final class VillageReservationGameTests {
             panel.notice().contains("Скот:"),
             "Elder panel snapshot must include the village livestock summary when animals are present.");
         helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40, batch = "desert_sandstone_all_color_beds_biome_trade_and_arbitration")
+    public static void desertBiomeSandstoneConstructionAllColorBedsInterVillageBiomeTradeAndAiArbitrationWorkInWorld(GameTestHelper helper) {
+        for (int x = 0; x <= 30; x++) {
+            for (int z = 0; z <= 2; z++) {
+                helper.setBlock(new BlockPos(x, 0, z), Blocks.SANDSTONE);
+            }
+        }
+
+        // 1. Desert village (left) & Forest village (right) setup.
+        BlockPos desertHomeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos desertHomeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos forestHomeA = helper.absolutePos(new BlockPos(25, 1, 1));
+        BlockPos forestHomeB = helper.absolutePos(new BlockPos(27, 1, 1));
+        BlockPos desertChestPos = helper.absolutePos(new BlockPos(5, 1, 1));
+        BlockPos forestChestPos = helper.absolutePos(new BlockPos(23, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(23, 1, 1), Blocks.CHEST);
+
+        Villager desertA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager desertBuilder = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        Villager forestA = helper.spawn(EntityType.VILLAGER, 25, 1, 1);
+        Villager forestB = helper.spawn(EntityType.VILLAGER, 27, 1, 1);
+        for (Villager v : List.of(desertA, desertBuilder, forestA, forestB)) {
+            v.setNoAi(true);
+        }
+        desertA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), desertHomeA));
+        desertBuilder.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), desertHomeB));
+        forestA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), forestHomeA));
+        forestB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), forestHomeB));
+
+        BlockPos desertCenter = helper.absolutePos(new BlockPos(2, 1, 1));
+        BlockPos forestCenter = helper.absolutePos(new BlockPos(26, 1, 1));
+        VillageRegistry.villageId(helper.getLevel(), desertCenter);
+        VillageRegistry.villageId(helper.getLevel(), forestCenter);
+        VillageRegistry.isStorageForVillage(helper.getLevel(), desertCenter, desertChestPos);
+        VillageRegistry.isStorageForVillage(helper.getLevel(), forestCenter, forestChestPos);
+
+        Container desertChest = (Container) helper.getLevel().getBlockEntity(desertChestPos);
+        Container forestChest = (Container) helper.getLevel().getBlockEntity(forestChestPos);
+        helper.assertTrue(desertChest != null && forestChest != null, "Both desert and forest chests must exist.");
+
+        // 2. Honest 4:1 Sand -> Sandstone compression for treeless desert settlements (Point 9).
+        desertChest.setItem(0, new ItemStack(Items.SAND, 64));
+        int compressedSandstone = VillageIndustry.compressSandToSandstoneIfEligible(desertChest);
+        helper.assertTrue(
+            compressedSandstone == 16
+                && desertChest.getItem(0).isEmpty()
+                && countItem(desertChest, Items.SANDSTONE) == 16,
+            "64 Sand must compress 4:1 into 16 Sandstone without creating or losing materials.");
+
+        // 3. Inter-settlement biome trade: Desert exchanges surplus Sandstone for Forest Oak Planks (Point 12).
+        desertChest.setItem(0, new ItemStack(Items.SANDSTONE, 32));
+        forestChest.setItem(0, new ItemStack(Items.OAK_PLANKS, 32));
+        boolean biomeTraded = VillageRegistry.executeBiomeResourceTradeIfEligible(
+            helper.getLevel(),
+            desertCenter,
+            forestCenter,
+            8
+        );
+        helper.assertTrue(
+            biomeTraded
+                && countItem(desertChest, Items.OAK_PLANKS) > 0
+                && countItem(forestChest, Items.SANDSTONE) > 0,
+            "Desert village must exchange surplus Sandstone for Forest Oak Planks 1:1.");
+
+        // 4. All-color bed support & biome-adaptive Sandstone house project (Points 10 & 11).
+        desertChest.clearContent();
+        desertChest.setItem(0, new ItemStack(Items.SANDSTONE, 64));
+        desertChest.setItem(1, new ItemStack(Items.SANDSTONE, 32));
+        desertChest.setItem(2, new ItemStack(Items.YELLOW_BED, 1));
+        desertChest.setItem(3, new ItemStack(Items.ACACIA_DOOR, 1));
+
+        Item selectedBed = VillageBuilder.selectAvailableBedItem(List.of(desertChest));
+        Item selectedDoor = VillageBuilder.selectAvailableDoorItem(Blocks.SANDSTONE, List.of(desertChest));
+        helper.assertTrue(
+            selectedBed == Items.YELLOW_BED
+                && selectedDoor == Items.ACACIA_DOOR
+                && VillageBuilder.isSupportedStructuralBlock(Blocks.SANDSTONE)
+                && VillageBuilder.isSupportedStructuralBlock(Blocks.STONE_BRICKS)
+                && VillageBuilder.isSupportedStructuralBlock(Blocks.TERRACOTTA),
+            "Builder must support all 16 bed colors, biome structural blocks, and available wooden doors.");
+
+        desertBuilder.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_BUILDER);
+        BlockPos houseSite = helper.absolutePos(new BlockPos(10, 1, 0));
+        boolean startedSandstoneHouse = VillageBuilder.startHouseProject(
+            helper.getLevel(),
+            desertCenter,
+            houseSite,
+            Blocks.SANDSTONE,
+            selectedDoor,
+            selectedBed
+        );
+        helper.assertTrue(
+            startedSandstoneHouse && VillageBuilder.isProjectActive(desertBuilder),
+            "Desert settlement must be able to start a house project using 96 Sandstone, Yellow Bed, and Acacia Door.");
+
+        // 5. AI Arbitration, Task Anti-Hang Watchdog & Role Stability (Points 2, 3, 4, 5).
+        desertA.getPersistentData().putLong(VillagerRoles.TASK_PROGRESS_TICK_KEY, 100L);
+        desertA.getPersistentData().putBoolean("livingvillages_logistics_active", true);
+        boolean recoveredStuck = VillagerRoles.recoverIfTaskStuck(desertA, 600L);
+        helper.assertTrue(
+            recoveredStuck
+                && !desertA.getPersistentData().getBoolean("livingvillages_logistics_active")
+                && !com.abs.livingvillages.domain.SettlementSimulationModel.canSwitchSpecialistRole(500L, 700L, false, false)
+                && com.abs.livingvillages.domain.SettlementSimulationModel.shouldYieldToVanillaVillagerAi(true, false, false, false),
+            "Task watchdog must recover stuck workers, enforce role tenure, and yield to vanilla sleep/trade AI.");
+        helper.succeed();
+    }
+
+    private static int countItem(Container container, Item item) {
+        if (container == null || item == null) return 0;
+        int total = 0;
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack stack = container.getItem(i);
+            if (!stack.isEmpty() && stack.is(item)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
     }
 
     private static void placeFloor(GameTestHelper helper) {

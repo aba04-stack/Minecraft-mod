@@ -47,9 +47,11 @@ public final class VillageBuilder {
     private static final String PHASE = P + "phase";
     private static final String PLANK_ITEM = P + "plank_item";
     private static final String DOOR_ITEM = P + "door_item";
+    private static final String BED_ITEM = P + "bed_item";
     private static final String SITE_X = P + "site_x", SITE_Y = P + "site_y", SITE_Z = P + "site_z";
     private static final String STEP_INDEX = P + "step_index";
     private static final String STARTED = P + "started";
+    private static final String LAST_PROGRESS_TICK = P + "last_progress_tick";
     private static final String NEXT_ACTION = P + "next_action";
     private static final String ROUTE_ACTIVE = P + "route_active";
     private static final String ROUTE_KIND = P + "route_kind";
@@ -72,6 +74,26 @@ public final class VillageBuilder {
     private static final double PLACE_REACH = 4.5D;
     private static final float WALK_SPEED = 0.62F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
+
+    public static final List<Item> ALL_BED_ITEMS = List.of(
+        Items.RED_BED, Items.WHITE_BED, Items.ORANGE_BED, Items.MAGENTA_BED,
+        Items.LIGHT_BLUE_BED, Items.YELLOW_BED, Items.LIME_BED, Items.PINK_BED,
+        Items.GRAY_BED, Items.LIGHT_GRAY_BED, Items.CYAN_BED, Items.PURPLE_BED,
+        Items.BLUE_BED, Items.BROWN_BED, Items.GREEN_BED, Items.BLACK_BED
+    );
+
+    public static final List<Block> BIOME_STRUCTURAL_BLOCKS = List.of(
+        Blocks.SANDSTONE, Blocks.CUT_SANDSTONE, Blocks.SMOOTH_SANDSTONE,
+        Blocks.RED_SANDSTONE, Blocks.CUT_RED_SANDSTONE, Blocks.SMOOTH_RED_SANDSTONE,
+        Blocks.COBBLESTONE, Blocks.MOSSY_COBBLESTONE, Blocks.STONE_BRICKS,
+        Blocks.TERRACOTTA, Blocks.BRICKS, Blocks.MUD_BRICKS, Blocks.SNOW_BLOCK
+    );
+
+    public static final List<Item> ALL_WOODEN_DOORS = List.of(
+        Items.OAK_DOOR, Items.SPRUCE_DOOR, Items.BIRCH_DOOR, Items.JUNGLE_DOOR,
+        Items.ACACIA_DOOR, Items.DARK_OAK_DOOR, Items.MANGROVE_DOOR,
+        Items.CHERRY_DOOR, Items.BAMBOO_DOOR, Items.CRIMSON_DOOR, Items.WARPED_DOOR
+    );
 
     private VillageBuilder() {}
 
@@ -104,6 +126,42 @@ public final class VillageBuilder {
     /** Number of planks used by the current fixed house blueprint. */
     public static int housePlanksRequired() { return PLANKS_REQUIRED; }
 
+    public static boolean isSupportedStructuralBlock(Block block) {
+        if (block == null || block == Blocks.AIR) return false;
+        return block.defaultBlockState().is(BlockTags.PLANKS) || BIOME_STRUCTURAL_BLOCKS.contains(block);
+    }
+
+    public static boolean isSupportedBedItem(Item item) {
+        return item != null && item != Items.AIR && Block.byItem(item) instanceof BedBlock;
+    }
+
+    public static Item selectAvailableBedItem(List<Container> containers) {
+        if (containers == null || containers.isEmpty()) return Items.AIR;
+        for (Item bed : ALL_BED_ITEMS) {
+            int total = 0;
+            for (Container c : containers) total += countItem(c, bed);
+            if (total >= 1) return bed;
+        }
+        return Items.AIR;
+    }
+
+    public static Item selectAvailableDoorItem(Block structuralBlock, List<Container> containers) {
+        Item matching = doorItemForPlanks(structuralBlock);
+        if (matching != Items.AIR && containers != null) {
+            int count = 0;
+            for (Container c : containers) count += countItem(c, matching);
+            if (count >= 1) return matching;
+        }
+        if (containers != null) {
+            for (Item door : ALL_WOODEN_DOORS) {
+                int count = 0;
+                for (Container c : containers) count += countItem(c, door);
+                if (count >= 1) return door;
+            }
+        }
+        return matching;
+    }
+
     /** Derives a matching real door item from the plank block namespace/path. */
     public static Item doorItemForPlanks(Block plankBlock) {
         if (plankBlock == null || plankBlock == Blocks.AIR
@@ -118,22 +176,28 @@ public final class VillageBuilder {
         return Block.byItem(item) instanceof DoorBlock ? item : Items.AIR;
     }
 
-    /** Called by the autonomous planner only after it verifies real planks, bed, door and site. */
+    /** Called by the autonomous planner only after it verifies real planks/structural blocks, bed, door and site. */
     public static boolean startHouseProject(ServerLevel level, BlockPos center, BlockPos site,
                                             Block plankBlock, Item doorItem) {
+        return startHouseProject(level, center, site, plankBlock, doorItem, Items.RED_BED);
+    }
+
+    public static boolean startHouseProject(ServerLevel level, BlockPos center, BlockPos site,
+                                            Block plankBlock, Item doorItem, Item bedItem) {
+        Item resolvedBed = isSupportedBedItem(bedItem) ? bedItem : Items.RED_BED;
         if (!LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
-            || plankBlock == null || !plankBlock.defaultBlockState().is(BlockTags.PLANKS)
+            || !isSupportedStructuralBlock(plankBlock)
             || doorItem == null || !(Block.byItem(doorItem) instanceof DoorBlock)
             || !VillageReservations.isProjectSiteAvailable(level, site, 8, null)) return false;
         Villager builder = findAvailableBuilder(level, center);
         if (builder == null) return false;
 
         Item plankItem = plankBlock.asItem();
-        if (!canFitProjectMaterials(builder.getInventory(), plankItem, PLANKS_REQUIRED, Items.RED_BED, doorItem)) return false;
+        if (!canFitProjectMaterials(builder.getInventory(), plankItem, PLANKS_REQUIRED, resolvedBed, doorItem)) return false;
 
         java.util.Map<Item, Integer> materialBill = java.util.Map.of(
-            plankItem, PLANKS_REQUIRED, Items.RED_BED, 1, doorItem, 1);
+            plankItem, PLANKS_REQUIRED, resolvedBed, 1, doorItem, 1);
         if (!VillageReservations.reserveStoragesForItems(level, builder.blockPosition(), builder, "house",
             materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) return false;
         CompoundTag data = builder.getPersistentData();
@@ -141,11 +205,14 @@ public final class VillageBuilder {
         data.putInt(PHASE, FETCH_PLANKS);
         String plankKey = BuiltInRegistries.ITEM.getKey(plankItem).toString();
         String doorKey = BuiltInRegistries.ITEM.getKey(doorItem).toString();
+        String bedKey = BuiltInRegistries.ITEM.getKey(resolvedBed).toString();
         data.putString(PLANK_ITEM, plankKey);
         data.putString(DOOR_ITEM, doorKey);
+        data.putString(BED_ITEM, bedKey);
         data.putInt(SITE_X, site.getX()); data.putInt(SITE_Y, site.getY()); data.putInt(SITE_Z, site.getZ());
         data.putInt(STEP_INDEX, 0);
         data.putLong(STARTED, level.getGameTime());
+        data.putLong(LAST_PROGRESS_TICK, level.getGameTime());
         data.putLong(NEXT_ACTION, 0L);
         clearOwnedRoute(builder, data);
         VillageRegistry.recordHouseCheckpoint(
@@ -251,7 +318,7 @@ public final class VillageBuilder {
         switch (data.getInt(PHASE)) {
             case FETCH_PLANKS -> fetchRequiredItem(villager, level, data,
                 getPlankItem(data), Math.max(0, PLANKS_REQUIRED - Math.min(data.getInt(STEP_INDEX), PLANKS_REQUIRED)), FETCH_BED);
-            case FETCH_BED -> fetchRequiredItem(villager, level, data, Items.RED_BED, 1, FETCH_DOOR);
+            case FETCH_BED -> fetchRequiredItem(villager, level, data, getBedItem(data), 1, FETCH_DOOR);
             case FETCH_DOOR -> fetchRequiredItem(villager, level, data, getDoorItem(data), 1, BUILDING);
             case BUILDING -> buildNextStep(villager, level, data, site);
             default -> clearProject(villager, data);
@@ -325,7 +392,7 @@ public final class VillageBuilder {
 
     private static void buildNextStep(Villager villager, ServerLevel level, CompoundTag data, BlockPos site) {
         Block plankBlock = getPlankBlock(data);
-        if (plankBlock == Blocks.AIR || !plankBlock.defaultBlockState().is(BlockTags.PLANKS)) {
+        if (!isSupportedStructuralBlock(plankBlock)) {
             pauseRoute(villager, data);
             return;
         }
@@ -335,7 +402,8 @@ public final class VillageBuilder {
             pauseRoute(villager, data);
             return;
         }
-        List<BuildStep> steps = makeHousePlan(site, plankBlock, doorBlock);
+        Block bedBlock = getBedBlock(data);
+        List<BuildStep> steps = makeHousePlan(site, plankBlock, doorBlock, bedBlock);
         int index = data.getInt(STEP_INDEX);
         if (index >= steps.size()) {
             VillageRegistry.clearHouseCheckpoint(level, villager.blockPosition());
@@ -407,7 +475,7 @@ public final class VillageBuilder {
         clearOwnedRoute(villager, data);
         if (step.secondPos() != null) {
             if (countItem(villager.getInventory(), step.item()) < 1) {
-                data.putInt(PHASE, step.item() == Items.RED_BED ? FETCH_BED : FETCH_DOOR);
+                data.putInt(PHASE, isSupportedBedItem(step.item()) ? FETCH_BED : FETCH_DOOR);
                 return;
             }
             if (removeItem(villager.getInventory(), step.item(), 1) != 1) return;
@@ -463,10 +531,16 @@ public final class VillageBuilder {
     }
 
     private static List<BuildStep> makeHousePlan(BlockPos base, Block plankBlock, Block doorBlock) {
+        return makeHousePlan(base, plankBlock, doorBlock, Blocks.RED_BED);
+    }
+
+    private static List<BuildStep> makeHousePlan(BlockPos base, Block plankBlock, Block doorBlock, Block bedBlock) {
         List<BuildStep> steps = new ArrayList<>(98);
         BlockState planks = plankBlock.defaultBlockState();
         Item plankItem = plankBlock.asItem();
-        // Floor: 25 real planks.
+        Block resolvedBedBlock = bedBlock instanceof BedBlock ? bedBlock : Blocks.RED_BED;
+        Item resolvedBedItem = resolvedBedBlock.asItem() != Items.AIR ? resolvedBedBlock.asItem() : Items.RED_BED;
+        // Floor: 25 real planks/structural blocks.
         for (int dx = 0; dx < 5; dx++) {
             for (int dz = 0; dz < 5; dz++) steps.add(new BuildStep(base.offset(dx, 0, dz), planks, plankItem, null, null));
         }
@@ -486,9 +560,9 @@ public final class VillageBuilder {
         }
         BlockPos footPos = base.offset(2, 1, 3);
         BlockPos headPos = base.offset(2, 1, 2);
-        BlockState foot = Blocks.RED_BED.defaultBlockState().setValue(BedBlock.FACING, Direction.NORTH).setValue(BedBlock.PART, BedPart.FOOT);
-        BlockState head = Blocks.RED_BED.defaultBlockState().setValue(BedBlock.FACING, Direction.NORTH).setValue(BedBlock.PART, BedPart.HEAD);
-        steps.add(new BuildStep(footPos, foot, Items.RED_BED, headPos, head));
+        BlockState foot = resolvedBedBlock.defaultBlockState().setValue(BedBlock.FACING, Direction.NORTH).setValue(BedBlock.PART, BedPart.FOOT);
+        BlockState head = resolvedBedBlock.defaultBlockState().setValue(BedBlock.FACING, Direction.NORTH).setValue(BedBlock.PART, BedPart.HEAD);
+        steps.add(new BuildStep(footPos, foot, resolvedBedItem, headPos, head));
 
         BlockPos doorLowerPos = base.offset(2, 1, 4);
         BlockPos doorUpperPos = base.offset(2, 2, 4);
@@ -603,8 +677,8 @@ public final class VillageBuilder {
         clearOwnedRoute(villager, data);
         VillageReservations.release(data, "house");
         data.putBoolean(ACTIVE_KEY, false);
-        data.remove(PHASE); data.remove(PLANK_ITEM); data.remove(DOOR_ITEM); data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);
-        data.remove(STEP_INDEX); data.remove(STARTED); data.remove(NEXT_ACTION);
+        data.remove(PHASE); data.remove(PLANK_ITEM); data.remove(DOOR_ITEM); data.remove(BED_ITEM); data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);
+        data.remove(STEP_INDEX); data.remove(STARTED); data.remove(LAST_PROGRESS_TICK); data.remove(NEXT_ACTION);
     }
 
     private static boolean hasOtherActiveTask(CompoundTag data) {
@@ -627,6 +701,21 @@ public final class VillageBuilder {
     private static Item getDoorItem(CompoundTag data) {
         ResourceLocation key = ResourceLocation.tryParse(data.getString(DOOR_ITEM));
         return key == null ? Items.AIR : BuiltInRegistries.ITEM.get(key);
+    }
+
+    private static Item getBedItem(CompoundTag data) {
+        String raw = data.getString(BED_ITEM);
+        if (raw == null || raw.isBlank()) return Items.RED_BED;
+        ResourceLocation key = ResourceLocation.tryParse(raw);
+        if (key == null) return Items.RED_BED;
+        Item item = BuiltInRegistries.ITEM.get(key);
+        return isSupportedBedItem(item) ? item : Items.RED_BED;
+    }
+
+    private static Block getBedBlock(CompoundTag data) {
+        Item item = getBedItem(data);
+        Block block = Block.byItem(item);
+        return block instanceof BedBlock ? block : Blocks.RED_BED;
     }
 
     private static Block getPlankBlock(CompoundTag data) {

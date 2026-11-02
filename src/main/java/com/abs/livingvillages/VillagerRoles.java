@@ -24,6 +24,8 @@ public final class VillagerRoles {
     public static final String HOME_X = "livingvillages_specialist_home_x";
     public static final String HOME_Y = "livingvillages_specialist_home_y";
     public static final String HOME_Z = "livingvillages_specialist_home_z";
+    public static final String ROLE_ASSIGNED_TICK_KEY = "livingvillages_role_assigned_tick";
+    public static final String TASK_PROGRESS_TICK_KEY = "livingvillages_task_progress_tick";
 
     private static final String TREE_TASK_ACTIVE = "livingvillages_treework_active";
     private static final String REPLANT_TASK_ACTIVE = "livingvillages_treework_replant_active";
@@ -173,9 +175,50 @@ public final class VillagerRoles {
         BlockPos home = averageAdultPosition(all, center);
         var data = selected.getPersistentData();
         data.putString(ROLE_KEY, role);
+        data.putLong(ROLE_ASSIGNED_TICK_KEY, level.getGameTime());
         data.putInt(HOME_X, home.getX());
         data.putInt(HOME_Y, home.getY());
         data.putInt(HOME_Z, home.getZ());
+    }
+
+    /**
+     * Checks whether autonomous mod work AI must yield to vanilla Villager AI
+     * (sleeping, player trading, recent damage panic, or active village evacuation).
+     */
+    public static boolean shouldYieldToVanillaVillagerAi(Villager villager) {
+        if (villager == null || !villager.isAlive()) return true;
+        boolean recentlyHurt = villager.getLastHurtByMob() != null
+            && (villager.tickCount - villager.getLastHurtByMobTimestamp()) <= 60;
+        boolean evacuating = villager.getPersistentData().getLong("livingvillages_evacuating_until")
+            > villager.level().getGameTime();
+        return com.abs.livingvillages.domain.SettlementSimulationModel.shouldYieldToVanillaVillagerAi(
+            villager.isSleeping(),
+            villager.isTrading(),
+            recentlyHurt,
+            evacuating
+        );
+    }
+
+    /**
+     * Recovers a villager whose active route/task has made zero progress for {@code MAX_TASK_STUCK_TICKS}.
+     */
+    public static boolean recoverIfTaskStuck(Villager villager, long nowTick) {
+        if (villager == null) return false;
+        var data = villager.getPersistentData();
+        long lastProgress = data.getLong(TASK_PROGRESS_TICK_KEY);
+        if (!com.abs.livingvillages.domain.SettlementSimulationModel.isTaskStuck(
+            lastProgress,
+            nowTick,
+            com.abs.livingvillages.domain.SettlementSimulationModel.MAX_TASK_STUCK_TICKS
+        )) {
+            return false;
+        }
+        villager.getBrain().eraseMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET);
+        villager.getNavigation().stop();
+        data.putBoolean("livingvillages_logistics_active", false);
+        data.putBoolean("livingvillages_industry_route_active", false);
+        data.putLong(TASK_PROGRESS_TICK_KEY, nowTick);
+        return true;
     }
 
     private static boolean roleTaskActive(Villager villager, String role) {

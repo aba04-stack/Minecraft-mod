@@ -161,6 +161,9 @@ public final class VillageAnimalAI {
         AABB localArea = animal.getBoundingBox().inflate(12.0D, 4.0D, 12.0D);
         LivingEntity predatorOrThreat = findNearestPredatorOrThreat(animal, level, localArea);
         boolean directThreat = predatorOrThreat != null;
+        if (shouldYieldToVanillaAnimalAi(animal, level, directThreat)) {
+            return TrustAndAnimalModel.ANIMAL_ACTION_IDLE;
+        }
         if (directThreat) {
             recordHerdAlert(data, predatorOrThreat.blockPosition(), nowTick);
         }
@@ -255,6 +258,25 @@ public final class VillageAnimalAI {
             }
         }
         return action;
+    }
+
+    public static boolean shouldYieldToVanillaAnimalAi(Animal animal, ServerLevel level, boolean directThreat) {
+        if (animal == null) return true;
+        if (animal.isLeashed() || animal.isVehicle() || animal.isPassenger()) {
+            return true;
+        }
+        if (!directThreat && level != null) {
+            AABB playerArea = animal.getBoundingBox().inflate(10.0D, 4.0D, 10.0D);
+            List<net.minecraft.world.entity.player.Player> players = level.getEntitiesOfClass(
+                net.minecraft.world.entity.player.Player.class, playerArea, net.minecraft.world.entity.player.Player::isAlive);
+            for (var player : players) {
+                if (isValidSpeciesBreedingFood(animal, player.getMainHandItem())
+                    || isValidSpeciesBreedingFood(animal, player.getOffhandItem())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static LivingEntity findNearestPredatorOrThreat(Animal animal, ServerLevel level, AABB area) {

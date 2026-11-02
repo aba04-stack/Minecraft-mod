@@ -705,11 +705,78 @@ public final class VillageRegistry extends SavedData {
             BlockPos neighborAnchor = entry.getValue();
             if (neighborAnchor == null || !level.hasChunkAt(neighborAnchor)) continue;
             if (executeNeighborTradeIfEligible(level, center, neighborAnchor, breadReserveCount, plankReserveCount)
-                || executeNeighborTradeIfEligible(level, neighborAnchor, center, breadReserveCount, plankReserveCount)) {
+                || executeNeighborTradeIfEligible(level, neighborAnchor, center, breadReserveCount, plankReserveCount)
+                || executeBiomeResourceTradeIfEligible(level, center, neighborAnchor, plankReserveCount)
+                || executeBiomeResourceTradeIfEligible(level, neighborAnchor, center, plankReserveCount)) {
                 completed++;
             }
         }
         return completed;
+    }
+
+    /**
+     * Exchanges surplus biome-specific construction materials (e.g., Desert Sandstone or Highland
+     * Cobblestone for Forest Oak Planks) between two peaceful settlements so treeless villages
+     * can acquire wood for doors, beds, and tools.
+     */
+    public static boolean executeBiomeResourceTradeIfEligible(
+        ServerLevel level,
+        BlockPos centerStoneOrSand,
+        BlockPos centerForest,
+        int reserveCount
+    ) {
+        if (level == null || centerStoneOrSand == null || centerForest == null) return false;
+        UUID idA = villageId(level, centerStoneOrSand);
+        UUID idB = villageId(level, centerForest);
+        if (idA == null || idB == null || idA.equals(idB)) return false;
+
+        long now = level.getGameTime();
+        boolean alarm = isVillageAlarmActive(level, centerStoneOrSand, now)
+            || isVillageAlarmActive(level, centerForest, now);
+        Item stoneOrSandItem = Items.SANDSTONE;
+        Container chestA = findNearestOwnedStorageWithItem(level, centerStoneOrSand, Items.SANDSTONE, reserveCount + 4);
+        if (chestA == null) {
+            stoneOrSandItem = Items.COBBLESTONE;
+            chestA = findNearestOwnedStorageWithItem(level, centerStoneOrSand, Items.COBBLESTONE, reserveCount + 4);
+        }
+        Container chestB = findNearestOwnedStorageWithItem(level, centerForest, Items.OAK_PLANKS, reserveCount + 8);
+        if (chestA == null || chestB == null) return false;
+
+        int surplusStone = Math.max(0, countItemInContainer(chestA, stoneOrSandItem) - Math.max(0, reserveCount));
+        int surplusPlanks = Math.max(0, countItemInContainer(chestB, Items.OAK_PLANKS) - Math.max(0, reserveCount));
+
+        VillageRegistry registry = get(level);
+        String key = pairKey(idA, idB);
+        int currentStanding = registry.diplomaticStandings.getOrDefault(key, 0);
+        var decision = com.abs.livingvillages.domain.SettlementSimulationModel.evaluateTradeCaravan(
+            currentStanding,
+            alarm,
+            surplusStone,
+            surplusPlanks
+        );
+        if (!decision.approved()) return false;
+
+        if (!canFitItemInContainer(chestB, stoneOrSandItem, decision.foodTransferred())
+            || !canFitItemInContainer(chestA, Items.OAK_PLANKS, decision.planksTransferred())) {
+            return false;
+        }
+
+        int removedStone = removeItemFromContainer(chestA, stoneOrSandItem, decision.foodTransferred());
+        if (removedStone != decision.foodTransferred()) return false;
+        int removedPlanks = removeItemFromContainer(chestB, Items.OAK_PLANKS, decision.planksTransferred());
+        if (removedPlanks != decision.planksTransferred()) {
+            insertItemIntoContainer(chestA, new ItemStack(stoneOrSandItem, removedStone));
+            return false;
+        }
+
+        insertItemIntoContainer(chestB, new ItemStack(stoneOrSandItem, removedStone));
+        insertItemIntoContainer(chestA, new ItemStack(Items.OAK_PLANKS, removedPlanks));
+        chestA.setChanged();
+        chestB.setChanged();
+
+        registry.diplomaticStandings.put(key, decision.updatedStanding());
+        registry.setDirty();
+        return true;
     }
 
     public static com.abs.livingvillages.domain.SettlementPorts.WorldAccessPort createWorldAccessPort(ServerLevel level) {

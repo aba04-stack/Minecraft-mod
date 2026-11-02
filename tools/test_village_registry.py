@@ -96,4 +96,6 @@ for filename, marker in {
 }.items():
     source = (JAVA / filename).read_text(encoding="utf-8")
     assert marker in source, f"{filename} must verify persistent village ownership before using storage"
-print("VILLAGE REGISTRY CONTRACT PASSED: saved identity, serialized asset owners, and all audited storage consumers")
+assert "executeBiomeResourceTradeIfEligible" in registry, "inter-village trade must support biome-scarce resource exchange (Sandstone/Cobblestone <-> Oak Planks)"
+assert "compressSandToSandstoneIfEligible" in industry, "industry must support 4:1 Sand -> Sandstone compression for treeless desert settlements"
+print("VILLAGE REGISTRY CONTRACT PASSED: saved identity, serialized asset owners, biome trade, and all audited storage consumers")

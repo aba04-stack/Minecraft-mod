@@ -16,4 +16,7 @@ assert "doorItemForPlanks" in source and "DoorBlock" in source, "a real matching
 assert "Items.RED_BED" in source and "ROUTE_TO_STORAGE" in source, "physical bed/material collection missing"
 assert "withinPlacementReach" in source and "hasClearLine" in source, "builder reach/LOS checks missing"
 assert "FETCH_DOOR" in source and "DoorHingeSide" in source, "door is not fetched and installed as a real double-block door"
-print("BUILDER MATERIAL BILL PASSED: 96 planks + 1 matching door + 1 real red bed; reach/LOS checks present")
+assert "ALL_BED_ITEMS" in source and "isSupportedBedItem" in source and "selectAvailableBedItem" in source, "builder must support all 16 bed colors"
+assert "BIOME_STRUCTURAL_BLOCKS" in source and "isSupportedStructuralBlock" in source, "builder must support biome-adaptive structural blocks (Sandstone, Stone Bricks, Terracotta, etc.)"
+assert "selectAvailableDoorItem" in source and "ALL_WOODEN_DOORS" in source, "builder must allow any available wooden door when building with biome stone/sandstone"
+print("BUILDER MATERIAL BILL PASSED: 96 structural blocks (planks/sandstone/stone) + 1 door + any of 16 bed colors; reach/LOS checks present")
