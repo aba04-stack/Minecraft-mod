@@ -896,9 +896,7 @@ public final class VillageIndustry {
         );
         if (produced <= 0) return 0;
         int neededSand = produced * 4;
-        int removed = removeItem(container, Items.SAND, neededSand);
-        if (removed != neededSand) {
-            if (removed > 0) insertIntoContainer(container, new ItemStack(Items.SAND, removed));
+        if (!takeItem(container, Items.SAND, neededSand)) {
             return 0;
         }
         insertIntoContainer(container, new ItemStack(Items.SANDSTONE, produced));
