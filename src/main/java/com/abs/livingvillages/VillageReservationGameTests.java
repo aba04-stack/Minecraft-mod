@@ -1487,7 +1487,7 @@ public final class VillageReservationGameTests {
         // 1. Villager Trust System (0-100, 5 tiers, persistence, preferences, defense, theft, and behavior).
         Villager citizen = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
         citizen.setNoAi(true);
-        UUID playerUuid = UUID.nameUUIDFromBytes("trust-test-player".getBytes());
+        java.util.UUID playerUuid = java.util.UUID.nameUUIDFromBytes("trust-test-player".getBytes());
 
         helper.assertTrue(
             com.abs.livingvillages.domain.TrustAndAnimalModel.trustTierNameRu(10).equals("незнакомец")

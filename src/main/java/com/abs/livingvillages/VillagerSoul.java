@@ -673,7 +673,8 @@ public final class VillagerSoul {
     }
 
     public static void onMonsterKilledByPlayer(LivingDeathEvent event) {
-        if (!(event.getEntity() instanceof Enemy victim) || victim.level().isClientSide()) {
+        var victim = event.getEntity();
+        if (!(victim instanceof Enemy) || victim.level().isClientSide()) {
             return;
         }
         if (event.getSource().getEntity() instanceof Player player
