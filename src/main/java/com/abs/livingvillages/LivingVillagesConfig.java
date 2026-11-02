@@ -32,6 +32,11 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.IntValue POPULATION_FOOD_RESERVE_POINTS;
     public static final ModConfigSpec.IntValue MINER_SEARCH_RADIUS_BLOCKS;
     public static final ModConfigSpec.IntValue VILLAGE_DEFENSE_RADIUS_BLOCKS;
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGER_PROGRESSION;
+    public static final ModConfigSpec.IntValue MAX_PROFESSION_LEVEL;
+    public static final ModConfigSpec.BooleanValue ENABLE_TACTICAL_MONSTER_AI;
+    public static final ModConfigSpec.IntValue MONSTER_TACTICAL_RADIUS_BLOCKS;
+    public static final ModConfigSpec.IntValue MAX_AI_CHECKS_PER_TICK;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -165,6 +170,31 @@ public final class LivingVillagesConfig {
             .comment("Радиус, в котором защитники обнаруживают враждебных существ.")
             .translation("livingvillages.config.village_defense_radius_blocks")
             .defineInRange("village_defense_radius_blocks", 18, 8, 32);
+
+        ENABLE_VILLAGER_PROGRESSION = builder
+            .comment("Минимальная система прокачки жителей: опыт за завершённые рабочие задачи и уровни профессий (без создания бесплатных предметов).")
+            .translation("livingvillages.config.enable_villager_progression")
+            .define("enable_villager_progression", true);
+
+        MAX_PROFESSION_LEVEL = builder
+            .comment("Максимальный уровень рабочей профессии жителя (от 1 до 5).")
+            .translation("livingvillages.config.max_profession_level")
+            .defineInRange("max_profession_level", 5, 1, 5);
+
+        ENABLE_TACTICAL_MONSTER_AI = builder
+            .comment("Тактическое поведение враждебных мобов на основе честного восприятия (прямая видимость и звуки работ) без всеведения.")
+            .translation("livingvillages.config.enable_tactical_monster_ai")
+            .define("enable_tactical_monster_ai", true);
+
+        MONSTER_TACTICAL_RADIUS_BLOCKS = builder
+            .comment("Радиус тактической оценки обстановки для враждебных мобов, в блоках.")
+            .translation("livingvillages.config.monster_tactical_radius_blocks")
+            .defineInRange("monster_tactical_radius_blocks", 24, 8, 48);
+
+        MAX_AI_CHECKS_PER_TICK = builder
+            .comment("Лимит тяжёлых проверок ИИ за один серверный тик для защиты производительности.")
+            .translation("livingvillages.config.max_ai_checks_per_tick")
+            .defineInRange("max_ai_checks_per_tick", 24, 4, 128);
 
         SPEC = builder.build();
     }

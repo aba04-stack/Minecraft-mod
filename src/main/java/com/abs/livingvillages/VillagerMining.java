@@ -235,6 +235,14 @@ public final class VillagerMining {
             tool.hurtAndBreak(1, villager, EquipmentSlot.MAINHAND);
             level.sendParticles(ParticleTypes.CRIT, pos.getX() + 0.5D, pos.getY() + 0.5D,
                 pos.getZ() + 0.5D, 6, 0.22D, 0.22D, 0.22D, 0.03D);
+            VillageTickBudget.recordActivitySignal(level, pos);
+            VillagerProgression.recordCompletedWork(
+                villager,
+                com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_MINER,
+                3,
+                true,
+                level.getGameTime()
+            );
         }
         level.destroyBlockProgress(-villager.getId(), pos, -1);
         resetProgress(data);

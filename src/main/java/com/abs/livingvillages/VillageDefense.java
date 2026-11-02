@@ -142,6 +142,14 @@ public final class VillageDefense {
                     threat.knockback(0.25D, guard.getX() - threat.getX(), guard.getZ() - threat.getZ());
                     level.sendParticles(ParticleTypes.CRIT, threat.getX(), threat.getY() + 0.6D,
                         threat.getZ(), 3, 0.15D, 0.2D, 0.15D, 0.02D);
+                    VillageTickBudget.recordActivitySignal(level, guard.blockPosition());
+                    VillagerProgression.recordCompletedWork(
+                        guard,
+                        com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_GUARD,
+                        3,
+                        true,
+                        now
+                    );
                 }
                 data.putLong(NEXT_ATTACK, now + ATTACK_COOLDOWN_TICKS);
             }

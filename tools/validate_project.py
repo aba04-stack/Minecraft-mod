@@ -236,6 +236,24 @@ def main() -> int:
         errors.append(f"village identity registry regression check failed: {exc}")
 
     try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_domain_portability.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"domain portability check failed: {exc}")
+
+    try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_villager_progression.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"villager progression regression check failed: {exc}")
+
+    try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_monster_tactical_ai.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"monster tactical AI regression check failed: {exc}")
+
+    try:
         subprocess.run(["java", str(ROOT / "tools/JavaSyntaxCheck.java"), str(ROOT / "src/main/java")],
                        check=True, capture_output=True, text=True)
     except Exception as exc:

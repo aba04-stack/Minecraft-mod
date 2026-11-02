@@ -43,5 +43,10 @@
   "livingvillages.elder.priority_defense": "Оборона",
   "livingvillages.elder.population": "Жители: {0} (взрослые: {1}, дети: {2})",
   "livingvillages.elder.beds": "Кровати с местом над ними: {0} (оценка)",
-  "livingvillages.elder.food": "Питание на складе: {0} очков"
+  "livingvillages.elder.food": "Питание на складе: {0} очков",
+  "livingvillages.config.enable_villager_progression": "Прокачка профессий жителей (опыт и уровни 1-5 за завершённую работу)",
+  "livingvillages.config.max_profession_level": "Максимальный уровень профессии жителя",
+  "livingvillages.config.enable_tactical_monster_ai": "Тактический ИИ монстров с честным восприятием (без всеведения)",
+  "livingvillages.config.monster_tactical_radius_blocks": "Радиус тактической оценки мобов (блоки)",
+  "livingvillages.config.max_ai_checks_per_tick": "Максимум тяжёлых проверок ИИ за серверный тик"
 }

@@ -435,6 +435,13 @@ public final class VillageFarmBuilder {
                 storage.setChanged();
                 worker.getInventory().setChanged();
             }
+            VillagerProgression.recordCompletedWork(
+                worker,
+                com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_FARMER,
+                8,
+                true,
+                now
+            );
             clearProject(worker, data);
             return;
         }

@@ -273,6 +273,13 @@ public final class VillagePopulation {
         }
 
         if (transferredAny) {
+            VillagerProgression.recordCompletedWork(
+                courier,
+                com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_COURIER,
+                3,
+                true,
+                now
+            );
             level.sendParticles(ParticleTypes.HAPPY_VILLAGER,
                 recipient.getX(), recipient.getY() + 1.0D, recipient.getZ(), 2, 0.25D, 0.2D, 0.25D, 0.0D);
         }

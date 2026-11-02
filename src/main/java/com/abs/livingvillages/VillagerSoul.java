@@ -213,6 +213,9 @@ public final class VillagerSoul {
             status += " · Отношения: " + relationshipName(relationship)
                 + " · Доверие: " + relationship.getInt("trust") + "/100";
         }
+        if (LivingVillagesConfig.ENABLE_VILLAGER_PROGRESSION.get()) {
+            status += " · Навык: " + VillagerProgression.describePrimarySkill(villager);
+        }
         player.sendSystemMessage(Component.literal(status).withStyle(ChatFormatting.GRAY));
 
         if (hasMemory && !relationship.getString("lastGift").isEmpty()

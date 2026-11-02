@@ -508,6 +508,14 @@ public final class VillagerTreeWork {
             level.destroyBlockProgress(-villager.getId(), target, -1);
             resetProgress(data);
             if (!leaves) {
+                VillageTickBudget.recordActivitySignal(level, target);
+                VillagerProgression.recordCompletedWork(
+                    villager,
+                    com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_LUMBERJACK,
+                    2,
+                    true,
+                    level.getGameTime()
+                );
                 BlockPos nextLog = findNextLogInSameTree(level, target, villager);
                 if (nextLog != null) {
                     clearOwnedRoute(villager, data);

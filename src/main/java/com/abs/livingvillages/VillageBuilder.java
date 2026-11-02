@@ -265,6 +265,13 @@ public final class VillageBuilder {
         List<BuildStep> steps = makeHousePlan(site, plankBlock, doorBlock);
         int index = data.getInt(STEP_INDEX);
         if (index >= steps.size()) {
+            VillagerProgression.recordCompletedWork(
+                villager,
+                com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER,
+                10,
+                true,
+                level.getGameTime()
+            );
             level.sendParticles(ParticleTypes.HAPPY_VILLAGER, villager.getX(), villager.getY() + 1.0D,
                 villager.getZ(), 4, 0.25D, 0.25D, 0.25D, 0.0D);
             clearProject(villager, data);

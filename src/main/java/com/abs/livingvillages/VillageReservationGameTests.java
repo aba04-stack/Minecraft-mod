@@ -539,6 +539,117 @@ public final class VillageReservationGameTests {
         });
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "villager_progression_lifecycle")
+    public static void villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema(GameTestHelper helper) {
+        placeFloor(helper);
+        Villager worker = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        worker.setNoAi(true);
+
+        // Simulate a legacy v0 tag with an unknown future field that must not be erased.
+        CompoundTag legacyProg = new CompoundTag();
+        legacyProg.putString("future_custom_field", "preserve_me");
+        worker.getPersistentData().put(VillagerProgression.PROGRESSION_TAG, legacyProg);
+
+        CompoundTag migrated = VillagerProgression.ensureMigratedTag(worker.getPersistentData());
+        helper.assertTrue(
+            migrated.getInt(VillagerProgression.SCHEMA_VERSION_KEY)
+                == com.abs.livingvillages.domain.VillagerProgressionModel.SCHEMA_VERSION,
+            "Legacy progression records must be promoted to the current schema version.");
+        helper.assertTrue(
+            "preserve_me".equals(migrated.getString("future_custom_field")),
+            "Schema migration must preserve unknown fields inside the progression tag.");
+
+        String minerRole = com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_MINER;
+        String builderRole = com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER;
+        worker.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_MINER);
+
+        // Incomplete/failed attempts must not award XP.
+        helper.assertTrue(
+            !VillagerProgression.recordCompletedWork(worker, minerRole, 10, false, 100L),
+            "Failed or cancelled tasks must never award profession XP.");
+        helper.assertTrue(
+            VillagerProgression.getXp(worker, minerRole) == 0
+                && VillagerProgression.getLevel(worker, minerRole) == 1,
+            "Villager must remain at level 1 with 0 XP after a failed attempt.");
+
+        // Confirmed completion awards XP and promotes level upon reaching threshold (10 XP -> Level 2).
+        helper.assertTrue(
+            VillagerProgression.recordCompletedWork(worker, minerRole, 12, true, 200L),
+            "Confirmed completed work must award profession XP.");
+        helper.assertTrue(
+            VillagerProgression.getXp(worker, minerRole) == 12
+                && VillagerProgression.getLevel(worker, minerRole) == 2,
+            "Reaching the XP threshold must promote the villager's profession level.");
+
+        // Cooldown guard prevents rapid duplicate XP awards on the same tick.
+        helper.assertTrue(
+            !VillagerProgression.recordCompletedWork(worker, minerRole, 5, true, 205L),
+            "Rapid duplicate work events inside the anti-abuse cooldown must be rejected.");
+
+        // Switching specialist role to builder and earning builder XP must preserve miner XP & level.
+        worker.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_BUILDER);
+        helper.assertTrue(
+            VillagerProgression.recordCompletedWork(worker, builderRole, 6, true, 300L),
+            "A villager must be able to earn XP in a new role after switching.");
+        helper.assertTrue(
+            VillagerProgression.getXp(worker, minerRole) == 12
+                && VillagerProgression.getLevel(worker, minerRole) == 2,
+            "Switching profession/role must preserve previously earned XP and level in prior roles.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "monster_tactical_perception")
+    public static void monsterTacticalPerceptionRejectsHiddenTargetsAndCapsPathRetries(GameTestHelper helper) {
+        for (int x = 0; x <= 8; x++) {
+            for (int z = 0; z <= 2; z++) {
+                helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, z)),
+                    Blocks.STONE.defaultBlockState(), 3);
+            }
+        }
+        // Build a solid stone wall at x = 4 blocking line of sight between (1,1,1) and (7,1,1).
+        for (int y = 1; y <= 3; y++) {
+            for (int z = 0; z <= 2; z++) {
+                helper.getLevel().setBlock(helper.absolutePos(new BlockPos(4, y, z)),
+                    Blocks.STONE.defaultBlockState(), 3);
+            }
+        }
+
+        net.minecraft.world.entity.monster.Zombie zombie =
+            helper.spawn(EntityType.ZOMBIE, 1, 1, 1);
+        Villager hiddenVillager = helper.spawn(EntityType.VILLAGER, 7, 1, 1);
+        zombie.setNoAi(true);
+        hiddenVillager.setNoAi(true);
+
+        helper.assertTrue(
+            !VillageMonsterAI.hasClearLineOfSight(helper.getLevel(), zombie, hiddenVillager),
+            "A solid stone wall must block direct line of sight between the monster and the villager.");
+        helper.assertTrue(
+            VillageMonsterAI.findHonestTarget(zombie, helper.getLevel(), 16, 256.0D) == null,
+            "Monsters must not detect hidden villagers through solid walls without a valid signal.");
+
+        // Verify that repeated failed path attempts trigger disengagement at MAX_PATH_RETRIES.
+        var decision = com.abs.livingvillages.domain.MonsterTacticalModel.evaluateTacticalStep(
+            com.abs.livingvillages.domain.MonsterTacticalModel.KIND_ZOMBIE,
+            com.abs.livingvillages.domain.MonsterTacticalModel.STATE_ENGAGING,
+            40L,
+            com.abs.livingvillages.domain.MonsterTacticalModel.DEFAULT_STATE_TIMEOUT_TICKS,
+            com.abs.livingvillages.domain.MonsterTacticalModel.MAX_PATH_RETRIES - 1,
+            true,
+            true,
+            false,
+            25.0D,
+            1.0D,
+            0,
+            0,
+            true
+        );
+        helper.assertTrue(
+            decision.nextState() == com.abs.livingvillages.domain.MonsterTacticalModel.STATE_DISENGAGE
+                && decision.resetTarget(),
+            "Exceeding MAX_PATH_RETRIES must transition the monster to STATE_DISENGAGE and reset its target.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {

@@ -444,6 +444,13 @@ public final class VillageCraftingJobs {
         }
         villager.getInventory().setChanged();
         container.setChanged();
+        VillagerProgression.recordCompletedWork(
+            villager,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_CRAFTSMAN,
+            5,
+            true,
+            now
+        );
         clearOwnedRoute(villager, data);
         clearJob(data);
         data.putLong(NEXT_JOB, now + RETRY_TICKS);

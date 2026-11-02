@@ -70,6 +70,7 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillageBuilder::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageFarmBuilder::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagePopulation::onVillagerTick);
+        NeoForge.EVENT_BUS.addListener(VillageMonsterAI::onEntityTick);
     }
 
     private void onServerStarting(ServerStartingEvent event) {

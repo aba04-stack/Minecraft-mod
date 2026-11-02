@@ -2,7 +2,7 @@ name: Build mod
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'arena/**']
   pull_request:
   workflow_dispatch:
 
