@@ -62,6 +62,9 @@ public final class VillageAnimalAI {
         if (!(event.getEntity() instanceof Animal animal) || animal.level().isClientSide()) {
             return;
         }
+        if (!LivingVillagesConfig.ENABLE_ANIMAL_BEHAVIOR.get()) {
+            return;
+        }
         if (!(animal.level() instanceof ServerLevel serverLevel) || !animal.isAlive()) {
             return;
         }

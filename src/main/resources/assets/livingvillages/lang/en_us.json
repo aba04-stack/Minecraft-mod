@@ -48,5 +48,6 @@
   "livingvillages.config.max_profession_level": "Maximum villager profession level",
   "livingvillages.config.enable_tactical_monster_ai": "Tactical monster AI with honest perception (no wallhack)",
   "livingvillages.config.monster_tactical_radius_blocks": "Monster tactical evaluation radius (blocks)",
-  "livingvillages.config.max_ai_checks_per_tick": "Maximum heavy AI checks per server tick"
+  "livingvillages.config.max_ai_checks_per_tick": "Maximum heavy AI checks per server tick",
+  "livingvillages.config.enable_animal_behavior": "Enhanced animal behavior: herd danger response, parental protection, foraging, shelter, and breeding"
 }

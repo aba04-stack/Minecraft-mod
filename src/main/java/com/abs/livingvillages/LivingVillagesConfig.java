@@ -37,6 +37,7 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.BooleanValue ENABLE_TACTICAL_MONSTER_AI;
     public static final ModConfigSpec.IntValue MONSTER_TACTICAL_RADIUS_BLOCKS;
     public static final ModConfigSpec.IntValue MAX_AI_CHECKS_PER_TICK;
+    public static final ModConfigSpec.BooleanValue ENABLE_ANIMAL_BEHAVIOR;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -195,6 +196,11 @@ public final class LivingVillagesConfig {
             .comment("Лимит тяжёлых проверок ИИ за один серверный тик для защиты производительности.")
             .translation("livingvillages.config.max_ai_checks_per_tick")
             .defineInRange("max_ai_checks_per_tick", 24, 4, 128);
+
+        ENABLE_ANIMAL_BEHAVIOR = builder
+            .comment("Улучшенное поведение животных: реакция стада на опасность, защита детёнышей, поиск корма/укрытия и разведение.")
+            .translation("livingvillages.config.enable_animal_behavior")
+            .define("enable_animal_behavior", true);
 
         SPEC = builder.build();
     }
