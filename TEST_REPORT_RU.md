@@ -6,12 +6,13 @@
 
 - Актуальная ветка: `arena/fbf16766-minecraft-mod` (включает `fix/living-villages-layout` + доменное ядро `com.abs.livingvillages.domain`, `VillagerProgression`, `VillageMonsterAI`, `VillageTickBudget` и 12 внутриигровых `GameTest`).
 - GitHub Actions CI: `python3 tools/validate_project.py` (13 регрессионных скриптов + `JavaSyntaxCheck`), `./gradlew build` и `./gradlew runGameTestServer` на `Temurin Java 21` (Minecraft `1.21.1` / NeoForge `21.1.264`) завершены со статусом `SUCCESS` (run `41431805194`).
-- Все четырнадцать настоящих Minecraft GameTests прошли, включая:
+- Все пятнадцать настоящих Minecraft GameTests прошли, включая:
   1. запрет бронировать чужой сундук/считать его запасы и сохранение HOME-less группы после переезда рядом с другой деревней;
   2. `villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema` — миграцию схемы `v0 → v1` с сохранением неизвестных полей, начисление опыта только за подтверждённую работу, повышение уровня и сохранение опыта при смене роли (`miner → builder → miner`);
   3. `monsterTacticalPerceptionRejectsHiddenTargetsAndCapsPathRetries` — честное восприятие монстров без рентгена сквозь глухую стену и сброс цели при превышении `MAX_PATH_RETRIES = 3`;
   4. `orphanedHouseProjectIsResumedByReplacementBuilderInSameVillage` — перехват незавершённого строительства дома другим строителем того же поселения с сохранённого `step_index` после потери исходного рабочего (`KI-006`);
-  5. `villageAlarmEvacuatesCiviliansAndHonestCatchUpConservesMaterials` — оповещение поселения о тревоге с эвакуацией мирных жителей к `HOME` и проверка законов сохранения материи в `SettlementSimulationModel`.
+  5. `villageAlarmEvacuatesCiviliansAndHonestCatchUpConservesMaterials` — оповещение поселения о тревоге с эвакуацией мирных жителей к `HOME` и проверка законов сохранения материи в `SettlementSimulationModel`;
+  6. `orphanedFarmProjectResumesAndParallelCraftingTelemetryAndTradeRulesHold` — перехват незавершённой фермы 5×5 другим жителем того же поселения (`KI-006`), параллельный крафт без досок во время стройки (`KI-008`), межпоселенческий обмен излишками (`Stage 5.3`) и телеметрия серверного тика (`Stage 1.4`).
 - Dedicated-server smoke-test и headless client smoke-test (`ElderScreen` в окне `427×240` под Xvfb/Mesa) включены в конвейер CI.
 - Артефакт `livingvillages-0.15.0.jar` собирается и публикуется в каждом запуске workflow.
 

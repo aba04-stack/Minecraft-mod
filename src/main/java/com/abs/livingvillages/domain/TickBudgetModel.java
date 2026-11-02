@@ -21,4 +21,16 @@ public final class TickBudgetModel {
         int safeMax = Math.max(1, maxPerTick);
         return usedThisTick < safeMax;
     }
+
+    public record TickTelemetrySnapshot(
+        long observedTicks,
+        long totalAiChecks,
+        long totalExecutionNanos,
+        long maxTickNanos
+    ) {}
+
+    public static double averageMicrosPerTick(TickTelemetrySnapshot snapshot) {
+        if (snapshot == null || snapshot.observedTicks() <= 0L) return 0.0D;
+        return (snapshot.totalExecutionNanos() / 1000.0D) / (double) snapshot.observedTicks();
+    }
 }

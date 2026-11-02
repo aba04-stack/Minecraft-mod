@@ -122,4 +122,46 @@ public final class SettlementSimulationModel {
         }
         return SQUAD_ADVANCE;
     }
+
+    /**
+     * Resolves KI-008: while a house or farm is actively building, recipes that consume wood planks
+     * are paused so they never drain reserved construction lumber, whereas non-plank stone/iron
+     * tool recipes using existing sticks may proceed in parallel.
+     */
+    public static boolean canCraftInParallelWithConstruction(
+        boolean constructionActive,
+        boolean recipeConsumesWoodPlanks
+    ) {
+        if (!constructionActive) return true;
+        return !recipeConsumesWoodPlanks;
+    }
+
+    public record TradeExchangeResult(
+        boolean approved,
+        int foodTransferred,
+        int planksTransferred,
+        int updatedStanding
+    ) {}
+
+    /**
+     * Evaluates an honest inter-settlement surplus trade exchange between two peaceful villages.
+     * Requires non-hostile diplomatic standing ({@code >= -10}), no active raid/defense alarm,
+     * and genuine surplus on both sides. Never creates items out of thin air.
+     */
+    public static TradeExchangeResult evaluateTradeCaravan(
+        int currentStanding,
+        boolean alarmActive,
+        int surplusFoodItems,
+        int partnerSurplusPlanks
+    ) {
+        int clampedStanding = Math.max(-100, Math.min(100, currentStanding));
+        if (alarmActive || clampedStanding < -10 || surplusFoodItems < 4 || partnerSurplusPlanks < 8) {
+            return new TradeExchangeResult(false, 0, 0, clampedStanding);
+        }
+        int bundles = Math.min(Math.min(surplusFoodItems / 4, partnerSurplusPlanks / 8), 4);
+        int foodMoved = bundles * 4;
+        int planksMoved = bundles * 8;
+        int nextStanding = Math.min(100, clampedStanding + bundles * 5);
+        return new TradeExchangeResult(true, foodMoved, planksMoved, nextStanding);
+    }
 }

@@ -755,6 +755,84 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "farm_recovery_and_parallel_craft")
+    public static void orphanedFarmProjectResumesAndParallelCraftingTelemetryAndTradeRulesHold(GameTestHelper helper) {
+        placeFloor(helper);
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos site = helper.absolutePos(new BlockPos(6, 1, 1));
+
+        Villager firstWorker = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager secondWorker = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        firstWorker.setNoAi(true);
+        secondWorker.setNoAi(true);
+        firstWorker.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeA));
+        secondWorker.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        VillageRegistry.recordFarmCheckpoint(
+            helper.getLevel(),
+            center,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "farm",
+                site.getX(),
+                site.getY(),
+                site.getZ(),
+                "minecraft:wheat_seeds",
+                "minecraft:wheat",
+                9,
+                50,
+                firstWorker.getUUID().toString(),
+                120L
+            )
+        );
+        firstWorker.getPersistentData().putBoolean(VillageFarmBuilder.ACTIVE_KEY, true);
+
+        helper.assertTrue(
+            !VillageFarmBuilder.tryResumeOrphanedFarmProject(helper.getLevel(), center),
+            "An active farm project owned by a living worker must not be stolen.");
+
+        firstWorker.discard();
+
+        helper.assertTrue(
+            VillageFarmBuilder.tryResumeOrphanedFarmProject(helper.getLevel(), center),
+            "When the original farm worker disappears, an available resident in the same village must resume the farm.");
+        helper.assertTrue(
+            VillageFarmBuilder.isProjectActive(secondWorker)
+                && secondWorker.getPersistentData().getInt("livingvillages_farm_build_step_index") == 9,
+            "The replacement farm worker must adopt the exact saved step_index from the farm checkpoint.");
+
+        // Verify KI-008 parallel non-plank crafting rule.
+        helper.assertTrue(
+            !com.abs.livingvillages.domain.SettlementSimulationModel.canCraftInParallelWithConstruction(true, true)
+                && com.abs.livingvillages.domain.SettlementSimulationModel.canCraftInParallelWithConstruction(true, false),
+            "Plank-consuming recipes must pause during house construction while non-plank recipes may run.");
+
+        // Verify inter-settlement surplus trade caravan rules (Stage 5.3).
+        var blockedByAlarm = com.abs.livingvillages.domain.SettlementSimulationModel.evaluateTradeCaravan(0, true, 16, 32);
+        helper.assertTrue(!blockedByAlarm.approved(),
+            "Trade caravans must not depart while a village defense alarm is active.");
+
+        var approvedTrade = com.abs.livingvillages.domain.SettlementSimulationModel.evaluateTradeCaravan(0, false, 8, 16);
+        helper.assertTrue(
+            approvedTrade.approved()
+                && approvedTrade.foodTransferred() == 8
+                && approvedTrade.planksTransferred() == 16
+                && approvedTrade.updatedStanding() == 10,
+            "Peaceful villages with real food and plank surplus must complete a material-conserving trade exchange.");
+
+        // Verify tick telemetry recording (Stage 1.4).
+        VillageTickBudget.recordSubsystemNanos(helper.getLevel(), 25_000L);
+        var telemetry = VillageTickBudget.snapshotTelemetry(helper.getLevel());
+        helper.assertTrue(
+            telemetry.totalExecutionNanos() >= 25_000L
+                && com.abs.livingvillages.domain.TickBudgetModel.averageMicrosPerTick(telemetry) > 0.0D,
+            "Server tick telemetry must record subsystem execution time and compute average microseconds per tick.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {

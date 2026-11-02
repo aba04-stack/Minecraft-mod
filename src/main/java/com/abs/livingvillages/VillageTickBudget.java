@@ -34,7 +34,32 @@ public final class VillageTickBudget {
             return false;
         }
         state.checksUsedThisTick++;
+        state.totalAiChecks++;
         return true;
+    }
+
+    public static void recordSubsystemNanos(ServerLevel level, long elapsedNanos) {
+        if (level == null || elapsedNanos <= 0L) return;
+        long now = level.getGameTime();
+        LevelTickState state = stateFor(level, now);
+        state.nanosThisTick += elapsedNanos;
+        state.totalExecutionNanos += elapsedNanos;
+        if (state.nanosThisTick > state.maxTickNanos) {
+            state.maxTickNanos = state.nanosThisTick;
+        }
+    }
+
+    public static TickBudgetModel.TickTelemetrySnapshot snapshotTelemetry(ServerLevel level) {
+        if (level == null) {
+            return new TickBudgetModel.TickTelemetrySnapshot(0L, 0L, 0L, 0L);
+        }
+        LevelTickState state = stateFor(level, level.getGameTime());
+        return new TickBudgetModel.TickTelemetrySnapshot(
+            Math.max(1L, state.observedTicks),
+            state.totalAiChecks,
+            state.totalExecutionNanos,
+            state.maxTickNanos
+        );
     }
 
     public static void recordActivitySignal(ServerLevel level, BlockPos pos) {
@@ -70,6 +95,8 @@ public final class VillageTickBudget {
         if (state.gameTime != now) {
             state.gameTime = now;
             state.checksUsedThisTick = 0;
+            state.nanosThisTick = 0L;
+            state.observedTicks++;
         }
         return state;
     }
@@ -87,6 +114,11 @@ public final class VillageTickBudget {
     private static final class LevelTickState {
         private long gameTime = -1L;
         private int checksUsedThisTick = 0;
+        private long observedTicks = 0L;
+        private long totalAiChecks = 0L;
+        private long nanosThisTick = 0L;
+        private long totalExecutionNanos = 0L;
+        private long maxTickNanos = 0L;
         private final Deque<ActivitySignal> signals = new ArrayDeque<>(MAX_SIGNALS_PER_LEVEL);
     }
 

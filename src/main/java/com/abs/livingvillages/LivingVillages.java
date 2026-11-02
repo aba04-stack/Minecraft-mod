@@ -113,10 +113,15 @@ public final class LivingVillages {
             }
 
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
+            long tickStartNanos = System.nanoTime();
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) {
                 VillageBuilder.tryResumeOrphanedHouseProject(level, villageCenter);
             }
+            if (LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
+                VillageFarmBuilder.tryResumeOrphanedFarmProject(level, villageCenter);
+            }
+            VillageTickBudget.recordSubsystemNanos(level, System.nanoTime() - tickStartNanos);
 
             // Do not let a second project spend ingredients while a worker carries a reserved order.
             if (villagers.stream().anyMatch(v -> v.getPersistentData().getBoolean(VillageCraftingJobs.ACTIVE_KEY)

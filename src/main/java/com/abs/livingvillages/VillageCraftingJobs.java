@@ -95,12 +95,19 @@ public final class VillageCraftingJobs {
         }
 
         long now = level.getGameTime();
-        // Construction has priority over competing resource consumption. A running craft order
-        // pauses without discarding carried ingredients, then resumes after the house is complete.
-        if (VillageBuilder.hasActiveProjectNear(level, villager.blockPosition())
-            || VillageFarmBuilder.hasActiveProjectNear(level, villager.blockPosition())) {
-            pauseOwnedRoute(villager, data);
-            return;
+        // Construction has priority over competing plank consumption (KI-008). A running craft order
+        // that consumes wood planks pauses without discarding carried ingredients, whereas non-plank
+        // stone/iron recipes using existing sticks may proceed in parallel.
+        boolean constructionActive = VillageBuilder.hasActiveProjectNear(level, villager.blockPosition())
+            || VillageFarmBuilder.hasActiveProjectNear(level, villager.blockPosition());
+        if (constructionActive) {
+            Recipe activeRecipe = data.getBoolean(ACTIVE_KEY) ? recipeFromId(data.getString(RECIPE)) : null;
+            if (activeRecipe == null
+                || !com.abs.livingvillages.domain.SettlementSimulationModel.canCraftInParallelWithConstruction(
+                    true, recipeConsumesPlanks(activeRecipe))) {
+                pauseOwnedRoute(villager, data);
+                return;
+            }
         }
         if (!isWorkTime(level, villager)) {
             pauseOwnedRoute(villager, data);
@@ -475,6 +482,16 @@ public final class VillageCraftingJobs {
             if (inventoryCount(villager.getInventory(), ingredient.item()) < ingredient.count()) return ingredient;
         }
         return null;
+    }
+
+    private static boolean recipeConsumesPlanks(Recipe recipe) {
+        if (recipe == null) return false;
+        for (Ingredient ingredient : recipe.inputs()) {
+            if (Block.byItem(ingredient.item()).defaultBlockState().is(BlockTags.PLANKS)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void setRoute(Villager villager, CompoundTag data, BlockPos stand, BlockPos storage,

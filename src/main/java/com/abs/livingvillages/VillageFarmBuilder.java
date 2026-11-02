@@ -159,12 +159,90 @@ public final class VillageFarmBuilder {
         CompoundTag data = worker.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
         data.putInt(PHASE, FETCH_SEEDS);
-        data.putString(SEED_ITEM, BuiltInRegistries.ITEM.getKey(seedItem).toString());
-        data.putString(CROP_BLOCK, BuiltInRegistries.BLOCK.getKey(cropBlock).toString());
+        String seedKey = BuiltInRegistries.ITEM.getKey(seedItem).toString();
+        String cropKey = BuiltInRegistries.BLOCK.getKey(cropBlock).toString();
+        data.putString(SEED_ITEM, seedKey);
+        data.putString(CROP_BLOCK, cropKey);
         data.putInt(SITE_X, site.getX()); data.putInt(SITE_Y, site.getY()); data.putInt(SITE_Z, site.getZ());
         data.putInt(STEP_INDEX, 0);
         data.putLong(NEXT_ACTION, 0L);
         clearOwnedRoute(worker, data);
+        VillageRegistry.recordFarmCheckpoint(
+            level,
+            center,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "farm",
+                site.getX(),
+                site.getY(),
+                site.getZ(),
+                seedKey,
+                cropKey,
+                0,
+                CROP_COUNT * 2 + 2,
+                worker.getUUID().toString(),
+                level.getGameTime()
+            )
+        );
+        return true;
+    }
+
+    /**
+     * Resumes an unfinished 5x5 farm construction project if the original worker in this village
+     * died or was removed before completing all steps (resolves KI-006 for farms).
+     */
+    public static boolean tryResumeOrphanedFarmProject(ServerLevel level, BlockPos center) {
+        if (!LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()
+            || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
+        var checkpoint = VillageRegistry.getFarmCheckpoint(level, center);
+        if (checkpoint == null) return false;
+
+        List<Villager> residents = VillageArea.findVillagers(level, center);
+        boolean ownerAliveInVillage = residents.stream().anyMatch(
+            v -> v.isAlive() && v.getUUID().toString().equals(checkpoint.ownerWorkerId()) && isProjectActive(v)
+        );
+        Villager replacement = residents.stream()
+            .filter(v -> v.isAlive() && !v.isBaby() && !v.isSleeping()
+                && v.getPersistentData().getString(VillagerRoles.ROLE_KEY).isEmpty()
+                && !hasOtherTask(v.getPersistentData()))
+            .min(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))))
+            .orElse(null);
+
+        if (!com.abs.livingvillages.domain.SettlementSimulationModel.canResumeOrphanedProject(
+            checkpoint,
+            ownerAliveInVillage,
+            replacement != null
+        )) {
+            return false;
+        }
+
+        CompoundTag data = replacement.getPersistentData();
+        data.putBoolean(ACTIVE_KEY, true);
+        data.putInt(PHASE, FETCH_SEEDS);
+        data.putString(SEED_ITEM, checkpoint.primaryMaterialId());
+        data.putString(CROP_BLOCK, checkpoint.secondaryMaterialId());
+        data.putInt(SITE_X, checkpoint.siteX());
+        data.putInt(SITE_Y, checkpoint.siteY());
+        data.putInt(SITE_Z, checkpoint.siteZ());
+        data.putInt(STEP_INDEX, checkpoint.stepIndex());
+        data.putLong(NEXT_ACTION, 0L);
+        clearOwnedRoute(replacement, data);
+
+        VillageRegistry.recordFarmCheckpoint(
+            level,
+            center,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                checkpoint.projectKind(),
+                checkpoint.siteX(),
+                checkpoint.siteY(),
+                checkpoint.siteZ(),
+                checkpoint.primaryMaterialId(),
+                checkpoint.secondaryMaterialId(),
+                checkpoint.stepIndex(),
+                checkpoint.totalSteps(),
+                replacement.getUUID().toString(),
+                level.getGameTime()
+            )
+        );
         return true;
     }
 
@@ -499,8 +577,33 @@ public final class VillageFarmBuilder {
 
     private static void advance(Villager worker, CompoundTag data, long now) {
         clearOwnedRoute(worker, data);
-        data.putInt(STEP_INDEX, data.getInt(STEP_INDEX) + 1);
-        data.putLong(NEXT_ACTION, now + STEP_DELAY_TICKS);
+        int nextStep = data.getInt(STEP_INDEX) + 1;
+        data.putInt(STEP_INDEX, nextStep);
+        long adjustedDelay = VillagerProgression.adjustedStepTicks(
+            worker,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_FARMER,
+            (int) STEP_DELAY_TICKS,
+            3
+        );
+        data.putLong(NEXT_ACTION, now + Math.min(STEP_DELAY_TICKS, adjustedDelay));
+        if (worker.level() instanceof ServerLevel serverLevel) {
+            VillageRegistry.recordFarmCheckpoint(
+                serverLevel,
+                worker.blockPosition(),
+                new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                    "farm",
+                    data.getInt(SITE_X),
+                    data.getInt(SITE_Y),
+                    data.getInt(SITE_Z),
+                    data.getString(SEED_ITEM),
+                    data.getString(CROP_BLOCK),
+                    nextStep,
+                    CROP_COUNT * 2 + 2,
+                    worker.getUUID().toString(),
+                    now
+                )
+            );
+        }
     }
 
     private static boolean withinReach(Villager worker, BlockPos target) {
@@ -580,6 +683,9 @@ public final class VillageFarmBuilder {
     }
 
     private static void clearProject(Villager worker, CompoundTag data) {
+        if (worker.level() instanceof ServerLevel serverLevel) {
+            VillageRegistry.clearFarmCheckpoint(serverLevel, worker.blockPosition());
+        }
         clearOwnedRoute(worker, data);
         VillageReservations.release(data, "farm");
         data.putBoolean(ACTIVE_KEY, false);

@@ -35,12 +35,17 @@ assert "public record TacticalDecision(" in monster_model
 budget_model = (DOMAIN_DIR / "TickBudgetModel.java").read_text(encoding="utf-8")
 assert "public static boolean isScheduledThisTick(" in budget_model
 assert "public static boolean canConsumeQuota(" in budget_model
+assert "public record TickTelemetrySnapshot(" in budget_model
+assert "public static double averageMicrosPerTick(" in budget_model
 
 settlement_model = (DOMAIN_DIR / "SettlementSimulationModel.java").read_text(encoding="utf-8")
 assert "public record ProjectCheckpoint(" in settlement_model
 assert "public record CatchUpResult(" in settlement_model
+assert "public record TradeExchangeResult(" in settlement_model
 assert "public static boolean canResumeOrphanedProject(" in settlement_model
 assert "public static CatchUpResult evaluateFurnaceCatchUp(" in settlement_model
 assert "public static int evaluateRaiderSquad(" in settlement_model
+assert "public static boolean canCraftInParallelWithConstruction(" in settlement_model
+assert "public static TradeExchangeResult evaluateTradeCaravan(" in settlement_model
 
 print("DOMAIN PORTABILITY PASSED: zero Minecraft/NeoForge imports in domain package; pure DTO contracts verified")

@@ -55,6 +55,7 @@ public final class VillageRegistry extends SavedData {
     private final Map<Long, UUID> bedOwners = new HashMap<>();
     private final Map<Long, UUID> workBlockOwners = new HashMap<>();
     private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> houseCheckpoints = new HashMap<>();
+    private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> farmCheckpoints = new HashMap<>();
     private final Map<UUID, Long> villageAlarms = new HashMap<>();
 
     private VillageRegistry() {}
@@ -389,6 +390,24 @@ public final class VillageRegistry extends SavedData {
                 entry.getLong("updatedTick")
             ));
         }
+        ListTag farmCheckpointTags = tag.getList("farmCheckpoints", Tag.TAG_COMPOUND);
+        for (int i = 0; i < farmCheckpointTags.size(); i++) {
+            CompoundTag entry = farmCheckpointTags.getCompound(i);
+            UUID id = parseUuid(entry.getString("village"));
+            if (id == null) continue;
+            data.farmCheckpoints.put(id, new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                entry.getString("kind"),
+                entry.getInt("siteX"),
+                entry.getInt("siteY"),
+                entry.getInt("siteZ"),
+                entry.getString("primaryMaterial"),
+                entry.getString("secondaryMaterial"),
+                entry.getInt("stepIndex"),
+                entry.getInt("totalSteps"),
+                entry.getString("ownerWorker"),
+                entry.getLong("updatedTick")
+            ));
+        }
         return data;
     }
 
@@ -446,6 +465,25 @@ public final class VillageRegistry extends SavedData {
             checkpointTags.add(value);
         }
         tag.put("houseCheckpoints", checkpointTags);
+        ListTag farmCheckpointTags = new ListTag();
+        for (Map.Entry<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> entry : farmCheckpoints.entrySet()) {
+            var cp = entry.getValue();
+            if (cp == null) continue;
+            CompoundTag value = new CompoundTag();
+            value.putString("village", entry.getKey().toString());
+            value.putString("kind", cp.projectKind());
+            value.putInt("siteX", cp.siteX());
+            value.putInt("siteY", cp.siteY());
+            value.putInt("siteZ", cp.siteZ());
+            value.putString("primaryMaterial", cp.primaryMaterialId());
+            value.putString("secondaryMaterial", cp.secondaryMaterialId());
+            value.putInt("stepIndex", cp.stepIndex());
+            value.putInt("totalSteps", cp.totalSteps());
+            value.putString("ownerWorker", cp.ownerWorkerId());
+            value.putLong("updatedTick", cp.updatedTick());
+            farmCheckpointTags.add(value);
+        }
+        tag.put("farmCheckpoints", farmCheckpointTags);
         return tag;
     }
 
@@ -480,6 +518,39 @@ public final class VillageRegistry extends SavedData {
         UUID id = villageId(level, center);
         if (id == null) return null;
         return get(level).houseCheckpoints.get(id);
+    }
+
+    public static void recordFarmCheckpoint(
+        ServerLevel level,
+        BlockPos center,
+        com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint checkpoint
+    ) {
+        if (level == null || center == null || checkpoint == null) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        VillageRegistry registry = get(level);
+        registry.farmCheckpoints.put(id, checkpoint);
+        registry.setDirty();
+    }
+
+    public static void clearFarmCheckpoint(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        VillageRegistry registry = get(level);
+        if (registry.farmCheckpoints.remove(id) != null) {
+            registry.setDirty();
+        }
+    }
+
+    public static com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint getFarmCheckpoint(
+        ServerLevel level,
+        BlockPos center
+    ) {
+        if (level == null || center == null) return null;
+        UUID id = villageId(level, center);
+        if (id == null) return null;
+        return get(level).farmCheckpoints.get(id);
     }
 
     public static void raiseVillageAlarm(ServerLevel level, BlockPos center, long gameTime) {

@@ -35,12 +35,16 @@
 
 Перечисленные ниже особенности реально присутствуют в коде `0.15.0` и должны учитываться при тестировании и рефакторинге:
 
-### KI-006 (УСТРАНЕНО ДЛЯ ДОМОВ / `TESTED`) — Восстановление незавершённого проекта при потере строителя (`VillageBuilder`, `VillageRegistry`)
-- **Исходная проблема:** план строительства дома и текущий шаг (`step_index`) хранились только в `villager.getPersistentData()` конкретного рабочего.
-- **Статус решения:** `VillageRegistry` сохраняет мир-уровневую контрольную точку проекта (`SettlementSimulationModel.ProjectCheckpoint`, `houseCheckpoints` в `SavedData`). Если строитель погибает или исчезает до завершения дома, метод `VillageBuilder.tryResumeOrphanedHouseProject` передаёт проект свободному строителю того же поселения с сохранённого шага `step_index` (покрыто внутриигровым тестом `orphanedHouseProjectIsResumedByReplacementBuilderInSameVillage`).
+### KI-006 (УСТРАНЕНО ДЛЯ ДОМОВ И ФЕРМ / `TESTED`) — Восстановление незавершённого проекта при потере рабочего (`VillageBuilder`, `VillageFarmBuilder`, `VillageRegistry`)
+- **Исходная проблема:** план строительства дома/фермы и текущий шаг (`step_index`) хранились только в `villager.getPersistentData()` конкретного рабочего.
+- **Статус решения:** `VillageRegistry` сохраняет мир-уровневые контрольные точки проектов домов и ферм (`houseCheckpoints`, `farmCheckpoints` в `SavedData`). Если рабочий погибает или исчезает до завершения проекта, методы `VillageBuilder.tryResumeOrphanedHouseProject` и `VillageFarmBuilder.tryResumeOrphanedFarmProject` передают проект свободному жителю того же поселения с сохранённого шага `step_index` (покрыто внутриигровыми тестами `orphanedHouseProjectIsResumedByReplacementBuilderInSameVillage` и `orphanedFarmProjectResumesAndParallelCraftingTelemetryAndTradeRulesHold`).
 
 ### KI-009 (УСТРАНЕНО / `TESTED`) — Поле версии схемы (`schema_version = 1`) в записях `SavedData` и `PersistentData`
 - **Статус решения:** `schema_version = 1` внедрён в `VillageRegistry` (`SavedData`), `VillagerProgression` (`livingvillages_progression`) и `VillagerSoul` (`livingvillages_soul`) с сохранением неизвестных полей и резервным снимком `_raw_backup_tag` (покрыто внутриигровым тестом `villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema`).
+
+### KI-008 (УСТРАНЕНО ДЛЯ КАМЕННЫХ/ЖЕЛЕЗНЫХ РЕЦЕПТОВ / `TESTED`) — Параллельное производство во время активной стройки (`VillageCraftingJobs`)
+- **Исходная проблема:** активный проект строительства дома или фермы приостанавливал все ремесленные заказы в поселении, включая рецепты без досок.
+- **Статус решения:** `VillageCraftingJobs` и `SettlementSimulationModel.canCraftInParallelWithConstruction` приостанавливают только рецепты, потребляющие деревянные доски (`recipeConsumesPlanks`), тогда как заказы из камня и железа при наличии готовых палочек могут выполняться параллельно.
 
 ### KI-007 — Вычисление границ поселения вокруг позиции игрока (`LivingVillages.onServerTick`)
 - **Описание:** активные области деревень определяются динамическим поиском жителей в радиусе `village_radius_blocks` вокруг каждого `ServerPlayer` (с объединением зон ближе `64` блоков).
