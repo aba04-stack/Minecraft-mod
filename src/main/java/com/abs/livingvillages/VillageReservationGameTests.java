@@ -1625,10 +1625,12 @@ public final class VillageReservationGameTests {
 
         BlockPos homeA = helper.absolutePos(new BlockPos(2, 1, 1));
         BlockPos homeB = helper.absolutePos(new BlockPos(4, 1, 1));
-        Villager residentA = spawnResident(helper, 2, 1, 1, homeA);
-        Villager residentB = spawnResident(helper, 4, 1, 1, homeB);
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 4, 1, 1);
         residentA.setNoAi(true);
         residentB.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeB));
 
         java.util.UUID caretakerUuid = java.util.UUID.nameUUIDFromBytes("livestock-caretaker".getBytes());
         VillagerSoul.setPlayerTrust(residentA, caretakerUuid, 20);
