@@ -1009,6 +1009,95 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "monster_archetypes_and_visit_catchup")
+    public static void monsterArchetypesWitchAllySupportCreeperMobGriefingAndVisitCatchUpWorkInWorld(GameTestHelper helper) {
+        for (int x = 0; x <= 20; x++) {
+            for (int z = 0; z <= 2; z++) {
+                helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, z)),
+                    Blocks.STONE.defaultBlockState(), 3);
+            }
+        }
+
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos chestPos = helper.absolutePos(new BlockPos(5, 1, 1));
+        BlockPos furnacePos = helper.absolutePos(new BlockPos(7, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(7, 1, 1), Blocks.FURNACE);
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        residentA.setNoAi(true);
+        residentB.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), center, chestPos),
+            "Village must own its chest.");
+        helper.assertTrue(VillageRegistry.isWorkBlockForVillage(helper.getLevel(), center, furnacePos),
+            "Village must own its furnace.");
+
+        Container chest = (Container) helper.getLevel().getBlockEntity(chestPos);
+        helper.assertTrue(chest != null, "Chest container must exist.");
+        chest.setItem(0, new ItemStack(Items.RAW_IRON, 3));
+        chest.setItem(1, new ItemStack(Items.COAL, 1));
+
+        // First visit records baseline timestamp (0 smelted); second visit 600 ticks later smelts 3 iron.
+        helper.assertTrue(VillageRegistry.recordVisitAndRunCatchUp(helper.getLevel(), center, 100L) == 0,
+            "Initial settlement visit must record the baseline timestamp without fabricating ingots.");
+        helper.assertTrue(VillageRegistry.recordVisitAndRunCatchUp(helper.getLevel(), center, 700L) == 3,
+            "Revisiting the settlement 600 ticks later must smelt 3 raw iron into 3 iron ingots.");
+
+        // Spawn a Witch and a wounded Skeleton ally in sight of residentB (Stages 4.2 & 4.3).
+        net.minecraft.world.entity.monster.Witch witch = helper.spawn(EntityType.WITCH, 3, 1, 2);
+        net.minecraft.world.entity.monster.Skeleton woundedAlly = helper.spawn(EntityType.SKELETON, 4, 1, 2);
+        witch.setNoAi(true);
+        woundedAlly.setNoAi(true);
+        woundedAlly.setHealth(4.0F);
+        witch.setTarget(residentB);
+
+        var witchDecision = VillageMonsterAI.evaluateMobTactics(
+            witch,
+            helper.getLevel(),
+            com.abs.livingvillages.domain.MonsterTacticalModel.KIND_WITCH,
+            1000L
+        );
+        helper.assertTrue(
+            witchDecision.tacticalAction() == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_SUPPORT_ALLIES
+                && woundedAlly.hasEffect(net.minecraft.world.effect.MobEffects.REGENERATION),
+            "A Witch with nearby allies must select ACTION_SUPPORT_ALLIES and apply regeneration to a wounded ally.");
+
+        // Verify Skeleton hold-distance, Creeper mobGriefing compliance, and Spider vertical flank decisions.
+        var skeletonClose = com.abs.livingvillages.domain.MonsterTacticalModel.evaluateTacticalStep(
+            com.abs.livingvillages.domain.MonsterTacticalModel.KIND_SKELETON,
+            com.abs.livingvillages.domain.MonsterTacticalModel.STATE_ENGAGING,
+            20L, 200L, 0, true, true, true, 16.0D, 0.9D, 0, 1, true
+        );
+        helper.assertTrue(
+            skeletonClose.tacticalAction() == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_HOLD_RANGE_OR_STRAFE,
+            "Skeletons within close range must hold distance from defenders.");
+
+        var creeperNoGrief = com.abs.livingvillages.domain.MonsterTacticalModel.evaluateTacticalStep(
+            com.abs.livingvillages.domain.MonsterTacticalModel.KIND_CREEPER,
+            com.abs.livingvillages.domain.MonsterTacticalModel.STATE_ENGAGING,
+            20L, 200L, 0, true, true, true, 9.0D, 1.0D, 0, 1, false
+        );
+        helper.assertTrue(
+            creeperNoGrief.tacticalAction() == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_CAUTIOUS_APPROACH,
+            "Creepers must respect mobGriefing=false and use cautious approach without breaching structures.");
+
+        var spiderFlank = com.abs.livingvillages.domain.MonsterTacticalModel.evaluateTacticalStep(
+            com.abs.livingvillages.domain.MonsterTacticalModel.KIND_SPIDER,
+            com.abs.livingvillages.domain.MonsterTacticalModel.STATE_ENGAGING,
+            20L, 200L, 0, true, true, true, 25.0D, 1.0D, 1, 1, true
+        );
+        helper.assertTrue(
+            spiderFlank.tacticalAction() == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_VERTICAL_FLANK,
+            "Spiders engaging a defended target must select vertical/flank positioning.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {

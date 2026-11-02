@@ -168,6 +168,18 @@ public final class VillageMonsterAI {
         }
         data.putInt(FAILED_PATHS_KEY, decision.failedPathAttempts());
 
+        if (mob instanceof Raider raider) {
+            int squadState = evaluateRaiderSquadTactics(raider, level, perceived);
+            if (squadState == com.abs.livingvillages.domain.SettlementSimulationModel.SQUAD_RETREAT) {
+                return new MonsterTacticalModel.TacticalDecision(
+                    MonsterTacticalModel.STATE_DISENGAGE,
+                    MonsterTacticalModel.ACTION_SCOUT_OR_RETREAT,
+                    decision.failedPathAttempts(),
+                    true
+                );
+            }
+        }
+
         if (decision.resetTarget()) {
             mob.getNavigation().stop();
             data.remove(TARGET_X_KEY);

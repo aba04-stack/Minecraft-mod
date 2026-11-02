@@ -64,6 +64,7 @@ public final class VillageRegistry extends SavedData {
     private final Map<UUID, Long> villageAlarms = new HashMap<>();
     private final Map<String, Integer> diplomaticStandings = new HashMap<>();
     private final Map<UUID, Boolean> guardEquipmentRequests = new HashMap<>();
+    private final Map<UUID, Long> villageLastVisitedTick = new HashMap<>();
 
     private VillageRegistry() {}
 
@@ -423,6 +424,14 @@ public final class VillageRegistry extends SavedData {
                 data.diplomaticStandings.put(pair, entry.getInt("standing"));
             }
         }
+        ListTag visitedTags = tag.getList("villageLastVisited", Tag.TAG_COMPOUND);
+        for (int i = 0; i < visitedTags.size(); i++) {
+            CompoundTag entry = visitedTags.getCompound(i);
+            UUID id = parseUuid(entry.getString("village"));
+            if (id != null) {
+                data.villageLastVisitedTick.put(id, entry.getLong("tick"));
+            }
+        }
         return data;
     }
 
@@ -507,6 +516,14 @@ public final class VillageRegistry extends SavedData {
             standingTags.add(value);
         }
         tag.put("diplomaticStandings", standingTags);
+        ListTag visitedTags = new ListTag();
+        for (Map.Entry<UUID, Long> entry : villageLastVisitedTick.entrySet()) {
+            CompoundTag value = new CompoundTag();
+            value.putString("village", entry.getKey().toString());
+            value.putLong("tick", entry.getValue());
+            visitedTags.add(value);
+        }
+        tag.put("villageLastVisited", visitedTags);
         return tag;
     }
 
@@ -678,6 +695,25 @@ public final class VillageRegistry extends SavedData {
         UUID id = villageId(level, center);
         if (id == null) return false;
         return Boolean.TRUE.equals(get(level).guardEquipmentRequests.get(id));
+    }
+
+    /**
+     * Records the current visit timestamp for a settlement and, if sufficient time has elapsed
+     * since the previous visit, runs honest catch-up smelting using real stored ore and coal.
+     */
+    public static int recordVisitAndRunCatchUp(ServerLevel level, BlockPos center, long currentTick) {
+        if (level == null || center == null) return 0;
+        UUID id = villageId(level, center);
+        if (id == null) return 0;
+        VillageRegistry registry = get(level);
+        Long previous = registry.villageLastVisitedTick.put(id, currentTick);
+        registry.setDirty();
+        if (previous == null || currentTick <= previous) return 0;
+        long elapsed = currentTick - previous;
+        if (elapsed < com.abs.livingvillages.domain.SettlementSimulationModel.SMELT_DURATION_TICKS) {
+            return 0;
+        }
+        return applyCatchUpSmeltingIfEligible(level, center, elapsed);
     }
 
     /**

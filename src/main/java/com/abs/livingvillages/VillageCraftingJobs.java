@@ -264,7 +264,8 @@ public final class VillageCraftingJobs {
 
         long adults = villagers.stream().filter(v -> v.isAlive() && !v.isBaby()).count();
         int swords = countTools(storages, villagers, VillageCraftingJobs::isSword, ToolUse.GUARD);
-        if (adults >= 5 && swords == 0) {
+        boolean guardRequestedSword = VillageRegistry.isGuardEquipmentRequested(level, center);
+        if ((adults >= 5 || guardRequestedSword) && swords == 0) {
             Recipe sword = null;
             if (iron >= 2) {
                 sword = fixed("iron_sword", Items.IRON_SWORD, 1,

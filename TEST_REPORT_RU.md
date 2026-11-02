@@ -6,7 +6,7 @@
 
 - Актуальная ветка: `arena/fbf16766-minecraft-mod` (включает `fix/living-villages-layout` + доменное ядро `com.abs.livingvillages.domain`, `VillagerProgression`, `VillageMonsterAI`, `VillageTickBudget` и 12 внутриигровых `GameTest`).
 - GitHub Actions CI: `python3 tools/validate_project.py` (13 регрессионных скриптов + `JavaSyntaxCheck`), `./gradlew build` и `./gradlew runGameTestServer` на `Temurin Java 21` (Minecraft `1.21.1` / NeoForge `21.1.264`) завершены со статусом `SUCCESS` (run `41431805194`).
-- Все семнадцать настоящих Minecraft GameTests прошли, включая:
+- Все восемнадцать настоящих Minecraft GameTests прошли, включая:
   1. запрет бронировать чужой сундук/считать его запасы и сохранение HOME-less группы после переезда рядом с другой деревней;
   2. `villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema` — миграцию схемы `v0 → v1` с сохранением неизвестных полей, начисление опыта только за подтверждённую работу, повышение уровня и сохранение опыта при смене роли (`miner → builder → miner`);
   3. `monsterTacticalPerceptionRejectsHiddenTargetsAndCapsPathRetries` — честное восприятие монстров без рентгена сквозь глухую стену и сброс цели при превышении `MAX_PATH_RETRIES = 3`;
@@ -14,7 +14,8 @@
   5. `villageAlarmEvacuatesCiviliansAndHonestCatchUpConservesMaterials` — оповещение поселения о тревоге с эвакуацией мирных жителей к `HOME` и проверка законов сохранения материи в `SettlementSimulationModel`;
   6. `orphanedFarmProjectResumesAndParallelCraftingTelemetryAndTradeRulesHold` — перехват незавершённой фермы 5×5 другим жителем того же поселения (`KI-006`), параллельный крафт без досок во время стройки (`KI-008`), межпоселенческий обмен излишками (`Stage 5.3`) и телеметрия серверного тика (`Stage 1.4`);
   7. `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade` — независимый выбор старост в двух соседних деревнях, изолированное исполнение серверных команд старосты (`applyElderAction`, `createPanelSnapshot`) и физический обмен излишками хлеба и досок между сундуками двух деревень (`executeNeighborTradeIfEligible`) с `1:1` сохранением предметов и ростом дипломатического статуса;
-  8. `catchUpSmeltingRaiderSquadRetreatAndGuardEquipmentRequestWorkInWorld` — честная догоняющая плавка в поселении с собственной печью и сундуком (`applyCatchUpSmeltingIfEligible`, `6` `RAW_IRON` + `1` `COAL` → `6` `IRON_INGOT`), запрос на снаряжение безоружного стражника (`setGuardEquipmentRequested`) и организованное отступление отряда разбойников (`Pillager`) при потере `50%` состава (`evaluateRaiderSquadTactics`).
+  8. `catchUpSmeltingRaiderSquadRetreatAndGuardEquipmentRequestWorkInWorld` — честная догоняющая плавка в поселении с собственной печью и сундуком (`applyCatchUpSmeltingIfEligible`, `6` `RAW_IRON` + `1` `COAL` → `6` `IRON_INGOT`), запрос на снаряжение безоружного стражника (`setGuardEquipmentRequested`) и организованное отступление отряда разбойников (`Pillager`) при потере `50%` состава (`evaluateRaiderSquadTactics`);
+  9. `monsterArchetypesWitchAllySupportCreeperMobGriefingAndVisitCatchUpWorkInWorld` — проверка тактического поведения архетипов ванильных мобов (`Witch` лечит раненого `Skeleton` эффектом `REGENERATION`, `Skeleton` удерживает дистанцию `ACTION_HOLD_RANGE_OR_STRAFE`, `Creeper` соблюдает `mobGriefing = false`, `Spider` выбирает `ACTION_VERTICAL_FLANK`) и автоматического догоняющего расчёта при повторном визите поселения (`recordVisitAndRunCatchUp`).
 - Dedicated-server smoke-test и headless client smoke-test (`ElderScreen` в окне `427×240` под Xvfb/Mesa) включены в конвейер CI.
 - Артефакт `livingvillages-0.15.0.jar` собирается и публикуется в каждом запуске workflow.
 

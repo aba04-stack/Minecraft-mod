@@ -114,6 +114,7 @@ public final class LivingVillages {
 
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
             long tickStartNanos = System.nanoTime();
+            VillageRegistry.recordVisitAndRunCatchUp(level, villageCenter, level.getGameTime());
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) {
                 VillageBuilder.tryResumeOrphanedHouseProject(level, villageCenter);
