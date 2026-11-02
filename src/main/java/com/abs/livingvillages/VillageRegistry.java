@@ -63,6 +63,7 @@ public final class VillageRegistry extends SavedData {
     private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> farmCheckpoints = new HashMap<>();
     private final Map<UUID, Long> villageAlarms = new HashMap<>();
     private final Map<String, Integer> diplomaticStandings = new HashMap<>();
+    private final Map<UUID, Boolean> guardEquipmentRequests = new HashMap<>();
 
     private VillageRegistry() {}
 
@@ -663,6 +664,75 @@ public final class VillageRegistry extends SavedData {
         registry.diplomaticStandings.put(key, decision.updatedStanding());
         registry.setDirty();
         return true;
+    }
+
+    public static void setGuardEquipmentRequested(ServerLevel level, BlockPos center, boolean requested) {
+        if (level == null || center == null) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        get(level).guardEquipmentRequests.put(id, requested);
+    }
+
+    public static boolean isGuardEquipmentRequested(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return false;
+        UUID id = villageId(level, center);
+        if (id == null) return false;
+        return Boolean.TRUE.equals(get(level).guardEquipmentRequests.get(id));
+    }
+
+    /**
+     * Executes honest, material-conserving catch-up smelting in a village that owns both a real
+     * furnace and an unreserved chest containing raw iron and coal (Stage 5.1).
+     */
+    public static int applyCatchUpSmeltingIfEligible(ServerLevel level, BlockPos center, long elapsedTicks) {
+        if (level == null || center == null) return 0;
+        if (!hasOwnedFurnaceNear(level, center)) return 0;
+        Container chest = findFirstAvailableOwnedStorage(level, center);
+        if (chest == null) return 0;
+
+        int rawIron = countItemInContainer(chest, Items.RAW_IRON);
+        int coal = countItemInContainer(chest, Items.COAL);
+        int ingotRoom = availableRoomForItem(chest, Items.IRON_INGOT);
+        var result = com.abs.livingvillages.domain.SettlementSimulationModel.evaluateFurnaceCatchUp(
+            elapsedTicks,
+            rawIron,
+            coal,
+            ingotRoom
+        );
+        if (result.smeltedCount() <= 0) return 0;
+
+        int removedOre = removeItemFromContainer(chest, Items.RAW_IRON, result.oreConsumed());
+        if (removedOre != result.oreConsumed()) return 0;
+        int removedCoal = removeItemFromContainer(chest, Items.COAL, result.fuelConsumed());
+        if (removedCoal != result.fuelConsumed()) {
+            insertItemIntoContainer(chest, new ItemStack(Items.RAW_IRON, removedOre));
+            return 0;
+        }
+        insertItemIntoContainer(chest, new ItemStack(Items.IRON_INGOT, result.smeltedCount()));
+        chest.setChanged();
+        return result.smeltedCount();
+    }
+
+    private static boolean hasOwnedFurnaceNear(ServerLevel level, BlockPos center) {
+        int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
+        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -4, -radius), center.offset(radius, 4, radius))) {
+            if (!level.hasChunkAt(pos)) continue;
+            BlockState state = level.getBlockState(pos);
+            if (!state.is(Blocks.FURNACE) && !state.is(Blocks.BLAST_FURNACE)) continue;
+            if (isWorkBlockForVillage(level, center, pos)) return true;
+        }
+        return false;
+    }
+
+    private static int availableRoomForItem(Container container, Item item) {
+        int room = 0;
+        int maxStack = item.getDefaultInstance().getMaxStackSize();
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack stack = container.getItem(i);
+            if (stack.isEmpty()) room += maxStack;
+            else if (stack.is(item)) room += Math.max(0, stack.getMaxStackSize() - stack.getCount());
+        }
+        return room;
     }
 
     private static Container findFirstAvailableOwnedStorage(ServerLevel level, BlockPos center) {

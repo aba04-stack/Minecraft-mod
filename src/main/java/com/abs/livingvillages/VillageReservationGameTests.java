@@ -930,6 +930,82 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "catchup_smelting_and_raider_squad")
+    public static void catchUpSmeltingRaiderSquadRetreatAndGuardEquipmentRequestWorkInWorld(GameTestHelper helper) {
+        placeFloor(helper);
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos chestPos = helper.absolutePos(new BlockPos(5, 1, 1));
+        BlockPos furnacePos = helper.absolutePos(new BlockPos(7, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(7, 1, 1), Blocks.FURNACE);
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        residentA.setNoAi(true);
+        residentB.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), center, chestPos),
+            "Village must own its chest.");
+        helper.assertTrue(VillageRegistry.isWorkBlockForVillage(helper.getLevel(), center, furnacePos),
+            "Village must own its furnace.");
+
+        Container chest = (Container) helper.getLevel().getBlockEntity(chestPos);
+        helper.assertTrue(chest != null, "Chest container must exist.");
+        chest.setItem(0, new ItemStack(Items.RAW_IRON, 6));
+        chest.setItem(1, new ItemStack(Items.COAL, 1));
+
+        // 1200 ticks = 6 smelting operations; 1 coal smelts up to 8 items -> 6 raw iron + 1 coal -> 6 iron ingots.
+        int smelted = VillageRegistry.applyCatchUpSmeltingIfEligible(helper.getLevel(), center, 1200L);
+        helper.assertTrue(smelted == 6,
+            "Honest catch-up smelting must smelt 6 raw iron using 1 coal over 1200 elapsed ticks.");
+        helper.assertTrue(
+            chest.getItem(0).is(Items.IRON_INGOT) && chest.getItem(0).getCount() == 6
+                && chest.getItem(1).isEmpty(),
+            "Catch-up smelting must consume raw iron and coal and deposit 6 iron ingots into the village chest.");
+
+        // Guard equipment request flag lifecycle (Stage 4.4).
+        VillageRegistry.setGuardEquipmentRequested(helper.getLevel(), center, true);
+        helper.assertTrue(VillageRegistry.isGuardEquipmentRequested(helper.getLevel(), center),
+            "Unarmed guard demand must be recorded on the village.");
+        VillageRegistry.setGuardEquipmentRequested(helper.getLevel(), center, false);
+        helper.assertTrue(!VillageRegistry.isGuardEquipmentRequested(helper.getLevel(), center),
+            "Guard equipment demand must clear once a sword is equipped.");
+
+        // Organized raider squad scouting and 50% casualty retreat in-world (Stage 5.2).
+        net.minecraft.world.entity.monster.Pillager leader = helper.spawn(EntityType.PILLAGER, 14, 1, 1);
+        net.minecraft.world.entity.monster.Pillager wingman = helper.spawn(EntityType.PILLAGER, 15, 1, 1);
+        net.minecraft.world.entity.monster.Pillager casualtyA = helper.spawn(EntityType.PILLAGER, 16, 1, 1);
+        net.minecraft.world.entity.monster.Pillager casualtyB = helper.spawn(EntityType.PILLAGER, 17, 1, 1);
+        for (var p : List.of(leader, wingman, casualtyA, casualtyB)) p.setNoAi(true);
+        leader.setTarget(residentA);
+
+        int holdDecision = VillageMonsterAI.evaluateRaiderSquadTactics(leader, helper.getLevel(), false);
+        helper.assertTrue(
+            holdDecision == com.abs.livingvillages.domain.SettlementSimulationModel.SQUAD_HOLD_SCOUT,
+            "Raider squad of 4 must hold until a scout perceives the settlement.");
+
+        int advanceDecision = VillageMonsterAI.evaluateRaiderSquadTactics(leader, helper.getLevel(), true);
+        helper.assertTrue(
+            advanceDecision == com.abs.livingvillages.domain.SettlementSimulationModel.SQUAD_ADVANCE,
+            "Scouted settlement with full 4-raider squad must advance.");
+
+        // Inflict 50% squad casualties (2 of 4 eliminated).
+        casualtyA.discard();
+        casualtyB.discard();
+        int retreatDecision = VillageMonsterAI.evaluateRaiderSquadTactics(leader, helper.getLevel(), true);
+        helper.assertTrue(
+            retreatDecision == com.abs.livingvillages.domain.SettlementSimulationModel.SQUAD_RETREAT
+                && leader.getTarget() == null
+                && leader.getPersistentData().getInt(VillageMonsterAI.STATE_KEY)
+                    == com.abs.livingvillages.domain.MonsterTacticalModel.STATE_DISENGAGE,
+            "Losing 50% of the raider squad must trigger organized retreat and clear the attack target.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {

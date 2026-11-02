@@ -44,6 +44,7 @@ public final class VillageMonsterAI {
     public static final String TARGET_Y_KEY = PREFIX + "target_y";
     public static final String TARGET_Z_KEY = PREFIX + "target_z";
     public static final String LAST_SUPPORT_KEY = PREFIX + "last_support";
+    public static final String INITIAL_SQUAD_KEY = PREFIX + "initial_squad";
 
     private static final int TICK_INTERVAL = 20;
     private static final double SIGHT_RANGE_BLOCKS = 20.0D;
@@ -305,5 +306,38 @@ public final class VillageMonsterAI {
             default -> {
             }
         }
+    }
+
+    /**
+     * Evaluates organized raider squad state (Stage 5.2): records the initial squad size in a
+     * 16-block radius around the raider, checks current living squad members, and forces
+     * disengagement/retreat if squad losses reach 50%.
+     */
+    public static int evaluateRaiderSquadTactics(Raider raider, ServerLevel level, boolean villageScouted) {
+        if (raider == null || level == null || !raider.isAlive()) {
+            return com.abs.livingvillages.domain.SettlementSimulationModel.SQUAD_RETREAT;
+        }
+        CompoundTag data = raider.getPersistentData();
+        AABB squadArea = raider.getBoundingBox().inflate(16.0D, 8.0D, 16.0D);
+        int currentLiving = level.getEntitiesOfClass(Raider.class, squadArea,
+            other -> other.isAlive() && !other.isRemoved()).size();
+
+        int initialSquad = data.getInt(INITIAL_SQUAD_KEY);
+        if (initialSquad <= 0 || currentLiving > initialSquad) {
+            initialSquad = Math.max(1, currentLiving);
+            data.putInt(INITIAL_SQUAD_KEY, initialSquad);
+        }
+
+        int squadDecision = com.abs.livingvillages.domain.SettlementSimulationModel.evaluateRaiderSquad(
+            villageScouted,
+            initialSquad,
+            currentLiving
+        );
+        if (squadDecision == com.abs.livingvillages.domain.SettlementSimulationModel.SQUAD_RETREAT) {
+            raider.setTarget(null);
+            raider.getNavigation().stop();
+            data.putInt(STATE_KEY, MonsterTacticalModel.STATE_DISENGAGE);
+        }
+        return squadDecision;
     }
 }

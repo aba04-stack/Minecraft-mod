@@ -56,10 +56,37 @@ public final class LivingVillagesClient {
             return;
         }
 
+        String codecFailure = verifyPayloadCodecRoundTrip(screen.data);
+        if (codecFailure != null) {
+            finishSmokeTest(minecraft, codecFailure);
+            return;
+        }
+
         smokeTestFinished = true;
         System.out.println("LIVING_VILLAGES_ELDER_SCREEN_SMOKE_PASS: seven buttons fit within "
             + screen.width + "x" + screen.height + ".");
         minecraft.setScreen(null);
+    }
+
+    private static String verifyPayloadCodecRoundTrip(VillageElder.ElderPanelData sample) {
+        io.netty.buffer.ByteBuf buf = io.netty.buffer.Unpooled.buffer();
+        try {
+            VillageElder.ElderPanelData.STREAM_CODEC.encode(buf, sample);
+            VillageElder.ElderPanelData decoded = VillageElder.ElderPanelData.STREAM_CODEC.decode(buf);
+            if (!sample.equals(decoded)) {
+                return "ElderPanelData STREAM_CODEC round-trip mismatch";
+            }
+            buf.clear();
+            VillageElder.ElderAction action = new VillageElder.ElderAction(sample.elderUuid(), 2);
+            VillageElder.ElderAction.STREAM_CODEC.encode(buf, action);
+            VillageElder.ElderAction decodedAction = VillageElder.ElderAction.STREAM_CODEC.decode(buf);
+            if (!action.equals(decodedAction)) {
+                return "ElderAction STREAM_CODEC round-trip mismatch";
+            }
+            return null;
+        } finally {
+            buf.release();
+        }
     }
 
     private void finishSmokeTest(Minecraft minecraft, String reason) {

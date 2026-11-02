@@ -78,6 +78,10 @@ public final class VillageDefense {
         if (threat != null) {
             data.putLong(NEXT_PATROL, now + PATROL_INTERVAL_TICKS);
             VillageRegistry.raiseVillageAlarm(level, home, now);
+            ringNearbyVillageBell(level, home);
+            if (!isSword(guard.getItemBySlot(EquipmentSlot.MAINHAND))) {
+                VillageRegistry.setGuardEquipmentRequested(level, home, true);
+            }
             evacuateNearbyCivilians(level, home);
             defendAgainst(guard, threat, level, data, now);
             return;
@@ -177,6 +181,12 @@ public final class VillageDefense {
         equipSlot(guard, level, EquipmentSlot.LEGS, VillageDefense::isLeggings);
         equipSlot(guard, level, EquipmentSlot.FEET, VillageDefense::isBoots);
         equipSlot(guard, level, EquipmentSlot.OFFHAND, stack -> stack.is(Items.SHIELD));
+        if (isSword(guard.getItemBySlot(EquipmentSlot.MAINHAND))) {
+            BlockPos home = VillagerRoles.getHome(guard);
+            if (home != null) {
+                VillageRegistry.setGuardEquipmentRequested(level, home, false);
+            }
+        }
     }
 
     private static void equipSlot(Villager guard, ServerLevel level, EquipmentSlot slot, Predicate<ItemStack> predicate) {
@@ -357,6 +367,17 @@ public final class VillageDefense {
                 .orElse(home);
             if (resident.blockPosition().distSqr(shelter) > 4.0D) {
                 resident.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(shelter, 0.75F, 1));
+            }
+        }
+    }
+
+    private static void ringNearbyVillageBell(ServerLevel level, BlockPos home) {
+        for (BlockPos pos : BlockPos.betweenClosed(home.offset(-10, -3, -10), home.offset(10, 4, 10))) {
+            if (!level.hasChunkAt(pos)) continue;
+            if (level.getBlockState(pos).is(Blocks.BELL)) {
+                level.blockEvent(pos, Blocks.BELL, 1, 0);
+                VillageTickBudget.recordActivitySignal(level, pos);
+                return;
             }
         }
     }
