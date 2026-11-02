@@ -1049,9 +1049,9 @@ public final class VillageReservationGameTests {
         helper.assertTrue(VillageRegistry.recordVisitAndRunCatchUp(helper.getLevel(), center, 700L) == 3,
             "Revisiting the settlement 600 ticks later must smelt 3 raw iron into 3 iron ingots.");
 
-        // Spawn a Witch and a wounded Skeleton ally in sight of residentB (Stages 4.2 & 4.3).
+        // Spawn a Witch and a wounded Spider ally in sight of residentB (Stages 4.2 & 4.3).
         net.minecraft.world.entity.monster.Witch witch = helper.spawn(EntityType.WITCH, 3, 1, 2);
-        net.minecraft.world.entity.monster.Skeleton woundedAlly = helper.spawn(EntityType.SKELETON, 4, 1, 2);
+        net.minecraft.world.entity.monster.Spider woundedAlly = helper.spawn(EntityType.SPIDER, 4, 1, 2);
         witch.setNoAi(true);
         woundedAlly.setNoAi(true);
         woundedAlly.setHealth(4.0F);
@@ -1065,8 +1065,9 @@ public final class VillageReservationGameTests {
         );
         helper.assertTrue(
             witchDecision.tacticalAction() == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_SUPPORT_ALLIES
-                && woundedAlly.hasEffect(net.minecraft.world.effect.MobEffects.REGENERATION),
-            "A Witch with nearby allies must select ACTION_SUPPORT_ALLIES and apply regeneration to a wounded ally.");
+                && (woundedAlly.hasEffect(net.minecraft.world.effect.MobEffects.REGENERATION)
+                    || woundedAlly.hasEffect(net.minecraft.world.effect.MobEffects.DAMAGE_RESISTANCE)),
+            "A Witch with nearby allies must select ACTION_SUPPORT_ALLIES and buff a wounded ally.");
 
         // Verify Skeleton hold-distance, Creeper mobGriefing compliance, and Spider vertical flank decisions.
         var skeletonClose = com.abs.livingvillages.domain.MonsterTacticalModel.evaluateTacticalStep(

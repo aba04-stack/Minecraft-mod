@@ -295,10 +295,11 @@ public final class VillageMonsterAI {
                 if (now - data.getLong(LAST_SUPPORT_KEY) >= SUPPORT_COOLDOWN_TICKS) {
                     List<Mob> woundedAllies = level.getEntitiesOfClass(Mob.class, localBox,
                         ally -> ally != mob && ally.isAlive() && ally instanceof Enemy
-                            && !(ally instanceof Zombie) && ally.getHealth() < ally.getMaxHealth() * 0.75F);
+                            && ally.getHealth() < ally.getMaxHealth() * 0.75F);
                     if (!woundedAllies.isEmpty()) {
                         Mob wounded = woundedAllies.get(0);
                         wounded.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 80, 0));
+                        wounded.addEffect(new MobEffectInstance(MobEffects.DAMAGE_RESISTANCE, 80, 0));
                         data.putLong(LAST_SUPPORT_KEY, now);
                     }
                 }
