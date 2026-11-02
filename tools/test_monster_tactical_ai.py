@@ -26,8 +26,20 @@ for marker in (
     "MonsterTacticalModel.evaluateTacticalStep(",
     "GameRules.RULE_MOBGRIEFING",
     "decision.resetTarget()",
+    "alertNearbyRaiders(",
+    "stepLastKnownSearchOrPatrol(",
+    "selectPriorityAllyForWitchSupport(",
+    "hasClimbableVerticalSurfaceNear(",
 ):
     assert marker in monster_ai, f"VillageMonsterAI.java missing {marker}"
+
+defense = (JAVA / "VillageDefense.java").read_text(encoding="utf-8")
+for marker in (
+    "selectPriorityThreat(",
+    "assistWoundedVillagerAfterCombat(",
+    "scoreGuardThreatPriority(",
+):
+    assert marker in defense, f"VillageDefense.java missing {marker}"
 
 for marker in (
     "MAX_SIGNALS_PER_LEVEL = 32",

@@ -1323,6 +1323,159 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "enhanced_mob_and_guard_behaviors")
+    public static void enhancedMobBehaviorsPillagerAlertSearchPatrolSkeletonSpreadCreeperHoldWitchTriageAndGuardAidWorkInWorld(
+            GameTestHelper helper) {
+        for (int x = 0; x <= 24; x++) {
+            for (int z = 0; z <= 2; z++) {
+                helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, z)),
+                    Blocks.STONE.defaultBlockState(), 3);
+            }
+        }
+
+        BlockPos homeA = helper.absolutePos(new BlockPos(2, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(4, 1, 1));
+        Villager guard = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        Villager civilian = helper.spawn(EntityType.VILLAGER, 6, 1, 1);
+        guard.setNoAi(true);
+        civilian.setNoAi(true);
+        guard.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeA));
+        civilian.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeB));
+        guard.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_GUARD);
+
+        // 1. Pillagers: group threat broadcast, 3-step search of last known position, and return to patrol.
+        net.minecraft.world.entity.monster.Pillager scout = helper.spawn(EntityType.PILLAGER, 14, 1, 1);
+        net.minecraft.world.entity.monster.Pillager allyRaider = helper.spawn(EntityType.PILLAGER, 16, 1, 1);
+        scout.setNoAi(true);
+        allyRaider.setNoAi(true);
+        VillageMonsterAI.ensureRaiderPatrolOrigin(allyRaider, allyRaider.getPersistentData());
+        int alertedCount = VillageMonsterAI.alertNearbyRaiders(scout, helper.getLevel(), civilian, civilian.blockPosition());
+        helper.assertTrue(
+            alertedCount >= 1
+                && allyRaider.getTarget() == civilian
+                && allyRaider.getPersistentData().getBoolean(VillageMonsterAI.HAS_LAST_KNOWN_KEY)
+                && allyRaider.getPersistentData().getInt(VillageMonsterAI.SEARCH_STEPS_KEY)
+                    == com.abs.livingvillages.domain.MonsterTacticalModel.DEFAULT_SEARCH_STEPS,
+            "Pillager must broadcast threat target and last known position to nearby Raider allies.");
+
+        // Step through the 3 search steps (3 -> 2 -> 1 -> 0) and verify transition to STATE_PATROLLING.
+        var step1 = VillageMonsterAI.stepLastKnownSearchOrPatrol(allyRaider, helper.getLevel(), allyRaider.getPersistentData(), 100L);
+        var step2 = VillageMonsterAI.stepLastKnownSearchOrPatrol(allyRaider, helper.getLevel(), allyRaider.getPersistentData(), 120L);
+        var step3 = VillageMonsterAI.stepLastKnownSearchOrPatrol(allyRaider, helper.getLevel(), allyRaider.getPersistentData(), 140L);
+        var step4 = VillageMonsterAI.stepLastKnownSearchOrPatrol(allyRaider, helper.getLevel(), allyRaider.getPersistentData(), 160L);
+        helper.assertTrue(
+            step1.nextState() == com.abs.livingvillages.domain.MonsterTacticalModel.STATE_SEARCHING_LAST_KNOWN
+                && step2.nextState() == com.abs.livingvillages.domain.MonsterTacticalModel.STATE_SEARCHING_LAST_KNOWN
+                && step3.nextState() == com.abs.livingvillages.domain.MonsterTacticalModel.STATE_SEARCHING_LAST_KNOWN
+                && step4.nextState() == com.abs.livingvillages.domain.MonsterTacticalModel.STATE_PATROLLING
+                && step4.tacticalAction() == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_PATROL_STEP,
+            "Pillager must search last known position for 3 steps and then return to its patrol route.");
+
+        // 2. Zombies: noise investigation and gradual search termination back to STATE_IDLE.
+        var zombieNoise = com.abs.livingvillages.domain.MonsterTacticalModel.evaluateTacticalStep(
+            com.abs.livingvillages.domain.MonsterTacticalModel.KIND_ZOMBIE,
+            com.abs.livingvillages.domain.MonsterTacticalModel.STATE_IDLE,
+            20L, 200L, 0, true, false, true, 64.0D, 1.0D, 0, 0, true
+        );
+        var zombieIdleAfterSearch = com.abs.livingvillages.domain.MonsterTacticalModel.evaluateSearchDecay(false, 0, false);
+        helper.assertTrue(
+            zombieNoise.tacticalAction() == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_INVESTIGATE_NOISE
+                && zombieIdleAfterSearch.nextState() == com.abs.livingvillages.domain.MonsterTacticalModel.STATE_IDLE,
+            "Zombies must investigate suspicious noise and return to idle once search steps expire.");
+
+        // 3. Skeletons: anti-clustering spread and cover seeking when under fire.
+        int skelClusterAction = com.abs.livingvillages.domain.MonsterTacticalModel.selectSkeletonCombatAction(
+            81.0D, true, 2, false
+        );
+        int skelCoverAction = com.abs.livingvillages.domain.MonsterTacticalModel.selectSkeletonCombatAction(
+            81.0D, true, 0, true
+        );
+        helper.assertTrue(
+            skelClusterAction == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_SEEK_COVER_OR_SPREAD
+                && skelCoverAction == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_SEEK_COVER_OR_SPREAD,
+            "Skeletons must spread out when clustered and seek cover when under fire.");
+
+        // 4. Spiders: vertical wall detection, ambush pounce, and multi-angle flanking.
+        helper.setBlock(new BlockPos(10, 1, 0), Blocks.STONE);
+        helper.setBlock(new BlockPos(10, 2, 0), Blocks.STONE);
+        helper.assertTrue(
+            VillageMonsterAI.hasClimbableVerticalSurfaceNear(helper.getLevel(), helper.absolutePos(new BlockPos(10, 1, 1)))
+                && com.abs.livingvillages.domain.MonsterTacticalModel.selectSpiderTacticalAction(25.0D, true, true, true)
+                    == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_AMBUSH_POUNCE,
+            "Spiders must detect climbable vertical surfaces and execute ambush pounces.");
+
+        // 5. Creepers: hold for ally clearance when allies swarm the target and abort unreachable paths.
+        helper.assertTrue(
+            com.abs.livingvillages.domain.MonsterTacticalModel.selectCreeperTacticalAction(16.0D, true, true, 2, true)
+                == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_HOLD_FOR_ALLY_CLEARANCE
+                && com.abs.livingvillages.domain.MonsterTacticalModel.selectCreeperTacticalAction(16.0D, true, false, 0, true)
+                    == com.abs.livingvillages.domain.MonsterTacticalModel.ACTION_NONE,
+            "Creepers must hold when allies are adjacent to the target and abort unreachable paths.");
+
+        // 6. Witches: prioritize the most critically wounded ally and support 3 distinct potion modes.
+        net.minecraft.world.entity.monster.Witch witch = helper.spawn(EntityType.WITCH, 18, 1, 1);
+        net.minecraft.world.entity.monster.Spider minorWound = helper.spawn(EntityType.SPIDER, 19, 1, 1);
+        net.minecraft.world.entity.monster.Spider criticalWound = helper.spawn(EntityType.SPIDER, 20, 1, 1);
+        witch.setNoAi(true);
+        minorWound.setNoAi(true);
+        criticalWound.setNoAi(true);
+        minorWound.setHealth(12.0F);   // 75% HP
+        criticalWound.setHealth(4.0F); // 25% HP
+        Mob chosenAlly = VillageMonsterAI.selectPriorityAllyForWitchSupport(
+            witch,
+            helper.getLevel(),
+            witch.getBoundingBox().inflate(8.0D, 4.0D, 8.0D)
+        );
+        helper.assertTrue(
+            chosenAlly == criticalWound
+                && com.abs.livingvillages.domain.MonsterTacticalModel.selectWitchSupportMode(2, 0.25D, true)
+                    == com.abs.livingvillages.domain.MonsterTacticalModel.WITCH_SUPPORT_CRITICAL_HEAL
+                && com.abs.livingvillages.domain.MonsterTacticalModel.selectWitchSupportMode(2, 0.95D, true)
+                    == com.abs.livingvillages.domain.MonsterTacticalModel.WITCH_SUPPORT_VANGUARD_BUFF,
+            "Witch must select the most critically wounded ally first and distinguish critical heal vs vanguard buff.");
+
+        // 7. Village Guards: prioritize direct threat to a civilian villager and assist wounded villagers after combat.
+        scout.discard();
+        allyRaider.discard();
+        witch.discard();
+        minorWound.discard();
+        criticalWound.discard();
+
+        net.minecraft.world.entity.monster.Zombie passiveNearGuard = helper.spawn(EntityType.ZOMBIE, 3, 1, 1);
+        net.minecraft.world.entity.monster.Zombie attackerOnCivilian = helper.spawn(EntityType.ZOMBIE, 6, 1, 2);
+        passiveNearGuard.setNoAi(true);
+        attackerOnCivilian.setNoAi(true);
+        attackerOnCivilian.setTarget(civilian);
+
+        Mob priorityThreat = VillageDefense.selectPriorityThreat(guard, helper.getLevel(), homeA, 16);
+        helper.assertTrue(
+            priorityThreat == attackerOnCivilian,
+            "Guard must prioritize the enemy actively threatening a civilian villager over a passive closer enemy.");
+
+        passiveNearGuard.discard();
+        attackerOnCivilian.discard();
+
+        // Wound the civilian, place guard within 2 blocks carrying bread, and verify post-combat aid.
+        civilian.setPos(guard.getX() + 1.5D, guard.getY(), guard.getZ());
+        civilian.setHealth(10.0F);
+        guard.getInventory().addItem(new ItemStack(Items.BREAD, 2));
+        boolean assisted = VillageDefense.assistWoundedVillagerAfterCombat(
+            guard,
+            helper.getLevel(),
+            homeA,
+            guard.getPersistentData(),
+            500L
+        );
+        helper.assertTrue(
+            assisted
+                && civilian.getHealth() > 10.0F
+                && civilian.hasEffect(net.minecraft.world.effect.MobEffects.REGENERATION)
+                && civilian.getInventory().getItem(0).is(Items.BREAD)
+                && civilian.getInventory().getItem(0).getCount() == 1,
+            "After combat, guard must heal a nearby wounded villager, apply regeneration, and share 1 food item.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {

@@ -38,6 +38,15 @@ monster_model = (DOMAIN_DIR / "MonsterTacticalModel.java").read_text(encoding="u
 assert "public static final int MAX_PATH_RETRIES = 3;" in monster_model
 assert "public static boolean canPerceiveTarget(" in monster_model
 assert "public record TacticalDecision(" in monster_model
+assert "public static SearchDecayDecision evaluateSearchDecay(" in monster_model
+assert "public static int[] computePatrolWaypointOffset(" in monster_model
+assert "public static int selectSkeletonCombatAction(" in monster_model
+assert "public static int selectSpiderTacticalAction(" in monster_model
+assert "public static int[] computeFlankOffset(" in monster_model
+assert "public static int selectCreeperTacticalAction(" in monster_model
+assert "public static int selectWitchSupportMode(" in monster_model
+assert "public static double scoreGuardThreatPriority(" in monster_model
+assert "public static boolean shouldGuardAssistWoundedVillager(" in monster_model
 
 budget_model = (DOMAIN_DIR / "TickBudgetModel.java").read_text(encoding="utf-8")
 assert "public static boolean isScheduledThisTick(" in budget_model
