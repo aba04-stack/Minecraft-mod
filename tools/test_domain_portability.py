@@ -7,7 +7,7 @@ DOMAIN_DIR = ROOT / "src/main/java/com/abs/livingvillages/domain"
 
 assert DOMAIN_DIR.exists(), "Domain package directory must exist."
 domain_files = sorted(DOMAIN_DIR.glob("*.java"))
-assert len(domain_files) >= 4, "Domain package must contain progression, monster AI, tick budget, and settlement models."
+assert len(domain_files) >= 5, "Domain package must contain progression, monster AI, tick budget, settlement, and port models."
 
 forbidden_prefixes = (
     "import net.minecraft.",
@@ -21,6 +21,13 @@ for path in domain_files:
     assert "package com.abs.livingvillages.domain;" in text, f"{path.name} must declare the domain package"
     for prefix in forbidden_prefixes:
         assert prefix not in text, f"{path.name} must not import platform package: {prefix}"
+
+ports_model = (DOMAIN_DIR / "SettlementPorts.java").read_text(encoding="utf-8")
+assert "public interface WorldAccessPort" in ports_model
+assert "public interface StorageAccessPort" in ports_model
+assert "public interface AgentControlPort" in ports_model
+assert "public interface PersistencePort" in ports_model
+assert "public static SettlementSimulationModel.CatchUpResult evaluateCatchUpViaPorts(" in ports_model
 
 prog_model = (DOMAIN_DIR / "VillagerProgressionModel.java").read_text(encoding="utf-8")
 assert "public static final int SCHEMA_VERSION = 1;" in prog_model

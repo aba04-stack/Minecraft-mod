@@ -28,7 +28,10 @@ import java.util.UUID;
  * All decisions that change the world are made on the logical server.
  */
 public final class VillagerSoul {
-    private static final String SOUL_KEY = "livingvillages_soul";
+    public static final int SCHEMA_VERSION = 1;
+    public static final String SCHEMA_VERSION_KEY = "schema_version";
+    public static final String RAW_BACKUP_TAG_KEY = "_raw_backup_tag";
+    public static final String SOUL_KEY = "livingvillages_soul";
     private static final String RELATIONSHIPS_KEY = "relationships";
     private static final int PERSONALITY_COUNT = 6;
     private static final long MOOD_INTERVAL_TICKS = 200L;
@@ -425,16 +428,48 @@ public final class VillagerSoul {
         return getSoul(villager).getString("name");
     }
 
+    /**
+     * Ensures the villager's soul tag is at the current schema version (v1).
+     * Unknown fields are preserved; malformed legacy records are backed up into {@code _raw_backup_tag}.
+     */
+    public static CompoundTag ensureMigratedSoulTag(CompoundTag entityPersistentData) {
+        if (entityPersistentData == null) {
+            return new CompoundTag();
+        }
+        if (entityPersistentData.contains(SOUL_KEY, net.minecraft.nbt.Tag.TAG_COMPOUND)) {
+            CompoundTag existing = entityPersistentData.getCompound(SOUL_KEY);
+            int version = existing.getInt(SCHEMA_VERSION_KEY);
+            if (version < 0 || (existing.contains(RELATIONSHIPS_KEY)
+                && !existing.contains(RELATIONSHIPS_KEY, net.minecraft.nbt.Tag.TAG_COMPOUND))) {
+                CompoundTag recovered = new CompoundTag();
+                recovered.put(RAW_BACKUP_TAG_KEY, existing.copy());
+                recovered.putInt(SCHEMA_VERSION_KEY, SCHEMA_VERSION);
+                recovered.put(RELATIONSHIPS_KEY, new CompoundTag());
+                entityPersistentData.put(SOUL_KEY, recovered);
+                return recovered;
+            }
+            if (version < SCHEMA_VERSION) {
+                existing.putInt(SCHEMA_VERSION_KEY, SCHEMA_VERSION);
+            }
+            return existing;
+        }
+        CompoundTag fresh = new CompoundTag();
+        if (entityPersistentData.contains(SOUL_KEY)) {
+            net.minecraft.nbt.Tag unexpected = entityPersistentData.get(SOUL_KEY);
+            if (unexpected != null) {
+                fresh.put(RAW_BACKUP_TAG_KEY, unexpected.copy());
+            }
+        }
+        fresh.putInt(SCHEMA_VERSION_KEY, SCHEMA_VERSION);
+        entityPersistentData.put(SOUL_KEY, fresh);
+        return fresh;
+    }
+
     private static CompoundTag getSoul(Villager villager) {
         CompoundTag root = villager.getPersistentData();
-        CompoundTag soul;
-        if (root.contains(SOUL_KEY)) {
-            soul = root.getCompound(SOUL_KEY);
-        } else {
-            soul = new CompoundTag();
-            root.put(SOUL_KEY, soul);
-        }
+        CompoundTag soul = ensureMigratedSoulTag(root);
         if (!soul.getBoolean("initialized")) {
+            soul.putInt(SCHEMA_VERSION_KEY, SCHEMA_VERSION);
             soul.putBoolean("initialized", true);
             soul.putString("name", villager.hasCustomName()
                 ? villager.getCustomName().getString()

@@ -342,6 +342,26 @@ public final class VillageElder {
         return notice;
     }
 
+    public static String summarizeSpecialistSkills(List<Villager> villagers) {
+        if (villagers == null || villagers.isEmpty() || !LivingVillagesConfig.ENABLE_VILLAGER_PROGRESSION.get()) {
+            return "";
+        }
+        List<String> entries = new ArrayList<>();
+        for (Villager villager : villagers) {
+            if (villager == null || !villager.isAlive() || villager.isBaby()) continue;
+            int totalXp = 0;
+            for (String role : com.abs.livingvillages.domain.VillagerProgressionModel.SUPPORTED_ROLES) {
+                totalXp += VillagerProgression.getXp(villager, role);
+            }
+            if (totalXp > 0) {
+                entries.add(VillagerProgression.describePrimarySkill(villager));
+            }
+            if (entries.size() >= 3) break;
+        }
+        if (entries.isEmpty()) return "";
+        return "Мастера: " + String.join(", ", entries) + ".";
+    }
+
     public static ElderPanelData createPanelSnapshot(ServerLevel level, Villager elder, String notice) {
         BlockPos origin = elder.blockPosition();
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
@@ -352,6 +372,10 @@ public final class VillageElder {
         int food = countStoredFood(level, origin);
         var data = elder.getPersistentData();
         String currentNotice = notice == null || notice.isBlank() ? data.getString(NOTICE_KEY) : notice;
+        String skills = summarizeSpecialistSkills(villagers);
+        if (!skills.isBlank() && !currentNotice.contains("Мастера:")) {
+            currentNotice = currentNotice.isBlank() ? skills : currentNotice + " " + skills;
+        }
         return new ElderPanelData(
             elder.getUUID().toString(), villagers.size(), adults, children, beds, food,
             Math.max(PRIORITY_BALANCED, Math.min(PRIORITY_DEFENSE, data.getInt(PRIORITY_KEY))),

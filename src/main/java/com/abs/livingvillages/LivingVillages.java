@@ -221,6 +221,7 @@ public final class LivingVillages {
             VillagePopulation.tickArea(level, villageCenter, villagers);
             // Industry scans only unreserved containers, so it can continue with separate stock.
             VillageIndustry.tickArea(level, villageCenter);
+            VillageRegistry.tryTradeWithKnownNeighbors(level, villageCenter, 4, 8);
         }
     }
 

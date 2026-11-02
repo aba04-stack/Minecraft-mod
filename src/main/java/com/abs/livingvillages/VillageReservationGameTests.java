@@ -1099,6 +1099,120 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "ports_soul_migration_and_auto_trade")
+    public static void portsAdapterSoulMigrationElderSkillSummaryAndAutoNeighborTradeWorkInWorld(GameTestHelper helper) {
+        for (int x = 0; x <= 30; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos homeOneA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeOneB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos homeTwoA = helper.absolutePos(new BlockPos(25, 1, 1));
+        BlockPos homeTwoB = helper.absolutePos(new BlockPos(27, 1, 1));
+        BlockPos storageOne = helper.absolutePos(new BlockPos(5, 1, 1));
+        BlockPos furnaceOne = helper.absolutePos(new BlockPos(7, 1, 1));
+        BlockPos storageTwo = helper.absolutePos(new BlockPos(23, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(7, 1, 1), Blocks.FURNACE);
+        helper.setBlock(new BlockPos(23, 1, 1), Blocks.CHEST);
+
+        Villager oneA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager oneB = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        Villager oneC = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        Villager oneD = helper.spawn(EntityType.VILLAGER, 4, 1, 1);
+        Villager twoA = helper.spawn(EntityType.VILLAGER, 25, 1, 1);
+        Villager twoB = helper.spawn(EntityType.VILLAGER, 26, 1, 1);
+        Villager twoC = helper.spawn(EntityType.VILLAGER, 27, 1, 1);
+        Villager twoD = helper.spawn(EntityType.VILLAGER, 28, 1, 1);
+
+        for (Villager v : List.of(oneA, oneB, oneC, oneD)) {
+            v.setNoAi(true);
+            v.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeOneA));
+        }
+        oneC.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeOneB));
+        oneD.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeOneB));
+
+        for (Villager v : List.of(twoA, twoB, twoC, twoD)) {
+            v.setNoAi(true);
+            v.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeTwoA));
+        }
+        twoC.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeTwoB));
+        twoD.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeTwoB));
+
+        // 1. Verify VillagerSoul v0 -> v1 schema migration and corrupt tag backup (Stage 1.2).
+        net.minecraft.nbt.CompoundTag legacyRoot = new net.minecraft.nbt.CompoundTag();
+        net.minecraft.nbt.CompoundTag legacySoul = new net.minecraft.nbt.CompoundTag();
+        legacySoul.putString("name", "Мира");
+        legacySoul.putString("custom_addon_note", "preserved");
+        legacyRoot.put(VillagerSoul.SOUL_KEY, legacySoul);
+        net.minecraft.nbt.CompoundTag migratedSoul = VillagerSoul.ensureMigratedSoulTag(legacyRoot);
+        helper.assertTrue(
+            migratedSoul.getInt(VillagerSoul.SCHEMA_VERSION_KEY) == VillagerSoul.SCHEMA_VERSION
+                && "preserved".equals(migratedSoul.getString("custom_addon_note")),
+            "VillagerSoul schema migration must upgrade to v1 while preserving unknown fields.");
+
+        // 2. Verify domain port adapters against the real ServerLevel (Stage 1.3).
+        BlockPos centerOne = helper.absolutePos(new BlockPos(2, 1, 1));
+        BlockPos centerTwo = helper.absolutePos(new BlockPos(26, 1, 1));
+        VillageRegistry.villageId(helper.getLevel(), centerOne);
+        VillageRegistry.villageId(helper.getLevel(), centerTwo);
+        VillageRegistry.isStorageForVillage(helper.getLevel(), centerOne, storageOne);
+        VillageRegistry.isWorkBlockForVillage(helper.getLevel(), centerOne, furnaceOne);
+        VillageRegistry.isStorageForVillage(helper.getLevel(), centerTwo, storageTwo);
+
+        Container chestOne = (Container) helper.getLevel().getBlockEntity(storageOne);
+        Container chestTwo = (Container) helper.getLevel().getBlockEntity(storageTwo);
+        helper.assertTrue(chestOne != null && chestTwo != null, "Both village chests must exist.");
+        chestOne.setItem(0, new ItemStack(Items.RAW_IRON, 4));
+        chestOne.setItem(1, new ItemStack(Items.COAL, 1));
+
+        var worldPort = VillageRegistry.createWorldAccessPort(helper.getLevel());
+        var storagePort = VillageRegistry.createStorageAccessPort(helper.getLevel());
+        var persistencePort = VillageRegistry.createPersistencePort(helper.getLevel());
+        var catchUpViaPorts = com.abs.livingvillages.domain.SettlementPorts.evaluateCatchUpViaPorts(
+            worldPort,
+            storagePort,
+            centerOne.getX(), centerOne.getY(), centerOne.getZ(),
+            800L,
+            "minecraft:raw_iron",
+            "minecraft:coal",
+            "minecraft:iron_ingot"
+        );
+        helper.assertTrue(
+            catchUpViaPorts.smeltedCount() == 4
+                && persistencePort.schemaVersion() == VillageRegistry.SCHEMA_VERSION,
+            "Domain ports adapter must query world and storage state accurately for catch-up smelting.");
+
+        // 3. Verify Elder panel specialist mastery summary (Stage 3.4).
+        oneB.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_BUILDER);
+        VillagerProgression.recordCompletedWork(
+            oneB,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER,
+            12,
+            true,
+            200L
+        );
+        List<Villager> groupOne = VillageArea.findVillagers(helper.getLevel(), centerOne);
+        VillageElder.ensureElder(helper.getLevel(), centerOne, groupOne);
+        Villager elderOne = groupOne.stream().filter(VillageElder::isElder).findFirst().orElse(null);
+        helper.assertTrue(elderOne != null, "Village one must elect an elder.");
+        var panelSnapshot = VillageElder.createPanelSnapshot(helper.getLevel(), elderOne, null);
+        helper.assertTrue(
+            panelSnapshot.notice().contains("Мастера:") && panelSnapshot.notice().contains("Строитель ур. 2"),
+            "Elder panel snapshot must include the specialist mastery summary when villagers earn XP.");
+
+        // 4. Verify automatic neighbor discovery and trade via tryTradeWithKnownNeighbors (Stage 5.3).
+        chestOne.setItem(2, new ItemStack(Items.BREAD, 12));
+        chestTwo.setItem(0, new ItemStack(Items.OAK_PLANKS, 24));
+        int completedTrades = VillageRegistry.tryTradeWithKnownNeighbors(helper.getLevel(), centerOne, 4, 8);
+        helper.assertTrue(
+            completedTrades == 1
+                && VillageRegistry.getDiplomaticStanding(helper.getLevel(), centerOne, centerTwo) > 0,
+            "tryTradeWithKnownNeighbors must automatically discover the loaded neighbor and execute surplus trade.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {

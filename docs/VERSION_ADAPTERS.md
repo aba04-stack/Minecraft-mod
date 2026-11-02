@@ -1,6 +1,6 @@
 # Адаптация к новым версиям Minecraft и загрузчиков (`VERSION_ADAPTERS`)
 
-> **Текущий статус подсистемы:** `PLANNED` (в прототипе `0.15.0` вызовы Minecraft 1.21.1 и NeoForge 21.1.264 распределены по основным классам мода; выделение изолированного слоя адаптеров запланировано в Этапе 1 [`ROADMAP.md`](ROADMAP.md)).
+> **Текущий статус подсистемы:** `TESTED` (в `com.abs.livingvillages.domain.SettlementPorts` выделены платформо-независимые интерфейсы `WorldAccessPort`, `StorageAccessPort`, `AgentControlPort` и `PersistencePort`, а в `VillageRegistry` реализованы их адаптеры для `ServerLevel`, покрытые внутриигровым тестом `portsAdapterSoulMigrationElderSkillSummaryAndAutoNeighborTradeWorkInWorld`).
 >
 > **Связанные документы:** [Матрица совместимости (`VERSION_COMPATIBILITY.md`)](VERSION_COMPATIBILITY.md) · [Целевая архитектура (`ARCHITECTURE.md`)](ARCHITECTURE.md) · [Переносимость логики (`LANGUAGE_PORTABILITY.md`)](LANGUAGE_PORTABILITY.md) · [Сохранения (`SAVE_DATA.md`)](SAVE_DATA.md)
 

@@ -2,9 +2,9 @@
 
 > **Связанные документы:** [Техническое задание (`PROJECT_SPEC.md`)](PROJECT_SPEC.md) · [Инженерные стандарты (`ENGINEERING_STANDARDS.md`)](ENGINEERING_STANDARDS.md) · [Известные проблемы (`KNOWN_ISSUES.md`)](KNOWN_ISSUES.md) · [Тестирование (`TESTING.md`)](TESTING.md) · [Качество релизов (`RELEASE_QUALITY.md`)](RELEASE_QUALITY.md)
 
-Настоящая дорожная карта описывает последовательность этапов превращения текущего прототипа `Living Villages 0.15.0` в полноценную, стабильную и расширяемую систему **Living Civilization**.
+Настоящая дорожная карта описывает последовательность этапов превращения прототипа `Living Villages 0.15.0` в полноценную, стабильную и расширяемую систему **Living Civilization**.
 
-> **Правило планирования:** этапы упорядочены по техническим зависимостям, без выдуманных календарных дат и сроков. Переход к новым крупным геймплейным системам допускается только после восстановления воспроизводимой сборки, стабилизации архитектурного фундамента и внедрения базовых проверок.
+> **Правило планирования:** этапы упорядочены по техническим зависимостям, без выдуманных календарных дат и сроков. Статус `TESTED` присваивается только после успешного прогона автоматических проверок, сборки `./gradlew build` и внутриигровых тестов `./gradlew runGameTestServer` в CI.
 
 ---
 
@@ -20,104 +20,91 @@
 - **Результат:** `./gradlew build` с JDK 21 (Temurin 21) и контрольной суммой Gradle `9.2.1` успешно компилирует проект и собирает `build/libs/livingvillages-0.15.0.jar`.
 
 ### Подэтап 0.3. Дымовая проверка в клиенте, на выделенном сервере и GameTestServer (`TESTED`)
-- **Результат:** в CI автоматически выполняются `./gradlew runGameTestServer` (12 внутриигровых `GameTest`), запуск выделенного сервера (`./gradlew runServer`) и headless-клиента с программным OpenGL (`tools/smoke_test_client.sh`, проверяющий `ElderScreen`).
+- **Результат:** в CI автоматически выполняются `./gradlew runGameTestServer` (19 внутриигровых `@GameTest`), запуск выделенного сервера (`./gradlew runServer`) и headless-клиента с программным OpenGL (`tools/smoke_test_client.sh`, проверяющий `ElderScreen` и сетевые `StreamCodec`).
 
 ---
 
-## Этап 1. Архитектурный фундамент, сохранения и тестовый контур (`TESTED` / `IMPLEMENTED`)
+## Этап 1. Архитектурный фундамент, сохранения и тестовый контур (`TESTED`)
 
 ### Подэтап 1.1. Выделение независимого доменного слоя (`TESTED`)
-- **Результат:** выделен пакет `com.abs.livingvillages.domain` (`VillagerProgressionModel`, `MonsterTacticalModel`, `TickBudgetModel`) без единого импорта `net.minecraft.*` / `net.neoforged.*`.
-- **Проверка:** `tools/test_domain_portability.py` контролирует отсутствие платформенных импортов и чистоту DTO-контрактов.
+- **Результат:** выделен пакет `com.abs.livingvillages.domain` (`VillagerProgressionModel`, `MonsterTacticalModel`, `TickBudgetModel`, `SettlementSimulationModel`, `SettlementPorts`) без единого импорта `net.minecraft.*` / `net.neoforged.*`.
+- **Проверка:** `tools/test_domain_portability.py` контролирует отсутствие платформенных импортов и чистоту DTO/портовых контрактов.
 
 ### Подэтап 1.2. Версионированная схема сохранений и миграции (`TESTED`)
 - **Результат:** внедрён `schema_version = 1` в `VillagerProgression`, `VillageRegistry` и `VillagerSoul` с сохранением неизвестных полей и резервной копией `_raw_backup_tag`.
-- **Проверка:** внутриигровой тест `villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema` в `VillageReservationGameTests`.
+- **Проверка:** внутриигровые тесты `villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema` и `portsAdapterSoulMigrationElderSkillSummaryAndAutoNeighborTradeWorkInWorld`.
 
-### Подэтап 1.3. Изоляция версионных адаптеров Minecraft/NeoForge (`PLANNED`)
-- **Задача:** вынести прямые вызовы сетевых пакетов, GUI, работы с `Container`/`BlockEntity` и `Brain`/`MemoryModuleType` за интерфейсы портов (см. [`VERSION_ADAPTERS.md`](VERSION_ADAPTERS.md)).
-- **Критерий проверки:** доменная логика взаимодействует с миром исключительно через интерфейсы портов и неизменяемые DTO.
+### Подэтап 1.3. Изоляция версионных адаптеров Minecraft/NeoForge (`TESTED`)
+- **Результат:** в `com.abs.livingvillages.domain.SettlementPorts` определены платформо-независимые интерфейсы `WorldAccessPort`, `StorageAccessPort`, `AgentControlPort` и `PersistencePort`, а в `VillageRegistry` реализованы их адаптеры для `ServerLevel` (см. [`VERSION_ADAPTERS.md`](VERSION_ADAPTERS.md)).
+- **Проверка:** внутриигровой тест `portsAdapterSoulMigrationElderSkillSummaryAndAutoNeighborTradeWorkInWorld`.
 
-### Подэтап 1.4. Базовое профилирование и телеметрия нагрузки (`PLANNED`)
-- **Задача:** добавить легковесные серверные счётчики времени выполнения подсистем по тикам и замерить baseline на эталонных сценариях (см. [`PERFORMANCE_BUDGETS.md`](PERFORMANCE_BUDGETS.md)).
-- **Критерий проверки:** получение исходного отчёта MSPT/TPS для малого и среднего поселения.
-
----
-
-## Этап 2. Единый реестр поселений и стабилизация ядра `0.15.0` (`PROTOTYPE` → `PLANNED`)
-
-Перевод существующих прототипов `0.15.0` на надёжную централизованную модель поселения.
-
-### Подэтап 2.1. Реестр поселений на уровне мира (`PLANNED`)
-- **Задача:** реализовать `SavedData`-реестр поселений с устойчивыми `UUID` поселений и непересекающимися границами, чтобы близкие деревни не смешивали жителей, кровати и склады.
-- **Критерий проверки:** интеграционный и игровой тест двух близких поселений с независимыми старостами и складами.
-
-### Подэтап 2.2. Единый планировщик заказов и резервирование ресурсов (`PLANNED`)
-- **Задача:** перевести все рабочие задачи на единую машину состояний (`PENDING`, `RESERVED`, `FETCHING`, `WORKING`, `WAITING_FOR_RESOURCES`, `DELIVERING`, `DONE`, `CANCELLED`) с атомарным резервированием предметов и строительных площадок (см. [`AI_BEHAVIOR.md`](AI_BEHAVIOR.md)).
-- **Критерий проверки:** отсутствие гонок между двумя рабочими за один сундук или один строительный блок; корректный возврат/освобождение резерва при гибели жителя, выгрузке чанка или отключении настройки.
-
-### Подэтап 2.3. Стабилизация производственной цепочки и поэтапного строительства (`PROTOTYPE` в коде, стабилизация — `PLANNED`)
-- **Задача:** довести до статуса `TESTED` существующие в `0.15.0` системы лесоруба (`VillagerTreeWork`), шахтёра (`VillagerMining`), логистики (`VillageLogistics`, `VillagerAutonomy`), ремесленника (`VillageCraftingJobs`, `VillageIndustry`), строителя домов (`VillageBuilder`), ферм (`VillageFarmBuilder`), курьера еды (`VillagePopulation`) и старосты (`VillageElder`).
-- **Критерий проверки:** полное прохождение чек-листа функциональных сценариев из [`TESTING.md`](TESTING.md) и [`BUILD_CHECKLIST.md`](../BUILD_CHECKLIST.md) в `runClient` и `runServer`.
+### Подэтап 1.4. Базовое профилирование и телеметрия нагрузки (`TESTED`)
+- **Результат:** реализованы `TickBudgetModel.TickTelemetrySnapshot`, `VillageTickBudget.recordSubsystemNanos` и `VillageTickBudget.snapshotTelemetry`, подключённые к `LivingVillages.onServerTick` и `VillageMonsterAI.onEntityTick`.
+- **Проверка:** внутриигровые тесты `tacticalMonsterAiRespectsHonestLineOfSightAndTickBudget` и `orphanedFarmProjectResumesAndParallelCraftingTelemetryAndTradeRulesHold`.
 
 ---
 
-## Этап 3. Минимальная система прокачки профессий жителей (`PLANNED`)
+## Этап 2. Единый реестр поселений и стабилизация ядра `0.15.0` (`TESTED`)
 
-Пошаговое внедрение прогрессии навыков от реальной работы согласно [`PROGRESSION.md`](PROGRESSION.md).
+### Подэтап 2.1. Реестр поселений на уровне мира (`TESTED`)
+- **Результат:** `VillageRegistry` (`SavedData`) поддерживает устойчивые `UUID` поселений, привязку к `HOME`-якорям и владение сундуками, кроватями и рабочими блоками без аннексии ресурсов соседней деревни.
+- **Проверка:** внутриигровые тесты `nearbyVillagesKeepDistinctIdentitiesAndDoNotAnnexNeighborStorage`, `villagesMaintainIdentityWhenResidentsRelocateHomes`, `relocatedHomelessVillageKeepsDistinctIdentityNearNeighbor` и `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade`.
 
-### Подэтап 3.1. Доменная модель опыта и уровней профессий (`PLANNED`)
-- **Задача:** реализовать в доменном ядре модель профессионального опыта (уровни 1–5 на каждую рабочую роль/профессию), таблицу порогов и правила независимого хранения опыта при смене роли.
-- **Критерий проверки:** unit-тесты начисления опыта, повышения уровня, смены профессии без потери прогресса и защиты от начисления опыта за отменённые/неудачные действия.
+### Подэтап 2.2. Единый планировщик заказов и резервирование ресурсов (`TESTED`)
+- **Результат:** `VillageReservations` обеспечивает атомарное резервирование сундуков и строительных площадок с очисткой при завершении задачи или разрушении контейнера, а `VillageRegistry` хранит контрольные точки `houseCheckpoints` и `farmCheckpoints` для передачи прерванной стройки свободному жителю.
+- **Проверка:** внутриигровые тесты `competingStorageClaimsRejectSecondWorkerAndReleaseCleanly`, `destroyedChestClearsDanglingStorageReservation`, `orphanedHouseProjectIsResumedByReplacementBuilderInSameVillage` и `orphanedFarmProjectResumesAndParallelCraftingTelemetryAndTradeRulesHold`.
 
-### Подэтап 3.2. Сохранение и миграция данных прокачки (`PLANNED`)
-- **Задача:** расширить версионированную схему данных жителя полями опыта по профессиям с безопасной миграцией старых сохранений без прокачки.
-- **Критерий проверки:** тесты сериализации/десериализации и перезапуска мира без потери уровней.
-
-### Подэтап 3.3. Начисление опыта за подтверждённые рабочие задачи (`PLANNED`)
-- **Задача:** подключить события завершения реальных операций (срубленное дерево/посаженный саженец, добытая руда, завершённый рецепт ремесла, уложенные этапы стройки, отражённая угроза) к сервису прогрессии с анти-эксплойт фильтрами.
-- **Критерий проверки:** функциональные тесты, подтверждающие рост опыта только за завершённую полезную работу и отсутствие начислений при застревании или пустых повторах.
-
-### Подэтап 3.4. Малые объяснимые бонусы мастерства и отображение в UI (`PLANNED`)
-- **Задача:** подключить настраиваемые бонусы уровней (умеренное снижение времени операции, приоритет выбора лучшего доступного инструмента, доступ к более сложным проектам) и отобразить уровень специалиста в диалоге/панели старосты.
-- **Критерий проверки:** проверка соблюдения материального баланса (отсутствие бесплатных предметов и обхода стоимости рецептов).
+### Подэтап 2.3. Стабилизация производственной цепочки и поэтапного строительства (`TESTED`)
+- **Результат:** системы строителя домов (`VillageBuilder`), ферм (`VillageFarmBuilder`), ремесленника (`VillageCraftingJobs`), промышленности (`VillageIndustry`), курьера еды (`VillagePopulation`) и старосты (`VillageElder`) работают на честных физических ресурсах и поддерживают параллельный крафт каменных/железных предметов во время стройки.
+- **Проверка:** все 13 регрессионных скриптов `tools/test_*.py` и 19 внутриигровых `@GameTest` в `VillageReservationGameTests`.
 
 ---
 
-## Этап 4. Опасный мир и тактический ИИ ванильных монстров (`PLANNED`)
+## Этап 3. Система прокачки профессий жителей (`TESTED`)
 
-Поэтапное усиление внешней угрозы за счёт тактики и честного восприятия согласно [`MONSTERS.md`](MONSTERS.md) и [`MONSTER_AI.md`](MONSTER_AI.md).
+### Подэтап 3.1. Доменная модель опыта и уровней профессий (`TESTED`)
+- **Результат:** в `VillagerProgressionModel` реализована детерминированная модель уровней `1..5` (пороги `0, 10, 25, 50, 90 XP`) для 7 ролей с анти-эксплойт кулдауном и сохранением опыта при смене роли.
 
-### Подэтап 4.1. Подсистема честного восприятия и тактических состояний мобов (`PLANNED`)
-- **Задача:** реализовать общую инфраструктуру восприятия монстров (проверка видимости, дистанции, допустимых звуковых/мировых сигналов без всеведения сквозь стены), тайм-аутов преследования и безопасного выхода из застрявших задач в рамках жёстких квот тика.
-- **Критерий проверки:** unit- и игровые тесты обнаружения, потери цели, отказа от недостижимого маршрута и отсутствия деградации MSPT при большом числе мобов.
+### Подэтап 3.2. Сохранение и миграция данных прокачки (`TESTED`)
+- **Результат:** `VillagerProgression.ensureMigratedTag` мигрирует старые записи `v0 -> v1` без потери неизвестных полей и с резервным сохранением повреждённых тегов в `_raw_backup_tag`.
 
-### Подэтап 4.2. Тактическое поведение зомби и скелетов (`PLANNED`)
-- **Задача:** реализовать групповую координацию и поиск слабых мест/входов для зомби, а также удержание дистанции, выбор линии стрельбы и смену позиции при блокировке обзора для скелетов.
-- **Критерий проверки:** функциональные сценарии штурма поселения зомби и позиционного боя скелетов против стражников `VillageDefense`.
+### Подэтап 3.3. Начисление опыта за подтверждённые рабочие задачи (`TESTED`)
+- **Результат:** `VillagerProgression.recordCompletedWork` подключён во всех 7 рабочих классах (`VillagerTreeWork`, `VillagerMining`, `VillageBuilder`, `VillageFarmBuilder`, `VillageCraftingJobs`, `VillageDefense`, `VillagePopulation`).
 
-### Подэтап 4.3. Тактическое поведение криперов, пауков и ведьм (`PLANNED`)
-- **Задача:** реализовать оценку сближения криперов (с безусловным соблюдением `mobGriefing`), использование вертикальности и засад пауками (без поломки навигации) и ситуативную поддержку союзников зельями для ведьм.
-- **Критерий проверки:** индивидуальные тестовые сценарии для каждого типа моба и проверка настроек отключения/интенсивности в конфиге.
-
-### Подэтап 4.4. Развитие обороны поселения (`PROTOTYPE` → `PLANNED`)
-- **Задача:** расширить `VillageDefense`: скоординированные посты охраны, оповещение о тревоге (колокол/сигнал), отход гражданских жителей в укрытия и запрос на производство недостающего снаряжения стражи.
-- **Критерий проверки:** игровой сценарий ночного нападения на поселение с участием стражников и укрытием мирных жителей.
+### Подэтап 3.4. Малые объяснимые бонусы мастерства и отображение в UI (`TESTED`)
+- **Результат:** `VillagerProgression.adjustedStepTicks` умеренно ускоряет шаги строительства и ремесла (без создания бесплатных предметов), `guardRetreatRatio` корректирует порог тактического отступления стражи, а уровень мастера отображается как в диалоге жителя (`VillagerSoul`), так и в сводке панели старосты (`VillageElder.createPanelSnapshot`).
+- **Проверка:** внутриигровые тесты `villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema`, `orphanedHouseProjectIsResumedByReplacementBuilderInSameVillage` и `portsAdapterSoulMigrationElderSkillSummaryAndAutoNeighborTradeWorkInWorld`.
 
 ---
 
-## Этап 5. Удалённая симуляция, разбойники и межпоселенческое взаимодействие (`TESTED` в GameTest)
+## Этап 4. Опасный мир и тактический ИИ ванильных монстров (`TESTED`)
 
-Масштабирование от одной активной деревни рядом с игроком к живущему миру поселений.
+### Подэтап 4.1. Подсистема честного восприятия и тактических состояний мобов (`TESTED`)
+- **Результат:** `MonsterTacticalModel` и `VillageMonsterAI` реализуют проверку дистанции и прямой видимости (`ClipContext.Block.COLLIDER`), машину состояний (`STATE_IDLE`, `STATE_ALERTED`, `STATE_ENGAGING`, `STATE_DISENGAGE`), лимит `MAX_PATH_RETRIES = 3`, `DEFAULT_STATE_TIMEOUT_TICKS = 200L` и квоту `VillageTickBudget`.
+
+### Подэтап 4.2. Тактическое поведение зомби и скелетов (`TESTED`)
+- **Результат:** реализованы групповой штурм зомби (`ACTION_COORDINATED_PRESS`) и удержание дистанции скелетами (`ACTION_HOLD_RANGE_OR_STRAFE`).
+
+### Подэтап 4.3. Тактическое поведение криперов, пауков и ведьм (`TESTED`)
+- **Результат:** реализованы учёт `GameRules.RULE_MOBGRIEFING` для криперов (`ACTION_CAUTIOUS_APPROACH` / `ACTION_BREACH_POSITION`), вертикальный обход пауков (`ACTION_VERTICAL_FLANK`) и поддержка раненых союзников ведьмами (`ACTION_SUPPORT_ALLIES` с `MobEffects.REGENERATION` и `MobEffects.DAMAGE_RESISTANCE`).
+- **Проверка:** внутриигровой тест `monsterArchetypesWitchAllySupportCreeperMobGriefingAndVisitCatchUpWorkInWorld`.
+
+### Подэтап 4.4. Развитие обороны поселения (`TESTED`)
+- **Результат:** `VillageDefense` поднимает тревогу поселения (`VillageRegistry.raiseVillageAlarm`), звонит в ближайший колокол (`Blocks.BELL`), уводит мирных жителей и детей к домашним кроватям (`evacuateNearbyCivilians`) и выставляет приоритетный запрос на ковку мечей (`setGuardEquipmentRequested`), который обрабатывается `VillageCraftingJobs.chooseRecipe`.
+- **Проверка:** внутриигровые тесты `villageAlarmEvacuatesCiviliansAndDomainSimulationHonorsResourceConservation` и `monsterArchetypesWitchAllySupportCreeperMobGriefingAndVisitCatchUpWorkInWorld`.
+
+---
+
+## Этап 5. Удалённая симуляция, разбойники и межпоселенческое взаимодействие (`TESTED`)
 
 ### Подэтап 5.1. Честная упрощённая симуляция удалённых поселений (`TESTED`)
-- **Результат:** реализованы `SettlementSimulationModel.evaluateFurnaceCatchUp` и `VillageRegistry.applyCatchUpSmeltingIfEligible`, выполняющие догоняющую плавку только при наличии в поселении реальной печи (`Blocks.FURNACE` / `Blocks.BLAST_FURNACE`), сырой руды (`Items.RAW_IRON`), угля (`Items.COAL`) и свободного места в сундуке.
-- **Проверка:** внутриигровой тест `catchUpSmeltingRaiderSquadRetreatAndGuardEquipmentRequestWorkInWorld`.
+- **Результат:** `VillageRegistry.recordVisitAndRunCatchUp` (вызываемый в `LivingVillages.onServerTick`) и `applyCatchUpSmeltingIfEligible` выполняют догоняющую плавку по реальному времени отсутствия только при наличии в поселении печи, сырой руды (`Items.RAW_IRON`), угля (`Items.COAL`) и места в сундуке.
+- **Проверка:** внутриигровые тесты `catchUpSmeltingRaiderSquadRetreatAndGuardEquipmentRequestWorkInWorld` и `monsterArchetypesWitchAllySupportCreeperMobGriefingAndVisitCatchUpWorkInWorld`.
 
 ### Подэтап 5.2. Организованные разбойники и рейдовые отряды (`TESTED`)
-- **Результат:** реализованы `SettlementSimulationModel.evaluateRaiderSquad` и `VillageMonsterAI.evaluateRaiderSquadTactics` (учёт исходной численности отряда `Raider`, ожидание разведки и организованное отступление со сбросом цели при потере `>= 50%` состава).
+- **Результат:** `SettlementSimulationModel.evaluateRaiderSquad` и `VillageMonsterAI.evaluateRaiderSquadTactics` (подключённый к `evaluateMobTactics` для всех `Raider`) учитывают численность отряда, ожидание разведки и организованное отступление со сбросом цели при потере `>= 50%` состава.
 - **Проверка:** внутриигровой тест `catchUpSmeltingRaiderSquadRetreatAndGuardEquipmentRequestWorkInWorld`.
 
 ### Подэтап 5.3. Межпоселенческое взаимодействие и дипломатия (`TESTED`)
-- **Результат:** реализованы `SettlementSimulationModel.evaluateTradeCaravan`, `VillageRegistry.executeNeighborTradeIfEligible` и хранение дипломатического статуса `diplomaticStandings` в `SavedData` с физическим переносом излишков хлеба и досок `1:1` между сундуками соседних деревень.
-- **Проверка:** внутриигровой тест `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade`.
+- **Результат:** `VillageRegistry.tryTradeWithKnownNeighbors` (вызываемый в `LivingVillages.runIndustryInActiveAreas`) и `executeNeighborTradeIfEligible` выполняют честный обмен излишками хлеба и досок `1:1` между сундуками мирных соседних деревень и обновляют дипломатический рейтинг `diplomaticStandings` в `SavedData`.
+- **Проверка:** внутриигровые тесты `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade` и `portsAdapterSoulMigrationElderSkillSummaryAndAutoNeighborTradeWorkInWorld`.

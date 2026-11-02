@@ -683,6 +683,135 @@ public final class VillageRegistry extends SavedData {
         return true;
     }
 
+    /**
+     * Automatically checks known loaded neighboring settlements in this dimension and executes
+     * honest 1:1 surplus trade caravans when eligible (Stage 5.3 live scheduler hook).
+     */
+    public static int tryTradeWithKnownNeighbors(
+        ServerLevel level,
+        BlockPos center,
+        int breadReserveCount,
+        int plankReserveCount
+    ) {
+        if (level == null || center == null) return 0;
+        UUID selfId = villageId(level, center);
+        if (selfId == null) return 0;
+        VillageRegistry registry = get(level);
+        List<Map.Entry<UUID, BlockPos>> entries = new ArrayList<>(registry.villageAnchors.entrySet());
+        entries.sort(Comparator.comparing(e -> e.getKey().toString()));
+        int completed = 0;
+        for (Map.Entry<UUID, BlockPos> entry : entries) {
+            if (selfId.equals(entry.getKey())) continue;
+            BlockPos neighborAnchor = entry.getValue();
+            if (neighborAnchor == null || !level.hasChunkAt(neighborAnchor)) continue;
+            if (executeNeighborTradeIfEligible(level, center, neighborAnchor, breadReserveCount, plankReserveCount)
+                || executeNeighborTradeIfEligible(level, neighborAnchor, center, breadReserveCount, plankReserveCount)) {
+                completed++;
+            }
+        }
+        return completed;
+    }
+
+    public static com.abs.livingvillages.domain.SettlementPorts.WorldAccessPort createWorldAccessPort(ServerLevel level) {
+        return new com.abs.livingvillages.domain.SettlementPorts.WorldAccessPort() {
+            @Override
+            public boolean isPositionLoaded(int x, int y, int z) {
+                return level != null && level.hasChunkAt(new BlockPos(x, y, z));
+            }
+
+            @Override
+            public boolean isVillageAlarmActive(int x, int y, int z, long gameTime) {
+                return level != null && VillageRegistry.isVillageAlarmActive(level, new BlockPos(x, y, z), gameTime);
+            }
+
+            @Override
+            public boolean hasOwnedFurnaceNear(int x, int y, int z) {
+                return level != null && VillageRegistry.hasOwnedFurnaceNear(level, new BlockPos(x, y, z));
+            }
+        };
+    }
+
+    public static com.abs.livingvillages.domain.SettlementPorts.StorageAccessPort createStorageAccessPort(ServerLevel level) {
+        return new com.abs.livingvillages.domain.SettlementPorts.StorageAccessPort() {
+            @Override
+            public int countItem(int x, int y, int z, String itemId) {
+                if (level == null) return 0;
+                Item item = resolvePortItem(itemId);
+                if (item == Items.AIR) return 0;
+                int total = 0;
+                for (Container c : findAvailableOwnedStorages(level, new BlockPos(x, y, z))) {
+                    total += countItemInContainer(c, item);
+                }
+                return total;
+            }
+
+            @Override
+            public int availableRoomForItem(int x, int y, int z, String itemId) {
+                if (level == null) return 0;
+                Item item = resolvePortItem(itemId);
+                if (item == Items.AIR) return 0;
+                int total = 0;
+                for (Container c : findAvailableOwnedStorages(level, new BlockPos(x, y, z))) {
+                    total += VillageRegistry.availableRoomForItem(c, item);
+                }
+                return total;
+            }
+
+            @Override
+            public boolean transferItem(int fromX, int fromY, int fromZ, int toX, int toY, int toZ, String itemId, int count) {
+                if (level == null || count <= 0) return false;
+                Item item = resolvePortItem(itemId);
+                if (item == Items.AIR) return false;
+                Container from = findNearestOwnedStorageWithItem(level, new BlockPos(fromX, fromY, fromZ), item, count);
+                List<Container> dests = findAvailableOwnedStorages(level, new BlockPos(toX, toY, toZ));
+                if (from == null || dests.isEmpty() || !canFitItemInContainer(dests.get(0), item, count)) return false;
+                int removed = removeItemFromContainer(from, item, count);
+                if (removed != count) return false;
+                insertItemIntoContainer(dests.get(0), new ItemStack(item, removed));
+                from.setChanged();
+                dests.get(0).setChanged();
+                return true;
+            }
+        };
+    }
+
+    public static com.abs.livingvillages.domain.SettlementPorts.PersistencePort createPersistencePort(ServerLevel level) {
+        return new com.abs.livingvillages.domain.SettlementPorts.PersistencePort() {
+            @Override
+            public int schemaVersion() {
+                return SCHEMA_VERSION;
+            }
+
+            @Override
+            public int readDiplomaticStanding(int ax, int ay, int az, int bx, int by, int bz) {
+                return getDiplomaticStanding(level, new BlockPos(ax, ay, az), new BlockPos(bx, by, bz));
+            }
+
+            @Override
+            public void writeDiplomaticStanding(int ax, int ay, int az, int bx, int by, int bz, int standing) {
+                if (level == null) return;
+                UUID idA = villageId(level, new BlockPos(ax, ay, az));
+                UUID idB = villageId(level, new BlockPos(bx, by, bz));
+                if (idA == null || idB == null || idA.equals(idB)) return;
+                VillageRegistry registry = get(level);
+                registry.diplomaticStandings.put(pairKey(idA, idB), standing);
+                registry.setDirty();
+            }
+        };
+    }
+
+    private static Item resolvePortItem(String itemId) {
+        if (itemId == null) return Items.AIR;
+        return switch (itemId) {
+            case "minecraft:raw_iron" -> Items.RAW_IRON;
+            case "minecraft:coal" -> Items.COAL;
+            case "minecraft:iron_ingot" -> Items.IRON_INGOT;
+            case "minecraft:bread" -> Items.BREAD;
+            case "minecraft:oak_planks" -> Items.OAK_PLANKS;
+            default -> Items.AIR;
+        };
+    }
+
     public static void setGuardEquipmentRequested(ServerLevel level, BlockPos center, boolean requested) {
         if (level == null || center == null) return;
         UUID id = villageId(level, center);

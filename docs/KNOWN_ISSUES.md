@@ -16,7 +16,7 @@
 - **Статус решения:** права `100755` (`+x`) восстановлены для `gradlew`, `BUILD_LOCAL.sh` и `tools/smoke_test_client.sh`.
 
 ### KI-003 (УСТРАНЕНО В CI / `TESTED`) — Полная компиляция с classpath Minecraft/NeoForge и запуск `GameTestServer`
-- **Статус решения:** в локальной песочнице без установленного JDK 21 и доступа к `services.gradle.org` выполняются быстрые Python/shell/JSON-проверки, а полная сборка `./gradlew build`, `./gradlew runGameTestServer` (12 внутриигровых `GameTest`), дымовой тест выделенного сервера и headless-клиента выполняются и подтверждены в GitHub Actions CI (`ubuntu-latest`, Temurin Java 21, run `41431805194`).
+- **Статус решения:** в локальной песочнице без установленного JDK 21 и доступа к `services.gradle.org` выполняются быстрые Python/shell/JSON-проверки, а полная сборка `./gradlew build`, `./gradlew runGameTestServer` (19 внутриигровых `GameTest`), дымовой тест выделенного сервера и headless-клиента выполняются и подтверждены в GitHub Actions CI (`ubuntu-latest`, Temurin Java 21).
 
 ---
 
@@ -46,11 +46,8 @@
 - **Исходная проблема:** активный проект строительства дома или фермы приостанавливал все ремесленные заказы в поселении, включая рецепты без досок.
 - **Статус решения:** `VillageCraftingJobs` и `SettlementSimulationModel.canCraftInParallelWithConstruction` приостанавливают только рецепты, потребляющие деревянные доски (`recipeConsumesPlanks`), тогда как заказы из камня и железа при наличии готовых палочек могут выполняться параллельно.
 
-### KI-007 — Вычисление границ поселения вокруг позиции игрока (`LivingVillages.onServerTick`)
-- **Описание:** активные области деревень определяются динамическим поиском жителей в радиусе `village_radius_blocks` вокруг каждого `ServerPlayer` (с объединением зон ближе `64` блоков).
-- **Риск:** при наличии двух близко расположенных деревень или перемещении игрока между ними состав жителей, попадающих в выборку `findVillagers`, может смещаться из-за отсутствия постоянного мир-уровневого реестра границ поселений (`SavedData`).
+### KI-007 (МИНИМИЗИРОВАНО В `VillageRegistry` / `TESTED`) — Вычисление границ поселения вокруг позиции игрока (`LivingVillages.onServerTick`, `VillageArea`, `VillageRegistry`)
+- **Описание:** активные области деревень запускаются вокруг каждого `ServerPlayer`, но выбор жителей и привязка имущества (`storageOwners`, `bedOwners`, `workBlockOwners`) выполняются через `VillageArea.selectNearestGroup` (кластеризация по `MemoryModuleType.HOME` с порогом `HOME_CLUSTER_LINK_BLOCKS = 20`) и постоянный `SavedData`-реестр `VillageRegistry`.
+- **Покрытие тестами:** подтверждено внутриигровыми тестами `nearbyVillagesKeepDistinctIdentitiesAndDoNotAnnexNeighborStorage`, `villagesMaintainIdentityWhenResidentsRelocateHomes`, `relocatedHomelessVillageKeepsDistinctIdentityNearNeighbor` и `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade`.
 
-### KI-008 — Блокировка параллельного производства на время активной стройки
-- **Описание:** в `LivingVillages`, `VillageIndustry` и `VillageCraftingJobs` активный проект строительства дома или фермы приостанавливает все остальные фоновые и физические ремесленные заказы в радиусе поселения (`hasActiveProjectNear`), чтобы избежать расхода одних и тех же досок.
-- **Риск:** во время долгой постройки хижины (96 блоков) деревня временно не может параллельно производить инструменты из других несвязанных материалов (например, каменные/железные кирки).
 
