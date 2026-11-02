@@ -135,9 +135,17 @@ public final class VillagerProgression {
         return VillagerProgressionModel.adjustedStepTicks(baseTicks, level, minTicks);
     }
 
+    public static int adjustedDurationTicks(Villager villager, String role, int baseTicks) {
+        return adjustedStepTicks(villager, role, baseTicks, 4);
+    }
+
     public static float guardRetreatRatio(Villager villager) {
         int level = getLevel(villager, VillagerProgressionModel.ROLE_GUARD);
         return VillagerProgressionModel.guardRetreatHealthRatio(level);
+    }
+
+    public static float retreatHealthThreshold(Villager villager, float fallbackRatio) {
+        return villager == null ? fallbackRatio : guardRetreatRatio(villager);
     }
 
     public static String describePrimarySkill(Villager villager) {
