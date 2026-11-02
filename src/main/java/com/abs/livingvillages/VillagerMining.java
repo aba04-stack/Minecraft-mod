@@ -291,7 +291,9 @@ public final class VillagerMining {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, origin, pos)
+                        || !VillageReservations.isStorageAvailable(level, pos, miner)) continue;
                     if (!(level.getBlockEntity(pos) instanceof Container container)) continue;
                     for (int slot = 0; slot < container.getContainerSize(); slot++) {
                         ItemStack stack = container.getItem(slot);
@@ -411,6 +413,8 @@ public final class VillagerMining {
 
         int radius = Math.min(12, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
+        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
+        if (ownershipCenter == null) ownershipCenter = origin;
         BlockPos bestStoragePos = null;
         int bestStorageSlot = -1;
         for (int dx = -radius; dx <= radius; dx++) {
@@ -418,6 +422,8 @@ public final class VillagerMining {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = origin.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
+                        || !VillageReservations.isStorageAvailable(level, pos, villager)
                         || !(level.getBlockEntity(pos) instanceof Container container)) continue;
                     for (int slot = 0; slot < container.getContainerSize(); slot++) {
                         int tier = pickaxeTier(container.getItem(slot));
@@ -455,6 +461,8 @@ public final class VillagerMining {
         }
 
         if (bestStoragePos != null && level.hasChunkAt(bestStoragePos)
+            && VillageRegistry.isStorageForVillage(level, ownershipCenter, bestStoragePos)
+            && VillageReservations.isStorageAvailable(level, bestStoragePos, villager)
             && level.getBlockEntity(bestStoragePos) instanceof Container container
             && bestStorageSlot >= 0 && bestStorageSlot < container.getContainerSize()) {
             if (!held.isEmpty()) {

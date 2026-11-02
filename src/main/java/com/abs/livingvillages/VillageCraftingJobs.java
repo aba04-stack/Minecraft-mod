@@ -154,17 +154,29 @@ public final class VillageCraftingJobs {
             return;
         }
 
-        List<StorageRef> storages = findStorages(level, origin, Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()));
+        List<StorageRef> storages = findStorages(level, origin, Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()), villager);
         if (storages.isEmpty()) {
             data.putLong(NEXT_JOB, now + RETRY_TICKS);
             return;
         }
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class,
-            new AABB(origin).inflate(LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get(), 12.0D,
-                LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()), Villager::isAlive);
+        List<Villager> villagers = VillageArea.findVillagers(level, origin);
         Recipe recipe = chooseRecipe(level, origin, villager, storages, villagers);
         if (recipe == null || !canFitCraftResult(villager.getInventory(), recipe)) {
             // An idle craftsman should not rescan thousands of blocks every few ticks while stock is low.
+            data.putLong(NEXT_JOB, now + RETRY_TICKS);
+            return;
+        }
+        Map<Item, Integer> totalInputs = new LinkedHashMap<>();
+        for (Ingredient ingredient : recipe.inputs()) {
+            totalInputs.merge(ingredient.item(), ingredient.count(), Integer::sum);
+        }
+        Map<Item, Integer> missingInputs = new LinkedHashMap<>();
+        for (Map.Entry<Item, Integer> input : totalInputs.entrySet()) {
+            int missing = Math.max(0, input.getValue() - inventoryCount(villager.getInventory(), input.getKey()));
+            if (missing > 0) missingInputs.put(input.getKey(), missing);
+        }
+        if (!missingInputs.isEmpty() && !VillageReservations.reserveStoragesForItems(level, origin, villager,
+            "crafting", missingInputs, Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()))) {
             data.putLong(NEXT_JOB, now + RETRY_TICKS);
             return;
         }
@@ -196,9 +208,9 @@ public final class VillageCraftingJobs {
             }
         }
 
-        int sticks = accessibleCount(storages, crafter, Items.STICK);
-        int cobble = accessibleCount(storages, crafter, Items.COBBLESTONE);
-        int iron = accessibleCount(storages, crafter, Items.IRON_INGOT);
+        int sticks = availableCount(storages, crafter, Items.STICK);
+        int cobble = availableCount(storages, crafter, Items.COBBLESTONE);
+        int iron = availableCount(storages, crafter, Items.IRON_INGOT);
         int pickaxes = countTools(storages, villagers, VillageCraftingJobs::isPickaxe, ToolUse.MINER);
         int stoneOrBetter = countTools(storages, villagers, VillageCraftingJobs::isStoneOrBetterPickaxe, ToolUse.MINER);
         int ironOrBetter = countTools(storages, villagers, VillageCraftingJobs::isIronOrBetterPickaxe, ToolUse.MINER);
@@ -216,7 +228,7 @@ public final class VillageCraftingJobs {
         }
         if (pickaxeGoal != null) {
             if (sticks < 2) {
-                int plankReserve = pickaxeGoal.output().is(Items.WOODEN_PICKAXE) ? 5 : 2;
+                int plankReserve = pickaxeGoal.output() == Items.WOODEN_PICKAXE ? 5 : 2;
                 Item plankForSticks = bestPlanks(storages, crafter, plankReserve);
                 return plankForSticks == null ? null : sticksRecipe(plankForSticks);
             }
@@ -235,7 +247,7 @@ public final class VillageCraftingJobs {
             }
             if (axe != null) {
                 if (sticks < 2) {
-                    int plankReserve = axe.output().is(Items.WOODEN_AXE) ? 5 : 2;
+                    int plankReserve = axe.output() == Items.WOODEN_AXE ? 5 : 2;
                     Item plankForSticks = bestPlanks(storages, crafter, plankReserve);
                     return plankForSticks == null ? null : sticksRecipe(plankForSticks);
                 }
@@ -260,7 +272,7 @@ public final class VillageCraftingJobs {
             if (sword != null) {
                 int neededSticks = 1;
                 if (sticks < neededSticks) {
-                    int plankReserve = sword.output().is(Items.WOODEN_SWORD) ? 4 : 2;
+                    int plankReserve = sword.output() == Items.WOODEN_SWORD ? 4 : 2;
                     Item plankForSticks = bestPlanks(storages, crafter, plankReserve);
                     return plankForSticks == null ? null : sticksRecipe(plankForSticks);
                 }
@@ -298,7 +310,8 @@ public final class VillageCraftingJobs {
         if (!atRouteTarget(villager, level, data, now)) return;
 
         BlockPos storagePos = routeStorage(data);
-        if (!level.hasChunkAt(storagePos) || !(level.getBlockEntity(storagePos) instanceof Container container)) {
+        if (!level.hasChunkAt(storagePos) || !VillageReservations.isStorageAvailable(level, storagePos, villager)
+            || !(level.getBlockEntity(storagePos) instanceof Container container)) {
             clearOwnedRoute(villager, data);
             return;
         }
@@ -414,7 +427,8 @@ public final class VillageCraftingJobs {
         if (!atRouteTarget(villager, level, data, now)) return;
 
         BlockPos storagePos = routeStorage(data);
-        if (!level.hasChunkAt(storagePos) || !(level.getBlockEntity(storagePos) instanceof Container container)
+        if (!level.hasChunkAt(storagePos) || !VillageReservations.isStorageAvailable(level, storagePos, villager)
+            || !(level.getBlockEntity(storagePos) instanceof Container container)
             || !canInsert(container, new ItemStack(recipe.output(), recipe.outputCount()))) {
             clearOwnedRoute(villager, data);
             return;
@@ -496,6 +510,7 @@ public final class VillageCraftingJobs {
     }
 
     private static void clearJob(CompoundTag data) {
+        VillageReservations.release(data, "crafting");
         data.putBoolean(ACTIVE_KEY, false);
         data.remove(STAGE); data.remove(RECIPE); data.remove(STARTED); data.remove(RETRY_AT);
         data.remove(TABLE_X); data.remove(TABLE_Y); data.remove(TABLE_Z); data.remove(CRAFT_STARTED);
@@ -820,22 +835,28 @@ public final class VillageCraftingJobs {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = VillagerRoles.getHome(villager);
         if (origin == null) origin = villager.blockPosition();
-        List<StorageRef> storages = findStorages(level, origin, radius);
-        return storages.stream().filter(ref -> countItem(ref.container(), item) > 0)
-            .sorted(Comparator.comparingDouble(ref -> villager.distanceToSqr(Vec3.atCenterOf(ref.pos()))))
-            .map(ref -> makeTarget(level, villager, ref.pos()))
-            .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        List<StorageRef> storages = findStorages(level, origin, radius, villager);
+        storages.sort(Comparator.comparingDouble(ref -> villager.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
+        for (StorageRef ref : storages) {
+            if (countItem(ref.container(), item) <= 0) continue;
+            StorageTarget target = makeTarget(level, villager, ref.pos());
+            if (target != null && VillageReservations.tryAddStorageReservation(level, villager, ref.pos(), "crafting")) return target;
+        }
+        return null;
     }
 
     private static StorageTarget findStorageWithRoom(ServerLevel level, Villager villager, ItemStack output) {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = VillagerRoles.getHome(villager);
         if (origin == null) origin = villager.blockPosition();
-        List<StorageRef> storages = findStorages(level, origin, radius);
-        return storages.stream().filter(ref -> canInsert(ref.container(), output))
-            .sorted(Comparator.comparingDouble(ref -> villager.distanceToSqr(Vec3.atCenterOf(ref.pos()))))
-            .map(ref -> makeTarget(level, villager, ref.pos()))
-            .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        List<StorageRef> storages = findStorages(level, origin, radius, villager);
+        storages.sort(Comparator.comparingDouble(ref -> villager.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
+        for (StorageRef ref : storages) {
+            if (!canInsert(ref.container(), output)) continue;
+            StorageTarget target = makeTarget(level, villager, ref.pos());
+            if (target != null && VillageReservations.tryAddStorageReservation(level, villager, ref.pos(), "crafting")) return target;
+        }
+        return null;
     }
 
     private static StorageTarget makeTarget(ServerLevel level, Villager villager, BlockPos storage) {
@@ -848,13 +869,15 @@ public final class VillageCraftingJobs {
         return stands.isEmpty() ? null : new StorageTarget(storage.immutable(), stands.get(0));
     }
 
-    private static List<StorageRef> findStorages(ServerLevel level, BlockPos center, int radius) {
+    private static List<StorageRef> findStorages(ServerLevel level, BlockPos center, int radius, Villager owner) {
         List<StorageRef> found = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -6; dy <= 6; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, center, pos)
+                        || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
                     BlockEntity entity = level.getBlockEntity(pos);
                     if (entity instanceof Container container) found.add(new StorageRef(pos.immutable(), container));
                 }
@@ -871,7 +894,11 @@ public final class VillageCraftingJobs {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -6; dy <= 6; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !level.getBlockState(pos).is(block)) continue;
+                    if (!level.hasChunkAt(pos)) continue;
+                    net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
+                    if (!state.is(block)) continue;
+                    if (VillageRegistry.isWorkBlockState(state)
+                        && !VillageRegistry.isWorkBlockForVillage(level, center, pos)) continue;
                     double distance = pos.distSqr(center);
                     if (distance < bestDistance) { bestDistance = distance; best = pos.immutable(); }
                 }

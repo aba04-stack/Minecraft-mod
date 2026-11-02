@@ -86,7 +86,7 @@ public final class VillagePopulation {
         if (foodReadyAdults >= 2) return; // Vanilla handles pairing and the actual birth.
 
         long now = level.getGameTime();
-        List<Container> storages = findStorages(level, center);
+        List<Container> storages = findStorages(level, center, null);
         if (storages.isEmpty() || storedFoodPoints(storages) <= LivingVillagesConfig.POPULATION_FOOD_RESERVE_POINTS.get()) {
             return;
         }
@@ -104,6 +104,7 @@ public final class VillagePopulation {
                 .toList()) {
                 StorageTarget target = findFoodStorage(level, center, courier, recipient, storages);
                 if (target == null) continue;
+                if (!VillageReservations.tryReserveStoragePositions(level, courier, List.of(target.chest()), "food_delivery")) continue;
                 startTrip(courier, center, recipient, target, now);
                 return; // One physical food trip at a time per active village area.
             }
@@ -197,6 +198,7 @@ public final class VillagePopulation {
         BlockPos storagePos = storagePos(data);
         BlockPos stand = routeStand(data);
         if (!level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
+            || !VillageReservations.isStorageAvailable(level, storagePos, courier)
             || !(level.getBlockEntity(storagePos) instanceof Container storage)) {
             finishTrip(courier, data, now);
             return;
@@ -205,7 +207,7 @@ public final class VillagePopulation {
         if (!atStand(courier, stand)) return;
 
         BlockPos center = centerPos(data);
-        List<Container> storages = findStorages(level, center);
+        List<Container> storages = findStorages(level, center, courier);
         Villager recipient = findVillager(level, center, data.getString(TARGET_UUID));
         if (recipient == null || recipient.isBaby() || !recipient.isAlive()
             || foodPoints(recipient) >= BREEDING_FOOD_POINTS) {
@@ -287,7 +289,7 @@ public final class VillagePopulation {
         }
         BlockPos center = centerPos(data);
         BlockPos preferred = storagePos(data);
-        StorageTarget target = findReturnStorage(level, center, courier.blockPosition(), preferred);
+        StorageTarget target = findReturnStorage(level, center, courier.blockPosition(), preferred, courier);
         if (target == null) {
             dropRemainingPackage(level, courier, data, courier.position());
             if (packageCount(data) == 0) finishTrip(courier, data, now);
@@ -303,6 +305,7 @@ public final class VillagePopulation {
         BlockPos storagePos = storagePos(data);
         BlockPos stand = routeStand(data);
         if (!level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
+            || !VillageReservations.isStorageAvailable(level, storagePos, courier)
             || !(level.getBlockEntity(storagePos) instanceof Container storage)) {
             beginReturn(courier, level, data, now);
             return;
@@ -325,19 +328,16 @@ public final class VillagePopulation {
     }
 
     private static Villager findHungryRecipient(ServerLevel level, BlockPos center, Villager courier, CompoundTag courierData) {
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return level.getEntitiesOfClass(Villager.class, area, v -> v != courier && v.isAlive() && !v.isBaby()
+        return VillageArea.findVillagers(level, center).stream()
+            .filter(v -> v != courier && v.isAlive() && !v.isBaby()
                 && foodPoints(v) < BREEDING_FOOD_POINTS && firstPackageItemThatFits(courier, v, courierData) != null)
-            .stream().min(Comparator.comparingInt(VillagePopulation::foodPoints)
+            .min(Comparator.comparingInt((Villager v) -> foodPoints(v))
                 .thenComparing(v -> v.getUUID().toString())).orElse(null);
     }
 
     private static Villager findVillager(ServerLevel level, BlockPos center, String uuid) {
         if (uuid == null || uuid.isBlank()) return null;
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        for (Villager villager : level.getEntitiesOfClass(Villager.class, area)) {
+        for (Villager villager : VillageArea.findVillagers(level, center)) {
             if (villager.isAlive() && villager.getUUID().toString().equals(uuid)) return villager;
         }
         return null;
@@ -354,7 +354,9 @@ public final class VillagePopulation {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -8; dy <= 8; dy++) {
                     BlockPos chest = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(chest) || !isStorage(level.getBlockState(chest))) continue;
+                    if (!level.hasChunkAt(chest) || !isStorage(level.getBlockState(chest))
+                        || !VillageRegistry.isStorageForVillage(level, center, chest)
+                        || !VillageReservations.isStorageAvailable(level, chest, courier)) continue;
                     if (!(level.getBlockEntity(chest) instanceof Container container)) continue;
                     Map<Item, Integer> plan = planFood(container, gap, globalPoints);
                     if (plan == null || !canFit(courier.getInventory(), plan) || !canFit(recipient.getInventory(), plan)) continue;
@@ -371,10 +373,15 @@ public final class VillagePopulation {
         return best;
     }
 
-    private static StorageTarget findReturnStorage(ServerLevel level, BlockPos center, BlockPos origin, BlockPos preferred) {
-        if (level.hasChunkAt(preferred) && isStorage(level.getBlockState(preferred))) {
+    private static StorageTarget findReturnStorage(ServerLevel level, BlockPos center, BlockPos origin,
+                                                   BlockPos preferred, Villager courier) {
+        if (level.hasChunkAt(preferred) && isStorage(level.getBlockState(preferred))
+            && VillageRegistry.isStorageForVillage(level, center, preferred)
+            && VillageReservations.isStorageAvailable(level, preferred, courier)) {
             BlockPos stand = findStandNear(level, preferred, origin);
-            if (stand != null) return new StorageTarget(preferred.immutable(), stand.immutable());
+            if (stand != null && VillageReservations.tryAddStorageReservation(level, courier, preferred, "food_delivery")) {
+                return new StorageTarget(preferred.immutable(), stand.immutable());
+            }
         }
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
         StorageTarget best = null;
@@ -384,9 +391,11 @@ public final class VillagePopulation {
                 for (int dy = -8; dy <= 8; dy++) {
                     BlockPos chest = center.offset(dx, dy, dz);
                     if (!level.hasChunkAt(chest) || !isStorage(level.getBlockState(chest))
+                        || !VillageRegistry.isStorageForVillage(level, center, chest)
+                        || !VillageReservations.isStorageAvailable(level, chest, courier)
                         || !(level.getBlockEntity(chest) instanceof Container)) continue;
                     BlockPos stand = findStandNear(level, chest, origin);
-                    if (stand == null) continue;
+                    if (stand == null || !VillageReservations.tryAddStorageReservation(level, courier, chest, "food_delivery")) continue;
                     double distance = origin.distSqr(stand);
                     if (distance < bestDistance) {
                         bestDistance = distance;
@@ -574,6 +583,7 @@ public final class VillagePopulation {
 
     private static void finishTrip(Villager courier, CompoundTag data, long now) {
         clearOwnedRoute(courier, data);
+        VillageReservations.release(data, "food_delivery");
         data.putBoolean(ACTIVE_KEY, false);
         data.putLong(NEXT_TRIP, now + RETRY_DELAY_TICKS);
         for (String key : new String[] {PHASE, TARGET_UUID, CENTER_X, CENTER_Y, CENTER_Z,
@@ -661,7 +671,8 @@ public final class VillagePopulation {
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -8, -radius), center.offset(radius, 8, radius))) {
             if (!level.hasChunkAt(pos)) continue;
             BlockState state = level.getBlockState(pos);
-            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT) continue;
+            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT
+                || !VillageRegistry.isBedForVillage(level, center, pos)) continue;
             BlockPos head = pos.relative(state.getValue(HorizontalDirectionalBlock.FACING));
             if (!level.hasChunkAt(head) || !hasBabyClearance(level, pos) || !hasBabyClearance(level, head)) continue;
             count++;
@@ -673,11 +684,13 @@ public final class VillagePopulation {
         return level.getBlockState(bedPart.above()).isAir() && level.getBlockState(bedPart.above(2)).isAir();
     }
 
-    private static List<Container> findStorages(ServerLevel level, BlockPos center) {
+    private static List<Container> findStorages(ServerLevel level, BlockPos center, Villager owner) {
         List<Container> containers = new ArrayList<>();
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -8, -radius), center.offset(radius, 8, radius))) {
-            if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+            if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                || !VillageRegistry.isStorageForVillage(level, center, pos)
+                || !VillageReservations.isStorageAvailable(level, pos, owner)) continue;
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (blockEntity instanceof Container container) containers.add(container);
         }

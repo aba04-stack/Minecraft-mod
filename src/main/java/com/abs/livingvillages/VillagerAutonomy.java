@@ -18,6 +18,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
+import java.util.List;
+
 /**
  * Small, real autonomy layer for vanilla farmer villagers.
  *
@@ -126,6 +128,10 @@ public final class VillagerAutonomy {
             return;
         }
 
+        if (!VillageReservations.tryReserveStoragePositions(level, villager, List.of(target.chest()), "food_stockpiling")) {
+            data.putLong(NEXT_SEARCH, now + RETRY_DELAY_TICKS);
+            return;
+        }
         data.putBoolean(TARGET_ACTIVE, true);
         data.putInt(TARGET_CHEST_X, target.chest().getX());
         data.putInt(TARGET_CHEST_Y, target.chest().getY());
@@ -153,9 +159,13 @@ public final class VillagerAutonomy {
             return;
         }
 
+        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
+        if (ownershipCenter == null) ownershipCenter = villager.blockPosition();
         if (!level.hasChunkAt(chestPos)
-            || !(level.getBlockEntity(chestPos) instanceof Container container)
-            || !isStorageBlock(level.getBlockState(chestPos))) {
+            || !isStorageBlock(level.getBlockState(chestPos))
+            || !VillageRegistry.isStorageForVillage(level, ownershipCenter, chestPos)
+            || !VillageReservations.isStorageAvailable(level, chestPos, villager)
+            || !(level.getBlockEntity(chestPos) instanceof Container container)) {
             cancelTrip(villager, data);
             data.putLong(NEXT_SEARCH, now + RETRY_DELAY_TICKS);
             return;
@@ -191,6 +201,8 @@ public final class VillagerAutonomy {
     private static StorageTarget findNearestStorage(Villager villager, ServerLevel level) {
         int radius = Math.min(12, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
+        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
+        if (ownershipCenter == null) ownershipCenter = origin;
         StorageTarget best = null;
         double bestDistance = Double.MAX_VALUE;
 
@@ -198,7 +210,9 @@ public final class VillagerAutonomy {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos chestPos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(chestPos) || !isStorageBlock(level.getBlockState(chestPos))) {
+                    if (!level.hasChunkAt(chestPos) || !isStorageBlock(level.getBlockState(chestPos))
+                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, chestPos)
+                        || !VillageReservations.isStorageAvailable(level, chestPos, villager)) {
                         continue;
                     }
                     BlockEntity blockEntity = level.getBlockEntity(chestPos);
@@ -364,6 +378,7 @@ public final class VillagerAutonomy {
     }
 
     private static void cancelTrip(Villager villager, CompoundTag data) {
+        VillageReservations.release(data, "food_stockpiling");
         if (data.getBoolean(TARGET_ACTIVE)) {
             BlockPos ownedStandPos = new BlockPos(
                 data.getInt(TARGET_STAND_X), data.getInt(TARGET_STAND_Y), data.getInt(TARGET_STAND_Z));

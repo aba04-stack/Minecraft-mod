@@ -66,9 +66,7 @@ public final class VillagerRoles {
     }
 
     private static void assignRolesInternal(ServerLevel level, BlockPos center, boolean reconciliationOnly) {
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        List<Villager> all = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
+        List<Villager> all = VillageArea.findVillagers(level, center);
 
         int availablePickaxes = VillageIndustry.countAvailablePickaxes(level, center);
         int availableSwords = VillageIndustry.countAvailableSwords(level, center);

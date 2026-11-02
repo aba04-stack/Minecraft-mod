@@ -83,13 +83,17 @@ public final class VillageBuilder {
         return villager.getPersistentData().getBoolean(ACTIVE_KEY);
     }
 
+    /** Returns the active house blueprint's lower corner, or null when this resident owns no house project. */
+    public static BlockPos activeProjectSite(Villager villager) {
+        CompoundTag data = villager.getPersistentData();
+        if (!data.getBoolean(ACTIVE_KEY)) return null;
+        return new BlockPos(data.getInt(SITE_X), data.getInt(SITE_Y), data.getInt(SITE_Z));
+    }
+
     public static boolean hasActiveProjectNear(ServerLevel level, BlockPos center) {
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) return false;
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return !level.getEntitiesOfClass(Villager.class, area,
-            v -> v.isAlive() && isProjectActive(v)).isEmpty();
+        return VillageArea.findVillagers(level, center).stream().anyMatch(VillageBuilder::isProjectActive);
     }
 
     /** Used by role assignment to keep a suitable spare bed available for natural population growth. */
@@ -120,13 +124,18 @@ public final class VillageBuilder {
         if (!LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
             || plankBlock == null || !plankBlock.defaultBlockState().is(BlockTags.PLANKS)
-            || doorItem == null || !(Block.byItem(doorItem) instanceof DoorBlock)) return false;
+            || doorItem == null || !(Block.byItem(doorItem) instanceof DoorBlock)
+            || !VillageReservations.isProjectSiteAvailable(level, site, 8, null)) return false;
         Villager builder = findAvailableBuilder(level, center);
         if (builder == null) return false;
 
         Item plankItem = plankBlock.asItem();
         if (!canFitProjectMaterials(builder.getInventory(), plankItem, PLANKS_REQUIRED, Items.RED_BED, doorItem)) return false;
 
+        java.util.Map<Item, Integer> materialBill = java.util.Map.of(
+            plankItem, PLANKS_REQUIRED, Items.RED_BED, 1, doorItem, 1);
+        if (!VillageReservations.reserveStoragesForItems(level, builder.blockPosition(), builder, "house",
+            materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) return false;
         CompoundTag data = builder.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
         data.putInt(PHASE, FETCH_PLANKS);
@@ -177,12 +186,10 @@ public final class VillageBuilder {
     }
 
     private static Villager findAvailableBuilder(ServerLevel level, BlockPos center) {
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
-        AABB area = new AABB(center).inflate(radius, 12.0D, radius);
-        return level.getEntitiesOfClass(Villager.class, area,
-                v -> v.isAlive() && !v.isBaby() && isBuilder(v) && !isProjectActive(v)
-                    && !hasOtherActiveTask(v.getPersistentData()))
-            .stream().min(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))))
+        return VillageArea.findVillagers(level, center).stream()
+            .filter(v -> v.isAlive() && !v.isBaby() && isBuilder(v) && !isProjectActive(v)
+                && !hasOtherActiveTask(v.getPersistentData()))
+            .min(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))))
             .orElse(null);
     }
 
@@ -205,6 +212,7 @@ public final class VillageBuilder {
             BlockPos storagePos = routeStorage(data);
             BlockPos standPos = routeStand(data);
             if (!level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
+                || !VillageReservations.isStorageAvailable(level, storagePos, villager)
                 || !(level.getBlockEntity(storagePos) instanceof Container storage)) {
                 clearOwnedRoute(villager, data);
                 data.putLong(NEXT_ACTION, now + WORK_RETRY_TICKS);
@@ -396,7 +404,8 @@ public final class VillageBuilder {
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
         for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-radius, -6, -radius), origin.offset(radius, 6, radius))) {
-            if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+            if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                || !VillageReservations.isStorageAvailable(level, pos, villager)) continue;
             if (!(level.getBlockEntity(pos) instanceof Container container) || countItem(container, item) <= 0) continue;
             candidates.add(pos.immutable());
         }
@@ -404,7 +413,9 @@ public final class VillageBuilder {
         for (BlockPos storage : candidates) {
             for (Direction direction : HORIZONTAL) {
                 BlockPos stand = storage.relative(direction);
-                if (isSafeStand(level, stand)) return new StorageTarget(storage, stand.immutable());
+                if (!isSafeStand(level, stand)) continue;
+                if (!VillageReservations.tryAddStorageReservation(level, villager, storage, "house")) break;
+                return new StorageTarget(storage, stand.immutable());
             }
         }
         return null;
@@ -487,6 +498,7 @@ public final class VillageBuilder {
 
     private static void clearProject(Villager villager, CompoundTag data) {
         clearOwnedRoute(villager, data);
+        VillageReservations.release(data, "house");
         data.putBoolean(ACTIVE_KEY, false);
         data.remove(PHASE); data.remove(PLANK_ITEM); data.remove(DOOR_ITEM); data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);
         data.remove(STEP_INDEX); data.remove(STARTED); data.remove(NEXT_ACTION);
@@ -534,7 +546,8 @@ public final class VillageBuilder {
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -8, -radius), center.offset(radius, 8, radius))) {
             if (!level.hasChunkAt(pos)) continue;
             BlockState state = level.getBlockState(pos);
-            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT) continue;
+            if (!(state.getBlock() instanceof BedBlock) || state.getValue(BedBlock.PART) != BedPart.FOOT
+                || !VillageRegistry.isBedForVillage(level, center, pos)) continue;
             BlockPos head = pos.relative(state.getValue(HorizontalDirectionalBlock.FACING));
             if (!level.hasChunkAt(head) || !level.getBlockState(pos.above()).isAir()
                 || !level.getBlockState(pos.above(2)).isAir()

@@ -188,17 +188,21 @@ public final class VillageDefense {
             return;
         }
 
-        ItemStack fromStorage = takeMatchingFromStorage(level, guard.blockPosition(), predicate);
+        ItemStack fromStorage = takeMatchingFromStorage(level, guard, guard.blockPosition(), predicate);
         if (!fromStorage.isEmpty()) guard.setItemSlot(slot, fromStorage);
     }
 
-    private static ItemStack takeMatchingFromStorage(ServerLevel level, BlockPos origin, Predicate<ItemStack> predicate) {
+    private static ItemStack takeMatchingFromStorage(ServerLevel level, Villager guard, BlockPos origin, Predicate<ItemStack> predicate) {
         int radius = Math.min(10, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        BlockPos ownershipCenter = VillagerRoles.getHome(guard);
+        if (ownershipCenter == null) ownershipCenter = guard.blockPosition();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -3; dy <= 4; dy++) {
                     BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))) continue;
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
+                        || !VillageReservations.isStorageAvailable(level, pos, guard)) continue;
                     BlockEntity be = level.getBlockEntity(pos);
                     if (!(be instanceof Container container)) continue;
                     for (int slot = 0; slot < container.getContainerSize(); slot++) {
@@ -260,6 +264,10 @@ public final class VillageDefense {
         int[][] offsets = {{4, 0}, {3, 3}, {0, 4}, {-3, 3}, {-4, 0}, {-3, -3}, {0, -4}, {3, -3}};
         int x = center.getX() + offsets[phase][0];
         int z = center.getZ() + offsets[phase][1];
+        // Patrols must not query heightmaps in an unloaded chunk.
+        if (!level.hasChunkAt(new BlockPos(x, center.getY(), z))) {
+            return isSafeStand(level, center) ? center : null;
+        }
         int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
         BlockPos target = new BlockPos(x, y, z);
         if (isSafeStand(level, target)) return target;
@@ -270,8 +278,8 @@ public final class VillageDefense {
         BlockPos home = VillagerRoles.getHome(guard);
         if (home != null) return home;
 
-        AABB area = new AABB(guard.blockPosition()).inflate(radius, 8.0D, radius);
-        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, area, v -> v.isAlive() && !v.isBaby());
+        List<Villager> villagers = VillageArea.findVillagers(level, guard.blockPosition(), radius, 8).stream()
+            .filter(v -> !v.isBaby()).toList();
         double x = 0.0D, y = 0.0D, z = 0.0D;
         for (Villager villager : villagers) {
             x += villager.getX(); y += villager.getY(); z += villager.getZ();
