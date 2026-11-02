@@ -35,8 +35,8 @@ jobs:
           set -o pipefail
           mkdir -p build
           if ! ./gradlew runGameTestServer 2>&1 | tee build/gametest.log; then
-            grep -E "failed!|GameTestAssertException|MultipleTestTracker" build/gametest.log | tail -n 15 | while IFS= read -r line; do
-              echo "::error title=GameTest Failure::$line"
+            (grep -iE "failed|timeout|GameTestAssertException|MultipleTestTracker|Exception" build/gametest.log || tail -n 20 build/gametest.log) | sed 's/^.*]: //' | tr -d '\r' | tail -n 15 | while IFS= read -r line; do
+              echo "::error file=src/main/java/com/abs/livingvillages/VillageReservationGameTests.java,line=1::$line"
             done
             exit 1
           fi

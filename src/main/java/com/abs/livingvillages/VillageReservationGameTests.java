@@ -1658,9 +1658,9 @@ public final class VillageReservationGameTests {
             VillagerRoles.isEligibleAutonomousAdult(residentA) && VillagerRoles.isEligibleAutonomousAdult(residentB),
             "Stage 1: Villagers with vanilla professions (FARMER, FLETCHER) must be eligible for autonomous settlement tasks.");
 
-        // Stage 2, 3 & 4: On an isolated platform at (+15, +40, +36) outside the 3x8 GameTest grid (>32 blocks in Z and Y),
+        // Stage 2, 3 & 4: On an isolated elevated platform at (15, 45, 1) in the same chunk (>32 blocks above y=1),
         // verify: gather logs -> bootstrap first storage chest -> deposit logs -> craft >96 planks -> build crafting table & bake bread.
-        BlockPos skyCenter = helper.absolutePos(new BlockPos(15, 40, 36));
+        BlockPos skyCenter = helper.absolutePos(new BlockPos(15, 45, 1));
         for (int dx = -6; dx <= 6; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 helper.getLevel().setBlock(skyCenter.offset(dx, -1, dz), Blocks.GRASS_BLOCK.defaultBlockState(), 3);
@@ -1778,6 +1778,7 @@ public final class VillageReservationGameTests {
         // Elect village elder and verify livestock summary + diagnostics appear in the Elder panel snapshot.
         List<Villager> villagers = List.of(residentA, residentB);
         VillageElder.ensureElder(helper.getLevel(), homeA, villagers);
+        VillagerRoles.assignRoles(helper.getLevel(), homeA);
         Villager elder = VillageElder.isElder(residentA) ? residentA : residentB;
         var panel = VillageElder.createPanelSnapshot(helper.getLevel(), elder, "");
         helper.assertTrue(
