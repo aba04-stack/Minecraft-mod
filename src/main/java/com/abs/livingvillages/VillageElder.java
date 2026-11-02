@@ -362,6 +362,17 @@ public final class VillageElder {
         return "Мастера: " + String.join(", ", entries) + ".";
     }
 
+    public static String summarizeLivestockStatus(ServerLevel level, BlockPos center, int radius) {
+        if (level == null || center == null) return "";
+        AABB area = new AABB(center).inflate(radius, 8.0D, radius);
+        List<net.minecraft.world.entity.animal.Animal> animals = level.getEntitiesOfClass(
+            net.minecraft.world.entity.animal.Animal.class, area, net.minecraft.world.entity.animal.Animal::isAlive);
+        if (animals.isEmpty()) return "";
+        int babies = (int) animals.stream().filter(net.minecraft.world.entity.animal.Animal::isBaby).count();
+        int adults = animals.size() - babies;
+        return "Скот: " + animals.size() + " (взрослых: " + adults + ", молодняк: " + babies + ").";
+    }
+
     public static ElderPanelData createPanelSnapshot(ServerLevel level, Villager elder, String notice) {
         BlockPos origin = elder.blockPosition();
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
@@ -375,6 +386,10 @@ public final class VillageElder {
         String skills = summarizeSpecialistSkills(villagers);
         if (!skills.isBlank() && !currentNotice.contains("Мастера:")) {
             currentNotice = currentNotice.isBlank() ? skills : currentNotice + " " + skills;
+        }
+        String livestock = summarizeLivestockStatus(level, origin, radius);
+        if (!livestock.isBlank() && !currentNotice.contains("Скот:")) {
+            currentNotice = currentNotice.isBlank() ? livestock : currentNotice + " " + livestock;
         }
         return new ElderPanelData(
             elder.getUUID().toString(), villagers.size(), adults, children, beds, food,

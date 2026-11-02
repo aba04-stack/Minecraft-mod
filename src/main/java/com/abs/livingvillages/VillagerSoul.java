@@ -231,6 +231,22 @@ public final class VillagerSoul {
 
         if (hasMemory) {
             applyTrustBehaviorToVillager(villager, player);
+            int currentTrust = relationship.getInt("trust");
+            if (currentTrust >= 20) {
+                player.sendSystemMessage(Component.literal("Предпочтение: "
+                    + describePreferredGift(soul.getInt("personality")) + ".")
+                    .withStyle(ChatFormatting.AQUA));
+            }
+            String req = soul.getString("activeRequestItem");
+            if (currentTrust >= 40 && !req.isEmpty()) {
+                player.sendSystemMessage(Component.literal("Просьба жителя: принеси "
+                    + describeRequestItem(req) + " (Shift + ПКМ с предметом в руке).")
+                    .withStyle(ChatFormatting.YELLOW));
+            }
+            if (currentTrust >= 60 && shareSurplusFoodWithTrustedPlayer(villager, player)) {
+                player.sendSystemMessage(Component.literal(name + " поделился с тобой хлебом по-дружески.")
+                    .withStyle(ChatFormatting.GREEN));
+            }
         }
 
         if (hasMemory && !relationship.getString("lastGift").isEmpty()
@@ -626,6 +642,68 @@ public final class VillagerSoul {
             case 4 -> stack.is(Items.CARROT) || stack.is(Items.POTATO);
             default -> stack.is(Items.CORNFLOWER) || stack.is(Items.EMERALD);
         };
+    }
+
+    public static String describePreferredGift(int personality) {
+        return switch (Math.floorMod(personality, PERSONALITY_COUNT)) {
+            case 0 -> "Хлеб или Пшеница";
+            case 1 -> "Мак или Одуванчик";
+            case 2 -> "Изумруд или Золотой слиток";
+            case 3 -> "Яблоко или Хлеб";
+            case 4 -> "Морковь или Картофель";
+            default -> "Василёк или Изумруд";
+        };
+    }
+
+    public static String describeRequestItem(String itemKey) {
+        if (itemKey == null) return "Хлеб";
+        return switch (itemKey) {
+            case "apple" -> "Яблоко";
+            case "carrot" -> "Морковь";
+            case "emerald" -> "Изумруд";
+            default -> "Хлеб";
+        };
+    }
+
+    /**
+     * Shares 1 physical bread from the villager's own inventory with a trusted friend (trust >= 60)
+     * when the villager carries at least 2 loaves (conserving items 1:1).
+     */
+    public static boolean shareSurplusFoodWithTrustedPlayer(Villager villager, Player player) {
+        if (villager == null || player == null) return false;
+        if (getPlayerTrust(villager, player.getUUID()) < 60) return false;
+        var inv = villager.getInventory();
+        int totalBread = 0;
+        int sourceSlot = -1;
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack s = inv.getItem(i);
+            if (s.is(Items.BREAD)) {
+                totalBread += s.getCount();
+                if (sourceSlot < 0) sourceSlot = i;
+            }
+        }
+        if (totalBread < 2 || sourceSlot < 0) return false;
+        ItemStack singleBread = inv.removeItem(sourceSlot, 1);
+        if (singleBread.isEmpty()) return false;
+        if (!player.getInventory().add(singleBread)) {
+            inv.addItem(singleBread);
+            return false;
+        }
+        return true;
+    }
+
+    public static void onStorageTamperedByPlayer(net.neoforged.neoforge.event.level.BlockEvent.BreakEvent event) {
+        if (!(event.getLevel() instanceof ServerLevel serverLevel)) return;
+        Player player = event.getPlayer();
+        if (player == null || player.isCreative()) return;
+        BlockPos pos = event.getPos();
+        var state = event.getState();
+        if (!state.is(net.minecraft.world.level.block.Blocks.CHEST)
+            && !state.is(net.minecraft.world.level.block.Blocks.TRAPPED_CHEST)
+            && !state.is(net.minecraft.world.level.block.Blocks.BARREL)) {
+            return;
+        }
+        recordPlayerTheft(serverLevel, pos, player.getUUID());
     }
 
     public static void assignVillagerRequest(Villager villager, String itemKey) {

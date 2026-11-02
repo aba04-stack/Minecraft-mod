@@ -471,4 +471,72 @@ public final class VillageAnimalAI {
         }
         return advanceTicks;
     }
+
+    public static void onAnimalInteract(net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.EntityInteractSpecific event) {
+        if (!(event.getTarget() instanceof Animal animal) || animal.level().isClientSide()) {
+            return;
+        }
+        if (!LivingVillagesConfig.ENABLE_ANIMAL_BEHAVIOR.get()
+            || !(event.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)
+            || event.getHand() != net.minecraft.world.InteractionHand.MAIN_HAND) {
+            return;
+        }
+        ItemStack held = player.getItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND);
+        if (player.isShiftKeyDown() && held.isEmpty()) {
+            event.setCancellationResult(net.minecraft.world.InteractionResult.SUCCESS);
+            event.setCanceled(true);
+            player.sendSystemMessage(
+                net.minecraft.network.chat.Component.literal(describeAnimalStatus(animal))
+                    .withStyle(net.minecraft.ChatFormatting.GRAY)
+            );
+            return;
+        }
+        if (isValidSpeciesBreedingFood(animal, held) && animal.level() instanceof ServerLevel serverLevel) {
+            recordLivestockCareTrustBonus(serverLevel, animal.blockPosition(), player.getUUID());
+        }
+    }
+
+    public static int recordLivestockCareTrustBonus(ServerLevel level, BlockPos pos, UUID playerId) {
+        if (level == null || pos == null || playerId == null) return 0;
+        AABB area = new AABB(pos).inflate(12.0D, 5.0D, 12.0D);
+        List<net.minecraft.world.entity.npc.Villager> villagers = level.getEntitiesOfClass(
+            net.minecraft.world.entity.npc.Villager.class, area, net.minecraft.world.entity.npc.Villager::isAlive);
+        int affected = 0;
+        for (var villager : villagers) {
+            VillagerSoul.recordTrustEvent(villager, playerId, TrustAndAnimalModel.EVENT_HELP_OR_GIFT, 2, false);
+            affected++;
+        }
+        return affected;
+    }
+
+    public static String describeAnimalStatus(Animal animal) {
+        if (animal == null) return "";
+        CompoundTag data = animal.getPersistentData();
+        String ageText = animal.isBaby() ? "Детёныш" : "Взрослое";
+        String traitText = offspringTraitNameRu(data.getInt(OFFSPRING_TRAIT_KEY));
+        String stateText = animalActionNameRu(data.getInt(LAST_ACTION_KEY));
+        return "Животное: " + ageText + " · Особенность: " + traitText + " · Состояние: " + stateText;
+    }
+
+    public static String offspringTraitNameRu(int trait) {
+        return switch (trait) {
+            case TrustAndAnimalModel.OFFSPRING_TRAIT_HARDY -> "Выносливый";
+            case TrustAndAnimalModel.OFFSPRING_TRAIT_SWIFT -> "Быстрый";
+            case TrustAndAnimalModel.OFFSPRING_TRAIT_CALM -> "Спокойный";
+            case TrustAndAnimalModel.OFFSPRING_TRAIT_VIGOROUS -> "Жизнелюбивый";
+            default -> "Обычный";
+        };
+    }
+
+    public static String animalActionNameRu(int action) {
+        return switch (action) {
+            case TrustAndAnimalModel.ANIMAL_ACTION_FLEE_THREAT -> "Убегает от опасности";
+            case TrustAndAnimalModel.ANIMAL_ACTION_PROTECT_OFFSPRING -> "Защищает потомство";
+            case TrustAndAnimalModel.ANIMAL_ACTION_FOLLOW_PARENT -> "Следует за родителем";
+            case TrustAndAnimalModel.ANIMAL_ACTION_SEEK_SHELTER -> "Ищет укрытие";
+            case TrustAndAnimalModel.ANIMAL_ACTION_FORAGE_OR_GRAZE -> "Ищет корм / пасётся";
+            case TrustAndAnimalModel.ANIMAL_ACTION_COURTSHIP -> "Брачное сближение";
+            default -> "Спокойно";
+        };
+    }
 }

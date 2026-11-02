@@ -62,6 +62,7 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onVillagerInteract);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onVillagerDamaged);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onMonsterKilledByPlayer);
+        NeoForge.EVENT_BUS.addListener(VillagerSoul::onStorageTamperedByPlayer);
         NeoForge.EVENT_BUS.addListener(VillagerAutonomy::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerTreeWork::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerMining::onVillagerTick);
@@ -75,6 +76,7 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalTick);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalDamaged);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onBabySpawn);
+        NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalInteract);
     }
 
     private void onServerStarting(ServerStartingEvent event) {

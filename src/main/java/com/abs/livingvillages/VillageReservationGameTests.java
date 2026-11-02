@@ -1615,6 +1615,62 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_care_trust_and_elder_livestock_summary")
+    public static void interactiveRequestPreferencesLivestockCareTrustAndElderLivestockSummaryWorkInWorld(GameTestHelper helper) {
+        for (int x = 0; x <= 30; x++) {
+            for (int z = 0; z <= 2; z++) {
+                helper.setBlock(new BlockPos(x, 0, z), Blocks.GRASS_BLOCK);
+            }
+        }
+
+        BlockPos homeA = helper.absolutePos(new BlockPos(2, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(4, 1, 1));
+        Villager residentA = spawnResident(helper, 2, 1, 1, homeA);
+        Villager residentB = spawnResident(helper, 4, 1, 1, homeB);
+        residentA.setNoAi(true);
+        residentB.setNoAi(true);
+
+        java.util.UUID caretakerUuid = java.util.UUID.nameUUIDFromBytes("livestock-caretaker".getBytes());
+        VillagerSoul.setPlayerTrust(residentA, caretakerUuid, 20);
+        VillagerSoul.assignVillagerRequest(residentA, "apple");
+
+        helper.assertTrue(
+            !VillagerSoul.describePreferredGift(0).isBlank()
+                && VillagerSoul.describeRequestItem("apple").equals("Яблоко"),
+            "Preferred gift and personal request descriptions must be localized.");
+
+        // Spawn an adult cow and a baby calf near the villagers and verify livestock care trust bonus + status.
+        net.minecraft.world.entity.animal.Cow adultCow = helper.spawn(EntityType.COW, 5, 1, 1);
+        net.minecraft.world.entity.animal.Cow babyCow = helper.spawn(EntityType.COW, 6, 1, 1);
+        adultCow.setNoAi(true);
+        babyCow.setNoAi(true);
+        babyCow.setAge(-1200);
+        VillageAnimalAI.registerOffspringFromParents(adultCow, adultCow, babyCow, 100L);
+
+        int affectedVillagers = VillageAnimalAI.recordLivestockCareTrustBonus(
+            helper.getLevel(),
+            adultCow.blockPosition(),
+            caretakerUuid
+        );
+        int updatedTrust = VillagerSoul.getPlayerTrust(residentA, caretakerUuid);
+        String animalStatus = VillageAnimalAI.describeAnimalStatus(babyCow);
+        helper.assertTrue(
+            affectedVillagers >= 1
+                && updatedTrust > 20
+                && animalStatus.contains("Детёныш"),
+            "Feeding village livestock must grant a trust bonus with nearby villagers and describe baby animal status.");
+
+        // Elect village elder and verify livestock summary appears in the Elder panel snapshot.
+        List<Villager> villagers = List.of(residentA, residentB);
+        VillageElder.ensureElder(helper.getLevel(), homeA, villagers);
+        Villager elder = VillageElder.isElder(residentA) ? residentA : residentB;
+        var panel = VillageElder.createPanelSnapshot(helper.getLevel(), elder, "");
+        helper.assertTrue(
+            panel.notice().contains("Скот:"),
+            "Elder panel snapshot must include the village livestock summary when animals are present.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {
