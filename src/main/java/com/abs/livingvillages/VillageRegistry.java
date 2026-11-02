@@ -623,8 +623,8 @@ public final class VillageRegistry extends SavedData {
 
         long now = level.getGameTime();
         boolean alarm = isVillageAlarmActive(level, centerA, now) || isVillageAlarmActive(level, centerB, now);
-        Container chestA = findFirstAvailableOwnedStorage(level, centerA);
-        Container chestB = findFirstAvailableOwnedStorage(level, centerB);
+        Container chestA = findNearestOwnedStorageWithItem(level, centerA, Items.BREAD, breadReserveCount + 1);
+        Container chestB = findNearestOwnedStorageWithItem(level, centerB, Items.OAK_PLANKS, plankReserveCount + 1);
         if (chestA == null || chestB == null) return false;
 
         int breadInA = countItemInContainer(chestA, Items.BREAD);
@@ -687,7 +687,7 @@ public final class VillageRegistry extends SavedData {
     public static int applyCatchUpSmeltingIfEligible(ServerLevel level, BlockPos center, long elapsedTicks) {
         if (level == null || center == null) return 0;
         if (!hasOwnedFurnaceNear(level, center)) return 0;
-        Container chest = findFirstAvailableOwnedStorage(level, center);
+        Container chest = findNearestOwnedStorageForSmelting(level, center);
         if (chest == null) return 0;
 
         int rawIron = countItemInContainer(chest, Items.RAW_IRON);
@@ -735,15 +735,42 @@ public final class VillageRegistry extends SavedData {
         return room;
     }
 
-    private static Container findFirstAvailableOwnedStorage(ServerLevel level, BlockPos center) {
+    private static List<Container> findAvailableOwnedStorages(ServerLevel level, BlockPos center) {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        List<BlockPos> positions = new ArrayList<>();
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -4, -radius), center.offset(radius, 4, radius))) {
             if (!level.hasChunkAt(pos)) continue;
             BlockState state = level.getBlockState(pos);
             if (!state.is(Blocks.CHEST) && !state.is(Blocks.TRAPPED_CHEST) && !state.is(Blocks.BARREL)) continue;
             if (!isStorageForVillage(level, center, pos) || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
+            positions.add(pos.immutable());
+        }
+        positions.sort(Comparator.comparingDouble(pos -> pos.distSqr(center)));
+        List<Container> containers = new ArrayList<>(positions.size());
+        for (BlockPos pos : positions) {
             BlockEntity be = level.getBlockEntity(pos);
-            if (be instanceof Container container) return container;
+            if (be instanceof Container container) {
+                containers.add(container);
+            }
+        }
+        return containers;
+    }
+
+    private static Container findNearestOwnedStorageWithItem(ServerLevel level, BlockPos center, Item item, int minCount) {
+        for (Container container : findAvailableOwnedStorages(level, center)) {
+            if (countItemInContainer(container, item) >= minCount) {
+                return container;
+            }
+        }
+        return null;
+    }
+
+    private static Container findNearestOwnedStorageForSmelting(ServerLevel level, BlockPos center) {
+        for (Container container : findAvailableOwnedStorages(level, center)) {
+            if (countItemInContainer(container, Items.RAW_IRON) > 0
+                && countItemInContainer(container, Items.COAL) > 0) {
+                return container;
+            }
         }
         return null;
     }

@@ -932,7 +932,10 @@ public final class VillageReservationGameTests {
 
     @GameTest(template = "empty", timeoutTicks = 20, batch = "catchup_smelting_and_raider_squad")
     public static void catchUpSmeltingRaiderSquadRetreatAndGuardEquipmentRequestWorkInWorld(GameTestHelper helper) {
-        placeFloor(helper);
+        for (int x = 0; x <= 20; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
         BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
         BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
         BlockPos chestPos = helper.absolutePos(new BlockPos(5, 1, 1));
