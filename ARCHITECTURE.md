@@ -1,6 +1,6 @@
 # Living Villages / Living Civilization — архитектура и материальный баланс (0.15.0)
 
-> **Статус кода 0.15.0:** `PROTOTYPE` (исходный код присутствует в репозитории, но полная компиляция с зависимостями Minecraft/NeoForge и проверка в `runClient` имеют статус `BLOCKED` / `UNVERIFIED`; см. [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md)).
+> **Статус кода 0.15.0:** `TESTED` в части статических инвариантов, полной компиляции `./gradlew build` и 12 внутриигровых `GameTest` в GitHub Actions CI (`IMPLEMENTED` для полного геймплейного цикла в `runClient`; см. [`docs/TESTING.md`](docs/TESTING.md)).
 >
 > **Связанные документы целевой архитектуры Living Civilization:**
 > - [Целевая слоистая архитектура, границы модулей и контракты (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md)

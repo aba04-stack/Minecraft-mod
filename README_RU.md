@@ -1,7 +1,7 @@
 # Living Villages 0.15.0 (Living Civilization) — логичная автономная деревня
 
 **Целевая версия в конфигурации (`gradle.properties`):** Minecraft Java Edition 1.21.1 · NeoForge 21.1.264 · Java 21 · Gradle 9.2.1.  
-**Статус кода 0.15.0:** `PROTOTYPE` (сборка и запуск в текущем репозитории имеют статус `BLOCKED` / `UNVERIFIED`, см. [`docs/VERSION_COMPATIBILITY.md`](docs/VERSION_COMPATIBILITY.md) и [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md)).
+**Статус кода 0.15.0:** `TESTED` в рамках статических проверок, полной сборки `./gradlew build`, 12 внутриигровых `GameTest`, dedicated-server и headless-client smoke-тестов в GitHub Actions CI (`IMPLEMENTED` для полного интерактивного цикла в живом мире; см. [`docs/VERSION_COMPATIBILITY.md`](docs/VERSION_COMPATIBILITY.md) и [`docs/TESTING.md`](docs/TESTING.md)).
 
 > **Полная техническая документация проекта Living Civilization:**
 > - [Главный обзор и навигация (`README.md`)](README.md) · [Техническое задание (`docs/PROJECT_SPEC.md`)](docs/PROJECT_SPEC.md) · [Дорожная карта (`docs/ROADMAP.md`)](docs/ROADMAP.md)

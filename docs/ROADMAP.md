@@ -8,35 +8,31 @@
 
 ---
 
-## Этап 0. Восстановление структуры репозитория и воспроизводимой сборки (`BLOCKED` / `PLANNED`)
+## Этап 0. Восстановление структуры репозитория и воспроизводимой сборки (`TESTED`)
 
-Перед любым развитием механик необходимо устранить инфраструктурные блокеры текущего репозитория (см. [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md)).
+Инфраструктурные блокеры плоской выгрузки устранены: стандартная структура каталогов восстановлена, биты исполнения `+x` выставлены, полная сборка и тесты проходят в GitHub Actions CI.
 
-### Подэтап 0.1. Восстановление дерева каталогов проекта (`PLANNED`)
-- **Задача:** перенести файлы, загруженные плоским списком в корень репозитория в коммите `8635934`, в штатные каталоги Gradle/NeoForge (`src/main/java/com/abs/livingvillages/`, `src/main/resources/assets/livingvillages/lang/`, `src/main/templates/META-INF/`, `tools/`, `gradle/wrapper/`, `.github/workflows/`, `.gitignore`), восстановив бит исполнения `chmod +x gradlew BUILD_LOCAL.sh`.
-- **Критерий проверки:** успешное прохождение `python3 tools/validate_project.py`, `java tools/JavaSyntaxCheck.java src/main/java`, всех скриптов `tools/test_*.py` и `sh -n gradlew BUILD_LOCAL.sh`.
+### Подэтап 0.1. Восстановление дерева каталогов проекта (`TESTED`)
+- **Результат:** все исходные файлы размещены в штатных каталогах Gradle/NeoForge (`src/main/java/com/abs/livingvillages/`, `src/main/java/com/abs/livingvillages/domain/`, `src/main/resources/assets/livingvillages/lang/`, `src/main/resources/data/livingvillages/structure/`, `src/main/templates/META-INF/`, `tools/`, `gradle/wrapper/`, `.github/workflows/build.yml`).
+- **Проверка:** `python3 tools/validate_project.py`, `java tools/JavaSyntaxCheck.java src/main/java`, все 13 скриптов `tools/test_*.py` и `sh -n gradlew BUILD_LOCAL.sh` проходят успешно (`PASS`).
 
-### Подэтап 0.2. Первая полная компиляция с Minecraft/NeoForge classpath (`BLOCKED`)
-- **Задача:** выполнить `./gradlew build` в окружении с JDK 21 и сетевым доступом к `services.gradle.org` и Maven-репозиториям NeoForge/Minecraft (`1.21.1` / `NeoForge 21.1.264`), устранив возможные несовпадения сигнатур API.
-- **Критерий проверки:** успешная генерация `build/libs/livingvillages-0.15.0.jar` без ошибок компиляции.
+### Подэтап 0.2. Первая полная компиляция с Minecraft/NeoForge classpath (`TESTED`)
+- **Результат:** `./gradlew build` с JDK 21 (Temurin 21) и контрольной суммой Gradle `9.2.1` успешно компилирует проект и собирает `build/libs/livingvillages-0.15.0.jar`.
 
-### Подэтап 0.3. Дымовая проверка в клиенте и на выделенном сервере (`PLANNED`)
-- **Задача:** запустить `./gradlew runClient` и `./gradlew runServer`, проверить загрузку мода, открытие меню настроек, отсутствие `NoClassDefFoundError` на сервере и базовое открытие панели старосты.
-- **Критерий проверки:** задокументированный отчёт запуска в [`TESTING.md`](TESTING.md) и обновление [`VERSION_COMPATIBILITY.md`](VERSION_COMPATIBILITY.md).
+### Подэтап 0.3. Дымовая проверка в клиенте, на выделенном сервере и GameTestServer (`TESTED`)
+- **Результат:** в CI автоматически выполняются `./gradlew runGameTestServer` (12 внутриигровых `GameTest`), запуск выделенного сервера (`./gradlew runServer`) и headless-клиента с программным OpenGL (`tools/smoke_test_client.sh`, проверяющий `ElderScreen`).
 
 ---
 
-## Этап 1. Архитектурный фундамент, сохранения и тестовый контур (`PLANNED`)
+## Этап 1. Архитектурный фундамент, сохранения и тестовый контур (`TESTED` / `IMPLEMENTED`)
 
-Формирование чистой архитектуры, позволяющей безопасно развивать сложные системы, переносить логику и обновлять версии Minecraft.
+### Подэтап 1.1. Выделение независимого доменного слоя (`TESTED`)
+- **Результат:** выделен пакет `com.abs.livingvillages.domain` (`VillagerProgressionModel`, `MonsterTacticalModel`, `TickBudgetModel`) без единого импорта `net.minecraft.*` / `net.neoforged.*`.
+- **Проверка:** `tools/test_domain_portability.py` контролирует отсутствие платформенных импортов и чистоту DTO-контрактов.
 
-### Подэтап 1.1. Выделение независимого доменного слоя (`PLANNED`)
-- **Задача:** разделить код внутри одного Gradle-проекта на пакеты доменной логики (`domain` — модели ресурсов, рецептов, материальных ведомостей, статусов заказов и приоритетов без импортов `net.minecraft.*`) и платформенных адаптеров (`platform` / `adapter`), см. [`ARCHITECTURE.md`](ARCHITECTURE.md) и [`LANGUAGE_PORTABILITY.md`](LANGUAGE_PORTABILITY.md).
-- **Критерий проверки:** автоматическая проверка отсутствия импортов `net.minecraft.*` / `net.neoforged.*` в пакете `domain` и запуск быстрых JUnit unit-тестов доменного ядра без старта Minecraft.
-
-### Подэтап 1.2. Версионированная схема сохранений и миграции (`PLANNED`)
-- **Задача:** внедрить явный номер версии схемы данных (`schema_version`), безопасные десериализаторы с сохранением неизвестных полей и конвейер последовательных миграций (см. [`SAVE_DATA.md`](SAVE_DATA.md)).
-- **Критерий проверки:** unit-тесты чтения данных `0.15.0`, миграции на схему `v1`, обработки повреждённых/неполных тегов и сохранения резервной копии при миграции.
+### Подэтап 1.2. Версионированная схема сохранений и миграции (`TESTED`)
+- **Результат:** внедрён `schema_version = 1` в `VillagerProgression`, `VillageRegistry` и `VillagerSoul` с сохранением неизвестных полей и резервной копией `_raw_backup_tag`.
+- **Проверка:** внутриигровой тест `villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema` в `VillageReservationGameTests`.
 
 ### Подэтап 1.3. Изоляция версионных адаптеров Minecraft/NeoForge (`PLANNED`)
 - **Задача:** вынести прямые вызовы сетевых пакетов, GUI, работы с `Container`/`BlockEntity` и `Brain`/`MemoryModuleType` за интерфейсы портов (см. [`VERSION_ADAPTERS.md`](VERSION_ADAPTERS.md)).

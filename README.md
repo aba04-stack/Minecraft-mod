@@ -37,13 +37,13 @@
 - **Староста деревни и панель управления (`VillageElder`, `LivingVillagesClient` — `IMPLEMENTED`, верстка проверена в headless smoke-test):** выбор старосты с сохранением ванильной профессии, открытие GUI по ПКМ пустой рукой, серверная валидация сетевых пакетов `ElderAction`, переключение приоритетов и заказы дома/фермы.
 - **Базовая стража и личность жителей (`VillageDefense`, `VillagerSoul`, `VillagerRoles` — `IMPLEMENTED`):** экипировка реальным оружием/бронёй со склада, ближний бой и отступление при ранении; имена, 6 характеров, настроение, память подарков и обид.
 
-### Новые архитектурные и геймплейные подсистемы Living Civilization (согласно [`docs/ROADMAP.md`](docs/ROADMAP.md))
+### Новые архитектурные и геймплейные подсистемы Living Civilization (реализованы и проверены в CI / GameTest)
 
-- **Независимое доменное ядро (`com.abs.livingvillages.domain`) и контракты переносимости:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/LANGUAGE_PORTABILITY.md`](docs/LANGUAGE_PORTABILITY.md).
-- **Минимальная система прокачки профессий жителей (1–5 уровней):** [`docs/PROGRESSION.md`](docs/PROGRESSION.md).
-- **Опасный мир и тактический ИИ ванильных монстров:** [`docs/MONSTERS.md`](docs/MONSTERS.md), [`docs/MONSTER_AI.md`](docs/MONSTER_AI.md).
-- **Квоты производительности, профилирование и удалённая симуляция:** [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md), [`docs/PERFORMANCE_BUDGETS.md`](docs/PERFORMANCE_BUDGETS.md).
-- **Версионирование схем сохранений (`schema_version`) и миграции:** [`docs/SAVE_DATA.md`](docs/SAVE_DATA.md).
+- **Независимое доменное ядро (`com.abs.livingvillages.domain` — `TESTED`):** `VillagerProgressionModel`, `MonsterTacticalModel` и `TickBudgetModel` не имеют зависимостей от `net.minecraft.*` / `net.neoforged.*` (проверяется `tools/test_domain_portability.py`). Подробнее: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/LANGUAGE_PORTABILITY.md`](docs/LANGUAGE_PORTABILITY.md).
+- **Минимальная система прокачки профессий жителей (`VillagerProgression` — `TESTED` в GameTest):** уровни 1–5 по каждой рабочей роли, начисление опыта только за подтверждённые завершённые задачи, сохранение опыта при смене роли и версионированная схема `schema_version = 1`. Подробнее: [`docs/PROGRESSION.md`](docs/PROGRESSION.md).
+- **Опасный мир и тактический ИИ ванильных монстров (`VillageMonsterAI` — `TESTED` в GameTest):** честное восприятие через `ClipContext.Block.COLLIDER` и ограниченные сигналы активности, лимит попыток пути (`MAX_PATH_RETRIES = 3`), соблюдение `mobGriefing` и тактика зомби, скелетов, криперов, пауков, ведьм и разбойников. Подробнее: [`docs/MONSTERS.md`](docs/MONSTERS.md), [`docs/MONSTER_AI.md`](docs/MONSTER_AI.md).
+- **Квоты производительности (`VillageTickBudget` — `IMPLEMENTED`):** лимит проверок ИИ на тик (`max_ai_checks_per_tick`) и распределённое расписание сущностей. Подробнее: [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md), [`docs/PERFORMANCE_BUDGETS.md`](docs/PERFORMANCE_BUDGETS.md).
+- **Версионирование схем сохранений (`schema_version = 1` — `TESTED` в GameTest):** безопасная миграция `v0 → v1` с сохранением неизвестных полей и резервной копией `_raw_backup_tag`. Подробнее: [`docs/SAVE_DATA.md`](docs/SAVE_DATA.md).
 
 ---
 

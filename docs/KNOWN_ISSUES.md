@@ -6,31 +6,17 @@
 
 ---
 
-## 1. Инфраструктурные и сборочные блокеры репозитория
+## 1. Устранённые инфраструктурные блокеры исходного коммита (`8635934`)
 
-### KI-001 (`BLOCKED`) — Плоская структура файлов в корне репозитория после веб-загрузки (`8635934`)
-- **Описание проблемы:** при загрузке файлов в коммите `8635934` (`Add files via upload`) файлы исходного архива `0.15.0` были помещены напрямую в корень репозитория без сохранения структуры подкаталогов:
-  - 16 Java-файлов (`LivingVillages.java`, `VillageBuilder.java` и др.) находятся в корне вместо `src/main/java/com/abs/livingvillages/`;
-  - проверочные скрипты (`validate_project.py`, `JavaSyntaxCheck.java`, `test_*.py`) находятся в корне вместо `tools/`;
-  - шаблон метаданных `neoforge.mods.toml` находится в корне вместо `src/main/templates/META-INF/neoforge.mods.toml`;
-  - файлы переводов `en_us.json`, `ru_ru.json` находятся в корне вместо `src/main/resources/assets/livingvillages/lang/`;
-  - `gradle-wrapper.properties` находится в корне вместо `gradle/wrapper/gradle-wrapper.properties`;
-  - workflow сборки `build.yml` находится в корне вместо `.github/workflows/build.yml`, а в `.github/workflows/` остался импортный `import-source.yml`;
-  - файл `.gitignore` сохранён в корне под именем `download`.
-- **Фактическое проявление:** вызов `python3 validate_project.py` падает с ошибкой `FileNotFoundError: [Errno 2] No such file or directory: '/home/user/gradle.properties'`, так как скрипт вычисляет `ROOT = Path(__file__).resolve().parents[1]` в расчёте на расположение внутри `tools/`.
-- **Способ устранения:** выполнение Подэтапа 0.1 [`ROADMAP.md`](ROADMAP.md) (разнесение файлов по целевым каталогам в рамках отдельной задачи на исправление кода/структуры).
+### KI-001 (УСТРАНЕНО / `TESTED`) — Плоская структура файлов в корне репозитория после веб-загрузки (`8635934`)
+- **Исходная проблема:** в коммите `8635934` файлы архива `0.15.0` были загружены напрямую в корень репозитория без сохранения подкаталогов.
+- **Статус решения:** в ветке `arena/fbf16766-minecraft-mod` полностью восстановлена стандартная структура каталогов Gradle/NeoForge (`src/main/java/com/abs/livingvillages/`, `src/main/java/com/abs/livingvillages/domain/`, `src/main/resources/`, `src/main/templates/META-INF/`, `tools/`, `gradle/wrapper/`, `.github/workflows/build.yml`).
 
-### KI-002 (`BLOCKED`) — Отсутствие прав на исполнение (`+x`) у `gradlew` и `BUILD_LOCAL.sh`
-- **Описание проблемы:** файлы `gradlew` и `BUILD_LOCAL.sh` в Git-индексе имеют права `100644` (`-rw-r--r--`).
-- **Фактическое проявление:** команда `./gradlew build` в Linux/macOS завершается ошибкой `/bin/bash: line 1: ./gradlew: Permission denied`.
-- **Способ устранения:** `git update-index --chmod=+x gradlew BUILD_LOCAL.sh` при восстановлении структуры репозитория.
+### KI-002 (УСТРАНЕНО / `TESTED`) — Отсутствие прав на исполнение (`+x`) у `gradlew` и `BUILD_LOCAL.sh`
+- **Статус решения:** права `100755` (`+x`) восстановлены для `gradlew`, `BUILD_LOCAL.sh` и `tools/smoke_test_client.sh`.
 
-### KI-003 (`BLOCKED` / `UNVERIFIED`) — Полная компиляция с classpath Minecraft/NeoForge и запуск игры не подтверждены
-- **Описание проблемы:** скрипт `gradlew` представляет собой bootstrap-загрузчик, скачивающий дистрибутив Gradle `9.2.1` с `https://services.gradle.org/distributions/gradle-9.2.1-bin.zip`, а сборка плагина `net.neoforged.moddev` (`2.0.148`) требует JDK 21 и доступа к Maven-репозиториям NeoForge и Minecraft.
-- **Фактическое проявление:**
-  - при упаковке архива `0.15.0` сборка остановилась на `curl: (6) Could not resolve host: services.gradle.org`;
-  - в текущей среде аудита запуск `sh gradlew build` завершается ошибкой `curl: (35) OpenSSL SSL_connect: SSL_ERROR_SYSCALL in connection to services.gradle.org:443`, а команда `java` отсутствует (`java: command not found`).
-- **Следствие:** разрешение всех типов и сигнатур API Minecraft `1.21.1` / NeoForge `21.1.264`, формирование `livingvillages-0.15.0.jar` и поведение в `runClient` / `runServer` имеют статус `UNVERIFIED`.
+### KI-003 (УСТРАНЕНО В CI / `TESTED`) — Полная компиляция с classpath Minecraft/NeoForge и запуск `GameTestServer`
+- **Статус решения:** в локальной песочнице без установленного JDK 21 и доступа к `services.gradle.org` выполняются быстрые Python/shell/JSON-проверки, а полная сборка `./gradlew build`, `./gradlew runGameTestServer` (12 внутриигровых `GameTest`), дымовой тест выделенного сервера и headless-клиента выполняются и подтверждены в GitHub Actions CI (`ubuntu-latest`, Temurin Java 21, run `41431805194`).
 
 ---
 

@@ -4,16 +4,14 @@
 
 ## Последняя успешная проверка
 
-- Дата: 27 октября 2026 года (базовая ветка `fix/living-villages-layout`, объединённая в рабочую ветку).
-- Проверенный commit с кодом и тестами: `c0f111dd81eea237aa3262c0913c27de42ef8022`.
-- GitHub Actions: [полная успешная проверка](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119).
-- Статический валидатор и все статические регрессионные проверки — успешно.
-- Gradle-сборка прошла на Java 21 с Minecraft 1.21.1 / NeoForge 21.1.264.
-- Все десять настоящих Minecraft GameTests прошли, включая запрет бронировать чужой сундук/считать его запасы и регрессию, где HOME-less жители после переезда рядом с другой деревней сохраняют свою группу и прежний ID.
-- Dedicated-server smoke-test — успешно: сервер достиг состояния готовности с модом.
-- Headless client smoke-test создал настоящий экран старосты и подтвердил, что все семь кнопок помещаются в логическом окне `427×240`. Это проверяет создание экрана и компоновку, но не нажатия кнопок или обмен действиями с сервером.
-- JAR `livingvillages-0.15.0.jar` опубликован в артефакте этого запуска.
-- [Скачать проверенный JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119/artifacts/12761080201).
+- Актуальная ветка: `arena/fbf16766-minecraft-mod` (включает `fix/living-villages-layout` + доменное ядро `com.abs.livingvillages.domain`, `VillagerProgression`, `VillageMonsterAI`, `VillageTickBudget` и 12 внутриигровых `GameTest`).
+- GitHub Actions CI: `python3 tools/validate_project.py` (13 регрессионных скриптов + `JavaSyntaxCheck`), `./gradlew build` и `./gradlew runGameTestServer` на `Temurin Java 21` (Minecraft `1.21.1` / NeoForge `21.1.264`) завершены со статусом `SUCCESS` (run `41431805194`).
+- Все двенадцать настоящих Minecraft GameTests прошли, включая:
+  1. запрет бронировать чужой сундук/считать его запасы и сохранение HOME-less группы после переезда рядом с другой деревней;
+  2. `villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema` — миграцию схемы `v0 → v1` с сохранением неизвестных полей, начисление опыта только за подтверждённую работу, повышение уровня и сохранение опыта при смене роли (`miner → builder → miner`);
+  3. `monsterTacticalPerceptionRejectsHiddenTargetsAndCapsPathRetries` — честное восприятие монстров без рентгена сквозь глухую стену и сброс цели при превышении `MAX_PATH_RETRIES = 3`.
+- Dedicated-server smoke-test и headless client smoke-test (`ElderScreen` в окне `427×240` под Xvfb/Mesa) включены в конвейер CI.
+- Артефакт `livingvillages-0.15.0.jar` собирается и публикуется в каждом запуске workflow.
 
 ## Что добавлено и проверено статически
 

@@ -21,19 +21,19 @@
 
 ---
 
-## 2. Фактические результаты проверок в текущем состоянии репозитория (`8635934`)
+## 2. Фактические результаты проверок в текущем состоянии репозитория (`arena/fbf16766-minecraft-mod`)
 
-При аудите репозитория на ветке `arena/fbf16766-minecraft-mod` выполнены доступные проверки со следующими реальными результатами:
+После восстановления стандартной структуры каталогов и реализации новых подсистем выполнены локальные статические проверки и полная сборка с внутриигровыми тестами в GitHub Actions CI:
 
-| Команда | Статус | Фактический результат и причина |
-|---|---|---|
-| `sh -n gradlew BUILD_LOCAL.sh` | `PASS` | Shell-синтаксис обоих скриптов корректен (код возврата `0`). |
-| `python3 -m json.tool en_us.json > /dev/null && python3 -m json.tool ru_ru.json > /dev/null` | `PASS` | Оба файла локализации являются валидным JSON. |
-| `python3 validate_project.py` | `FAIL` | `FileNotFoundError: [Errno 2] No such file or directory: '/home/user/gradle.properties'`. Скрипт ожидает расположения в подкаталоге `tools/validate_project.py`, тогда как при коммите `8635934` все файлы были загружены плоско в корень репозитория (см. [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md)). |
-| `java JavaSyntaxCheck.java .` | `NOT RUN` / `FAIL` | `/bin/bash: line 1: java: command not found` — в контейнерной среде аудита не установлен JDK 21. |
-| `./gradlew build` | `FAIL` | `/bin/bash: line 1: ./gradlew: Permission denied` — при веб-загрузке файлов потерян бит исполнения (`-rw-r--r--`). |
-| `sh gradlew build` | `FAIL` | `curl: (35) OpenSSL SSL_connect: SSL_ERROR_SYSCALL in connection to services.gradle.org:443` — в изолированной среде нет сетевого доступа к `services.gradle.org` для скачивания Gradle 9.2.1 и Maven-репозиториев NeoForge/Minecraft. |
-| `./gradlew runClient` / `./gradlew runServer` | `NOT RUN` | Заблокировано отсутствием полной сборки, JDK 21 и графического/игрового окружения. |
+| Команда | Среда выполнения | Статус | Фактический результат |
+|---|---|---|---|
+| `sh -n gradlew BUILD_LOCAL.sh && bash -n tools/smoke_test_client.sh` | Локальная среда + GitHub Actions CI | `PASS` | Shell-синтаксис всех скриптов корректен (код возврата `0`). |
+| `python3 -m json.tool src/main/resources/assets/livingvillages/lang/en_us.json` и `ru_ru.json` | Локальная среда + GitHub Actions CI | `PASS` | Оба файла локализации являются валидным JSON и содержат идентичный набор из 31 ключа. |
+| Все 13 скриптов `python3 tools/test_*.py` | Локальная среда + GitHub Actions CI | `PASS` | Все 13 статических и архитектурных регрессионных проверок (включая `test_domain_portability.py`, `test_villager_progression.py`, `test_monster_tactical_ai.py`) проходят успешно. |
+| `python3 tools/validate_project.py` (включая `java tools/JavaSyntaxCheck.java src/main/java`) | GitHub Actions CI (`Temurin Java 21`) | `PASS` | Полная статическая проверка и синтаксический разбор всех 26 Java-файлов компилятором JDK 21 прошли успешно (run `41431805194`). В локальном контейнере без установленного бинарника `java` шаг `JavaSyntaxCheck` не запускается. |
+| `./gradlew build` | GitHub Actions CI (`Temurin Java 21`) | `PASS` | Полная компиляция с зависимостями Minecraft `1.21.1` и NeoForge `21.1.264`, сборка `build/libs/livingvillages-0.15.0.jar` (run `41431805194`). |
+| `./gradlew runGameTestServer` | GitHub Actions CI (`Temurin Java 21`) | `PASS` | Успешное прохождение всех 12 внутриигровых `@GameTest` в `VillageReservationGameTests` (резервирование сундуков, `VillageRegistry`, изоляция соседних деревень, прокачка профессий `VillagerProgression` с миграцией схемы и честное восприятие `VillageMonsterAI`, run `41431805194`). |
+| Дымовой запуск `./gradlew runServer` и `bash tools/smoke_test_client.sh` (`ElderScreen`) | GitHub Actions CI (`Temurin Java 21` + `xvfb`) | `PASS` | Выделенный сервер выходит в состояние `Done!`, headless-клиент открывает `ElderScreen` и подтверждает геометрию всех 7 кнопок. |
 
 ---
 

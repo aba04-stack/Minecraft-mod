@@ -32,7 +32,7 @@ jobs:
       - name: Run in-world reservation GameTests
         run: ./gradlew runGameTestServer
       - name: Smoke-test dedicated server startup
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || startsWith(github.ref_name, 'arena/')
         shell: bash
         run: |
           set -euo pipefail
@@ -71,7 +71,7 @@ jobs:
           if [ -f run/server/logs/latest.log ]; then tail -n 200 run/server/logs/latest.log; fi
           exit 1
       - name: Smoke-test client startup with software OpenGL
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || startsWith(github.ref_name, 'arena/')
         shell: bash
         run: |
           sudo apt-get update -qq
