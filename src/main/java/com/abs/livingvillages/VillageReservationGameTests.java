@@ -1421,7 +1421,7 @@ public final class VillageReservationGameTests {
         criticalWound.setNoAi(true);
         minorWound.setHealth(12.0F);   // 75% HP
         criticalWound.setHealth(4.0F); // 25% HP
-        Mob chosenAlly = VillageMonsterAI.selectPriorityAllyForWitchSupport(
+        var chosenAlly = VillageMonsterAI.selectPriorityAllyForWitchSupport(
             witch,
             helper.getLevel(),
             witch.getBoundingBox().inflate(8.0D, 4.0D, 8.0D)
@@ -1447,7 +1447,7 @@ public final class VillageReservationGameTests {
         attackerOnCivilian.setNoAi(true);
         attackerOnCivilian.setTarget(civilian);
 
-        Mob priorityThreat = VillageDefense.selectPriorityThreat(guard, helper.getLevel(), homeA, 16);
+        var priorityThreat = VillageDefense.selectPriorityThreat(guard, helper.getLevel(), homeA, 16);
         helper.assertTrue(
             priorityThreat == attackerOnCivilian,
             "Guard must prioritize the enemy actively threatening a civilian villager over a passive closer enemy.");
