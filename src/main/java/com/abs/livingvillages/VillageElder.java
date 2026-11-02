@@ -285,8 +285,16 @@ public final class VillageElder {
             || player.distanceToSqr(elder) > INTERACTION_RADIUS_SQR) return;
 
         var data = elder.getPersistentData();
+        String notice = applyElderAction(elder, action.action());
+        if (notice == null) return;
+        sendPanel(player, elder, notice);
+    }
+
+    public static String applyElderAction(Villager elder, int actionCode) {
+        if (elder == null || !elder.isAlive() || !isElder(elder)) return null;
+        var data = elder.getPersistentData();
         String notice;
-        switch (action.action()) {
+        switch (actionCode) {
             case ACTION_TOGGLE_AUTO -> {
                 boolean enabled = !data.getBoolean(AUTO_KEY);
                 data.putBoolean(AUTO_KEY, enabled);
@@ -328,14 +336,13 @@ public final class VillageElder {
                 data.putInt(PRIORITY_KEY, PRIORITY_BALANCED);
                 notice = "Приоритет изменён: сбалансированное развитие.";
             }
-            default -> { return; }
+            default -> { return null; }
         }
         data.putString(NOTICE_KEY, notice);
-        sendPanel(player, elder, notice);
+        return notice;
     }
 
-    private static void sendPanel(ServerPlayer player, Villager elder, String notice) {
-        ServerLevel level = player.serverLevel();
+    public static ElderPanelData createPanelSnapshot(ServerLevel level, Villager elder, String notice) {
         BlockPos origin = elder.blockPosition();
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
         List<Villager> villagers = VillageArea.findVillagers(level, origin);
@@ -345,10 +352,14 @@ public final class VillageElder {
         int food = countStoredFood(level, origin);
         var data = elder.getPersistentData();
         String currentNotice = notice == null || notice.isBlank() ? data.getString(NOTICE_KEY) : notice;
-        PacketDistributor.sendToPlayer(player, new ElderPanelData(
+        return new ElderPanelData(
             elder.getUUID().toString(), villagers.size(), adults, children, beds, food,
             Math.max(PRIORITY_BALANCED, Math.min(PRIORITY_DEFENSE, data.getInt(PRIORITY_KEY))),
-            data.getBoolean(AUTO_KEY), currentNotice));
+            data.getBoolean(AUTO_KEY), currentNotice);
+    }
+
+    private static void sendPanel(ServerPlayer player, Villager elder, String notice) {
+        PacketDistributor.sendToPlayer(player, createPanelSnapshot(player.serverLevel(), elder, notice));
     }
 
     private static int countBeds(ServerLevel level, BlockPos center, int radius) {

@@ -8,10 +8,15 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
 
@@ -57,6 +62,7 @@ public final class VillageRegistry extends SavedData {
     private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> houseCheckpoints = new HashMap<>();
     private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> farmCheckpoints = new HashMap<>();
     private final Map<UUID, Long> villageAlarms = new HashMap<>();
+    private final Map<String, Integer> diplomaticStandings = new HashMap<>();
 
     private VillageRegistry() {}
 
@@ -408,6 +414,14 @@ public final class VillageRegistry extends SavedData {
                 entry.getLong("updatedTick")
             ));
         }
+        ListTag standingTags = tag.getList("diplomaticStandings", Tag.TAG_COMPOUND);
+        for (int i = 0; i < standingTags.size(); i++) {
+            CompoundTag entry = standingTags.getCompound(i);
+            String pair = entry.getString("pair");
+            if (!pair.isBlank()) {
+                data.diplomaticStandings.put(pair, entry.getInt("standing"));
+            }
+        }
         return data;
     }
 
@@ -484,6 +498,14 @@ public final class VillageRegistry extends SavedData {
             farmCheckpointTags.add(value);
         }
         tag.put("farmCheckpoints", farmCheckpointTags);
+        ListTag standingTags = new ListTag();
+        for (Map.Entry<String, Integer> entry : diplomaticStandings.entrySet()) {
+            CompoundTag value = new CompoundTag();
+            value.putString("pair", entry.getKey());
+            value.putInt("standing", entry.getValue());
+            standingTags.add(value);
+        }
+        tag.put("diplomaticStandings", standingTags);
         return tag;
     }
 
@@ -566,6 +588,145 @@ public final class VillageRegistry extends SavedData {
         if (id == null) return false;
         Long raised = get(level).villageAlarms.get(id);
         return raised != null && com.abs.livingvillages.domain.SettlementSimulationModel.isAlarmActive(raised, gameTime);
+    }
+
+    private static String pairKey(UUID a, UUID b) {
+        String sa = a.toString();
+        String sb = b.toString();
+        return sa.compareTo(sb) <= 0 ? sa + "|" + sb : sb + "|" + sa;
+    }
+
+    public static int getDiplomaticStanding(ServerLevel level, BlockPos centerA, BlockPos centerB) {
+        if (level == null || centerA == null || centerB == null) return 0;
+        UUID idA = villageId(level, centerA);
+        UUID idB = villageId(level, centerB);
+        if (idA == null || idB == null || idA.equals(idB)) return 0;
+        return get(level).diplomaticStandings.getOrDefault(pairKey(idA, idB), 0);
+    }
+
+    /**
+     * Executes an honest, 1:1 material-conserving surplus trade between two distinct peaceful
+     * settlements using real items in unreserved village-owned chests/barrels (Stage 5.3).
+     */
+    public static boolean executeNeighborTradeIfEligible(
+        ServerLevel level,
+        BlockPos centerA,
+        BlockPos centerB,
+        int breadReserveCount,
+        int plankReserveCount
+    ) {
+        if (level == null || centerA == null || centerB == null) return false;
+        UUID idA = villageId(level, centerA);
+        UUID idB = villageId(level, centerB);
+        if (idA == null || idB == null || idA.equals(idB)) return false;
+
+        long now = level.getGameTime();
+        boolean alarm = isVillageAlarmActive(level, centerA, now) || isVillageAlarmActive(level, centerB, now);
+        Container chestA = findFirstAvailableOwnedStorage(level, centerA);
+        Container chestB = findFirstAvailableOwnedStorage(level, centerB);
+        if (chestA == null || chestB == null) return false;
+
+        int breadInA = countItemInContainer(chestA, Items.BREAD);
+        int planksInB = countItemInContainer(chestB, Items.OAK_PLANKS);
+        int surplusBread = Math.max(0, breadInA - Math.max(0, breadReserveCount));
+        int surplusPlanks = Math.max(0, planksInB - Math.max(0, plankReserveCount));
+
+        VillageRegistry registry = get(level);
+        String key = pairKey(idA, idB);
+        int currentStanding = registry.diplomaticStandings.getOrDefault(key, 0);
+        var decision = com.abs.livingvillages.domain.SettlementSimulationModel.evaluateTradeCaravan(
+            currentStanding,
+            alarm,
+            surplusBread,
+            surplusPlanks
+        );
+        if (!decision.approved()) return false;
+
+        if (!canFitItemInContainer(chestB, Items.BREAD, decision.foodTransferred())
+            || !canFitItemInContainer(chestA, Items.OAK_PLANKS, decision.planksTransferred())) {
+            return false;
+        }
+
+        int removedBread = removeItemFromContainer(chestA, Items.BREAD, decision.foodTransferred());
+        if (removedBread != decision.foodTransferred()) return false;
+        int removedPlanks = removeItemFromContainer(chestB, Items.OAK_PLANKS, decision.planksTransferred());
+        if (removedPlanks != decision.planksTransferred()) {
+            insertItemIntoContainer(chestA, new ItemStack(Items.BREAD, removedBread));
+            return false;
+        }
+
+        insertItemIntoContainer(chestB, new ItemStack(Items.BREAD, removedBread));
+        insertItemIntoContainer(chestA, new ItemStack(Items.OAK_PLANKS, removedPlanks));
+        chestA.setChanged();
+        chestB.setChanged();
+
+        registry.diplomaticStandings.put(key, decision.updatedStanding());
+        registry.setDirty();
+        return true;
+    }
+
+    private static Container findFirstAvailableOwnedStorage(ServerLevel level, BlockPos center) {
+        int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -4, -radius), center.offset(radius, 4, radius))) {
+            if (!level.hasChunkAt(pos)) continue;
+            BlockState state = level.getBlockState(pos);
+            if (!state.is(Blocks.CHEST) && !state.is(Blocks.TRAPPED_CHEST) && !state.is(Blocks.BARREL)) continue;
+            if (!isStorageForVillage(level, center, pos) || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be instanceof Container container) return container;
+        }
+        return null;
+    }
+
+    private static int countItemInContainer(Container container, Item item) {
+        int total = 0;
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack stack = container.getItem(i);
+            if (stack.is(item)) total += stack.getCount();
+        }
+        return total;
+    }
+
+    private static boolean canFitItemInContainer(Container container, Item item, int amount) {
+        int room = 0;
+        int maxStack = item.getDefaultInstance().getMaxStackSize();
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack stack = container.getItem(i);
+            if (stack.isEmpty()) room += maxStack;
+            else if (stack.is(item)) room += Math.max(0, stack.getMaxStackSize() - stack.getCount());
+            if (room >= amount) return true;
+        }
+        return room >= amount;
+    }
+
+    private static int removeItemFromContainer(Container container, Item item, int amount) {
+        int remaining = amount;
+        for (int i = 0; i < container.getContainerSize() && remaining > 0; i++) {
+            ItemStack stack = container.getItem(i);
+            if (!stack.is(item)) continue;
+            int take = Math.min(remaining, stack.getCount());
+            container.removeItem(i, take);
+            remaining -= take;
+        }
+        return amount - remaining;
+    }
+
+    private static void insertItemIntoContainer(Container container, ItemStack stack) {
+        for (int pass = 0; pass < 2 && !stack.isEmpty(); pass++) {
+            for (int i = 0; i < container.getContainerSize() && !stack.isEmpty(); i++) {
+                ItemStack existing = container.getItem(i);
+                if (pass == 0 && !existing.isEmpty() && ItemStack.isSameItemSameComponents(existing, stack)) {
+                    int move = Math.min(stack.getCount(), existing.getMaxStackSize() - existing.getCount());
+                    if (move > 0) {
+                        existing.grow(move);
+                        stack.shrink(move);
+                    }
+                } else if (pass == 1 && existing.isEmpty()) {
+                    container.setItem(i, stack.copy());
+                    stack.setCount(0);
+                }
+            }
+        }
     }
 
     private static ListTag writeOwners(Map<Long, UUID> owners) {

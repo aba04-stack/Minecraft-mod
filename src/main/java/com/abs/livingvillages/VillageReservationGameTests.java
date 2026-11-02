@@ -833,6 +833,103 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "two_villages_elder_and_trade")
+    public static void twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade(GameTestHelper helper) {
+        for (int x = 0; x <= 30; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos homeOneA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeOneB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos homeTwoA = helper.absolutePos(new BlockPos(25, 1, 1));
+        BlockPos homeTwoB = helper.absolutePos(new BlockPos(27, 1, 1));
+        BlockPos storageOne = helper.absolutePos(new BlockPos(5, 1, 1));
+        BlockPos storageTwo = helper.absolutePos(new BlockPos(23, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(23, 1, 1), Blocks.CHEST);
+
+        Villager oneA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager oneB = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        Villager oneC = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        Villager oneD = helper.spawn(EntityType.VILLAGER, 4, 1, 1);
+        Villager twoA = helper.spawn(EntityType.VILLAGER, 25, 1, 1);
+        Villager twoB = helper.spawn(EntityType.VILLAGER, 26, 1, 1);
+        Villager twoC = helper.spawn(EntityType.VILLAGER, 27, 1, 1);
+        Villager twoD = helper.spawn(EntityType.VILLAGER, 28, 1, 1);
+
+        for (Villager v : List.of(oneA, oneB, oneC, oneD)) {
+            v.setNoAi(true);
+            v.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeOneA));
+        }
+        oneC.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeOneB));
+        oneD.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeOneB));
+
+        for (Villager v : List.of(twoA, twoB, twoC, twoD)) {
+            v.setNoAi(true);
+            v.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeTwoA));
+        }
+        twoC.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeTwoB));
+        twoD.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeTwoB));
+
+        BlockPos centerOne = helper.absolutePos(new BlockPos(2, 1, 1));
+        BlockPos centerTwo = helper.absolutePos(new BlockPos(26, 1, 1));
+
+        List<Villager> groupOne = VillageArea.findVillagers(helper.getLevel(), centerOne);
+        List<Villager> groupTwo = VillageArea.findVillagers(helper.getLevel(), centerTwo);
+        VillageElder.ensureElder(helper.getLevel(), centerOne, groupOne);
+        VillageElder.ensureElder(helper.getLevel(), centerTwo, groupTwo);
+
+        Villager elderOne = groupOne.stream().filter(VillageElder::isElder).findFirst().orElse(null);
+        Villager elderTwo = groupTwo.stream().filter(VillageElder::isElder).findFirst().orElse(null);
+        helper.assertTrue(elderOne != null && elderTwo != null && !elderOne.getUUID().equals(elderTwo.getUUID()),
+            "Two neighboring populated villages must elect independent elders.");
+
+        // Apply distinct server-validated elder orders in each village and verify isolation.
+        VillageElder.applyElderAction(elderOne, 2); // ACTION_REQUEST_HOUSE
+        VillageElder.applyElderAction(elderTwo, 4); // ACTION_DEFENSE_PRIORITY
+        helper.assertTrue(
+            VillageElder.pendingRequest(groupOne) == VillageElder.REQUEST_HOUSE
+                && VillageElder.priorityForVillagers(groupOne) == VillageElder.PRIORITY_HOUSING,
+            "Village one must record the house order and housing priority.");
+        helper.assertTrue(
+            VillageElder.pendingRequest(groupTwo) == VillageElder.REQUEST_NONE
+                && VillageElder.priorityForVillagers(groupTwo) == VillageElder.PRIORITY_DEFENSE,
+            "Village two must retain its own defense priority without receiving village one's house request.");
+
+        // Stock both village chests and execute a real 1:1 physical surplus trade caravan.
+        Container chestOne = (Container) helper.getLevel().getBlockEntity(storageOne);
+        Container chestTwo = (Container) helper.getLevel().getBlockEntity(storageTwo);
+        helper.assertTrue(chestOne != null && chestTwo != null, "Both village chests must exist.");
+        chestOne.setItem(0, new ItemStack(Items.BREAD, 16));
+        chestTwo.setItem(0, new ItemStack(Items.OAK_PLANKS, 32));
+
+        var snapshotOne = VillageElder.createPanelSnapshot(helper.getLevel(), elderOne, null);
+        helper.assertTrue(snapshotOne.population() == 4 && snapshotOne.foodPoints() == 64,
+            "Elder panel snapshot must report the owning village's population and stored food points.");
+
+        helper.assertTrue(
+            VillageRegistry.executeNeighborTradeIfEligible(helper.getLevel(), centerOne, centerTwo, 4, 8),
+            "Peaceful neighboring villages with real surplus must execute a physical trade caravan.");
+
+        // 16 bread - 4 reserve = 12 surplus (3 bundles of 4 bread <-> 3 bundles of 8 planks = 24 planks).
+        int breadAfterOne = chestOne.getItem(0).is(Items.BREAD) ? chestOne.getItem(0).getCount() : 0;
+        int planksAfterOne = chestOne.getItem(1).is(Items.OAK_PLANKS) ? chestOne.getItem(1).getCount() : 0;
+        int planksAfterTwo = chestTwo.getItem(0).is(Items.OAK_PLANKS) ? chestTwo.getItem(0).getCount() : 0;
+        int breadAfterTwo = chestTwo.getItem(1).is(Items.BREAD) ? chestTwo.getItem(1).getCount() : 0;
+
+        helper.assertTrue(
+            breadAfterOne + breadAfterTwo == 16 && planksAfterOne + planksAfterTwo == 32,
+            "Inter-settlement trade must strictly conserve total bread and planks (zero free items).");
+        helper.assertTrue(
+            planksAfterOne == 24 && breadAfterTwo == 12,
+            "Each village's chest must physically receive the traded goods from its neighbor.");
+        helper.assertTrue(
+            VillageRegistry.getDiplomaticStanding(helper.getLevel(), centerOne, centerTwo) == 15,
+            "Successful surplus trade must increase persistent diplomatic standing between the two villages.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {
