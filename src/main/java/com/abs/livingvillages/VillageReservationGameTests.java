@@ -650,6 +650,111 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "orphaned_project_recovery")
+    public static void orphanedHouseProjectIsResumedByReplacementBuilderInSameVillage(GameTestHelper helper) {
+        placeFloor(helper);
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos site = helper.absolutePos(new BlockPos(6, 1, 1));
+
+        Villager firstBuilder = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager secondBuilder = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        firstBuilder.setNoAi(true);
+        secondBuilder.setNoAi(true);
+        firstBuilder.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeA));
+        secondBuilder.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeB));
+        firstBuilder.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_BUILDER);
+        secondBuilder.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_BUILDER);
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        VillageRegistry.recordHouseCheckpoint(
+            helper.getLevel(),
+            center,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "house",
+                site.getX(),
+                site.getY(),
+                site.getZ(),
+                "minecraft:oak_planks",
+                "minecraft:oak_door",
+                14,
+                98,
+                firstBuilder.getUUID().toString(),
+                100L
+            )
+        );
+        firstBuilder.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, true);
+
+        // While the original builder is alive and active in the village, the replacement builder must not steal it.
+        helper.assertTrue(
+            !VillageBuilder.tryResumeOrphanedHouseProject(helper.getLevel(), center),
+            "An active house project owned by a living builder must not be stolen by another worker.");
+
+        // Simulate the original builder dying/disappearing mid-project (KI-006).
+        firstBuilder.discard();
+
+        helper.assertTrue(
+            VillageBuilder.tryResumeOrphanedHouseProject(helper.getLevel(), center),
+            "When the original builder is lost, an available builder in the same village must resume the checkpoint.");
+        helper.assertTrue(
+            VillageBuilder.isProjectActive(secondBuilder)
+                && secondBuilder.getPersistentData().getInt("livingvillages_builder_step_index") == 14,
+            "The replacement builder must adopt the exact saved step_index from the village checkpoint.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "alarm_and_simulation_rules")
+    public static void villageAlarmEvacuatesCiviliansAndHonestCatchUpConservesMaterials(GameTestHelper helper) {
+        placeFloor(helper);
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(8, 1, 1));
+
+        Villager guard = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager civilian = helper.spawn(EntityType.VILLAGER, 5, 1, 1);
+        guard.setNoAi(true);
+        civilian.setNoAi(true);
+        guard.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeA));
+        civilian.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), homeB));
+        guard.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_GUARD);
+
+        BlockPos center = helper.absolutePos(new BlockPos(3, 1, 1));
+        VillageRegistry.raiseVillageAlarm(helper.getLevel(), center, helper.getLevel().getGameTime());
+        VillageDefense.evacuateNearbyCivilians(helper.getLevel(), center);
+
+        helper.assertTrue(
+            civilian.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET),
+            "A village defense alarm must direct idle non-guard civilians toward their shelter HOME.");
+        helper.assertTrue(
+            !guard.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET),
+            "Guards must not be routed into civilian evacuation when an alarm sounds.");
+
+        // Verify honest furnace catch-up never creates ingots without real ore and fuel.
+        var noFuel = com.abs.livingvillages.domain.SettlementSimulationModel.evaluateFurnaceCatchUp(2000L, 10, 0, 10);
+        helper.assertTrue(
+            noFuel.smeltedCount() == 0 && noFuel.oreConsumed() == 0,
+            "Catch-up simulation must produce 0 ingots when no real fuel is available.");
+
+        var bounded = com.abs.livingvillages.domain.SettlementSimulationModel.evaluateFurnaceCatchUp(2000L, 5, 1, 10);
+        helper.assertTrue(
+            bounded.smeltedCount() == 5 && bounded.oreConsumed() == 5 && bounded.fuelConsumed() == 1,
+            "Catch-up simulation must conserve matter 1:1 with real ore and fuel.");
+
+        // Verify raider squad scouting and 50% loss retreat rules.
+        helper.assertTrue(
+            com.abs.livingvillages.domain.SettlementSimulationModel.evaluateRaiderSquad(false, 4, 4)
+                == com.abs.livingvillages.domain.SettlementSimulationModel.SQUAD_HOLD_SCOUT,
+            "Raider squads must hold until a scout perceives the settlement.");
+        helper.assertTrue(
+            com.abs.livingvillages.domain.SettlementSimulationModel.evaluateRaiderSquad(true, 4, 2)
+                == com.abs.livingvillages.domain.SettlementSimulationModel.SQUAD_RETREAT,
+            "Raider squads losing 50% of their force must transition to organized retreat.");
+        helper.succeed();
+    }
+
     private static void placeFloor(GameTestHelper helper) {
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {

@@ -139,13 +139,86 @@ public final class VillageBuilder {
         CompoundTag data = builder.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
         data.putInt(PHASE, FETCH_PLANKS);
-        data.putString(PLANK_ITEM, BuiltInRegistries.ITEM.getKey(plankItem).toString());
-        data.putString(DOOR_ITEM, BuiltInRegistries.ITEM.getKey(doorItem).toString());
+        String plankKey = BuiltInRegistries.ITEM.getKey(plankItem).toString();
+        String doorKey = BuiltInRegistries.ITEM.getKey(doorItem).toString();
+        data.putString(PLANK_ITEM, plankKey);
+        data.putString(DOOR_ITEM, doorKey);
         data.putInt(SITE_X, site.getX()); data.putInt(SITE_Y, site.getY()); data.putInt(SITE_Z, site.getZ());
         data.putInt(STEP_INDEX, 0);
         data.putLong(STARTED, level.getGameTime());
         data.putLong(NEXT_ACTION, 0L);
         clearOwnedRoute(builder, data);
+        VillageRegistry.recordHouseCheckpoint(
+            level,
+            center,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "house",
+                site.getX(),
+                site.getY(),
+                site.getZ(),
+                plankKey,
+                doorKey,
+                0,
+                PLANKS_REQUIRED + 2,
+                builder.getUUID().toString(),
+                level.getGameTime()
+            )
+        );
+        return true;
+    }
+
+    /**
+     * Resumes an unfinished house construction project if the original builder in this village
+     * died or was removed before completing all steps (resolves KI-006).
+     */
+    public static boolean tryResumeOrphanedHouseProject(ServerLevel level, BlockPos center) {
+        if (!LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
+            || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
+        var checkpoint = VillageRegistry.getHouseCheckpoint(level, center);
+        if (checkpoint == null) return false;
+
+        List<Villager> residents = VillageArea.findVillagers(level, center);
+        boolean ownerAliveInVillage = residents.stream().anyMatch(
+            v -> v.isAlive() && v.getUUID().toString().equals(checkpoint.ownerWorkerId()) && isProjectActive(v)
+        );
+        Villager replacement = findAvailableBuilder(level, center);
+        if (!com.abs.livingvillages.domain.SettlementSimulationModel.canResumeOrphanedProject(
+            checkpoint,
+            ownerAliveInVillage,
+            replacement != null
+        )) {
+            return false;
+        }
+
+        CompoundTag data = replacement.getPersistentData();
+        data.putBoolean(ACTIVE_KEY, true);
+        data.putInt(PHASE, FETCH_PLANKS);
+        data.putString(PLANK_ITEM, checkpoint.primaryMaterialId());
+        data.putString(DOOR_ITEM, checkpoint.secondaryMaterialId());
+        data.putInt(SITE_X, checkpoint.siteX());
+        data.putInt(SITE_Y, checkpoint.siteY());
+        data.putInt(SITE_Z, checkpoint.siteZ());
+        data.putInt(STEP_INDEX, checkpoint.stepIndex());
+        data.putLong(STARTED, level.getGameTime());
+        data.putLong(NEXT_ACTION, 0L);
+        clearOwnedRoute(replacement, data);
+
+        VillageRegistry.recordHouseCheckpoint(
+            level,
+            center,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                checkpoint.projectKind(),
+                checkpoint.siteX(),
+                checkpoint.siteY(),
+                checkpoint.siteZ(),
+                checkpoint.primaryMaterialId(),
+                checkpoint.secondaryMaterialId(),
+                checkpoint.stepIndex(),
+                checkpoint.totalSteps(),
+                replacement.getUUID().toString(),
+                level.getGameTime()
+            )
+        );
         return true;
     }
 
@@ -265,6 +338,7 @@ public final class VillageBuilder {
         List<BuildStep> steps = makeHousePlan(site, plankBlock, doorBlock);
         int index = data.getInt(STEP_INDEX);
         if (index >= steps.size()) {
+            VillageRegistry.clearHouseCheckpoint(level, villager.blockPosition());
             VillagerProgression.recordCompletedWork(
                 villager,
                 com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER,
@@ -362,8 +436,30 @@ public final class VillageBuilder {
         }
         villager.getInventory().setChanged();
         villager.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
-        data.putInt(STEP_INDEX, index + 1);
-        data.putLong(NEXT_ACTION, now + BUILD_STEP_INTERVAL_TICKS);
+        int nextStep = index + 1;
+        data.putInt(STEP_INDEX, nextStep);
+        long adjustedInterval = VillagerProgression.adjustedDurationTicks(
+            villager,
+            com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER,
+            (int) BUILD_STEP_INTERVAL_TICKS
+        );
+        data.putLong(NEXT_ACTION, now + Math.min(BUILD_STEP_INTERVAL_TICKS, adjustedInterval));
+        VillageRegistry.recordHouseCheckpoint(
+            level,
+            villager.blockPosition(),
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "house",
+                site.getX(),
+                site.getY(),
+                site.getZ(),
+                data.getString(PLANK_ITEM),
+                data.getString(DOOR_ITEM),
+                nextStep,
+                steps.size(),
+                villager.getUUID().toString(),
+                now
+            )
+        );
     }
 
     private static List<BuildStep> makeHousePlan(BlockPos base, Block plankBlock, Block doorBlock) {

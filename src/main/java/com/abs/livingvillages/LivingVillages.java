@@ -114,6 +114,9 @@ public final class LivingVillages {
 
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
             VillageElder.ensureElder(level, villageCenter, villagers);
+            if (LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) {
+                VillageBuilder.tryResumeOrphanedHouseProject(level, villageCenter);
+            }
 
             // Do not let a second project spend ingredients while a worker carries a reserved order.
             if (villagers.stream().anyMatch(v -> v.getPersistentData().getBoolean(VillageCraftingJobs.ACTIVE_KEY)

@@ -7,7 +7,7 @@ DOMAIN_DIR = ROOT / "src/main/java/com/abs/livingvillages/domain"
 
 assert DOMAIN_DIR.exists(), "Domain package directory must exist."
 domain_files = sorted(DOMAIN_DIR.glob("*.java"))
-assert len(domain_files) >= 3, "Domain package must contain progression, monster AI, and tick budget models."
+assert len(domain_files) >= 4, "Domain package must contain progression, monster AI, tick budget, and settlement models."
 
 forbidden_prefixes = (
     "import net.minecraft.",
@@ -35,5 +35,12 @@ assert "public record TacticalDecision(" in monster_model
 budget_model = (DOMAIN_DIR / "TickBudgetModel.java").read_text(encoding="utf-8")
 assert "public static boolean isScheduledThisTick(" in budget_model
 assert "public static boolean canConsumeQuota(" in budget_model
+
+settlement_model = (DOMAIN_DIR / "SettlementSimulationModel.java").read_text(encoding="utf-8")
+assert "public record ProjectCheckpoint(" in settlement_model
+assert "public record CatchUpResult(" in settlement_model
+assert "public static boolean canResumeOrphanedProject(" in settlement_model
+assert "public static CatchUpResult evaluateFurnaceCatchUp(" in settlement_model
+assert "public static int evaluateRaiderSquad(" in settlement_model
 
 print("DOMAIN PORTABILITY PASSED: zero Minecraft/NeoForge imports in domain package; pure DTO contracts verified")

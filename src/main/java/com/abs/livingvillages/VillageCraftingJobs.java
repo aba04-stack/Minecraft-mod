@@ -372,7 +372,15 @@ public final class VillageCraftingJobs {
             data.putInt(STAGE, GO_TO_TABLE);
             return;
         }
-        if (now - data.getLong(CRAFT_STARTED) < CRAFT_DURATION_TICKS) return;
+        long requiredCraftTicks = Math.min(
+            CRAFT_DURATION_TICKS,
+            VillagerProgression.adjustedDurationTicks(
+                villager,
+                com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_CRAFTSMAN,
+                (int) CRAFT_DURATION_TICKS
+            )
+        );
+        if (now - data.getLong(CRAFT_STARTED) < requiredCraftTicks) return;
         if (firstMissingIngredient(villager, recipe) != null) {
             data.putInt(STAGE, GATHER_INPUTS);
             return;

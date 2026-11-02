@@ -37,6 +37,8 @@ import java.util.WeakHashMap;
  * Split/merge behavior still requires validation in a real client world.
  */
 public final class VillageRegistry extends SavedData {
+    public static final int SCHEMA_VERSION = 1;
+    private static final String SCHEMA_VERSION_KEY = "schema_version";
     private static final String DATA_NAME = "livingvillages_village_registry";
     private static final Factory<VillageRegistry> FACTORY =
         new Factory<>(VillageRegistry::new, VillageRegistry::load, null);
@@ -52,6 +54,8 @@ public final class VillageRegistry extends SavedData {
     private final Map<Long, UUID> storageOwners = new HashMap<>();
     private final Map<Long, UUID> bedOwners = new HashMap<>();
     private final Map<Long, UUID> workBlockOwners = new HashMap<>();
+    private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> houseCheckpoints = new HashMap<>();
+    private final Map<UUID, Long> villageAlarms = new HashMap<>();
 
     private VillageRegistry() {}
 
@@ -367,11 +371,30 @@ public final class VillageRegistry extends SavedData {
         data.storageOwners.putAll(readOwners(tag.getList("storageOwners", Tag.TAG_COMPOUND)));
         data.bedOwners.putAll(readOwners(tag.getList("bedOwners", Tag.TAG_COMPOUND)));
         data.workBlockOwners.putAll(readOwners(tag.getList("workBlockOwners", Tag.TAG_COMPOUND)));
+        ListTag checkpointTags = tag.getList("houseCheckpoints", Tag.TAG_COMPOUND);
+        for (int i = 0; i < checkpointTags.size(); i++) {
+            CompoundTag entry = checkpointTags.getCompound(i);
+            UUID id = parseUuid(entry.getString("village"));
+            if (id == null) continue;
+            data.houseCheckpoints.put(id, new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                entry.getString("kind"),
+                entry.getInt("siteX"),
+                entry.getInt("siteY"),
+                entry.getInt("siteZ"),
+                entry.getString("primaryMaterial"),
+                entry.getString("secondaryMaterial"),
+                entry.getInt("stepIndex"),
+                entry.getInt("totalSteps"),
+                entry.getString("ownerWorker"),
+                entry.getLong("updatedTick")
+            ));
+        }
         return data;
     }
 
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
+        tag.putInt(SCHEMA_VERSION_KEY, SCHEMA_VERSION);
         ListTag villageTags = new ListTag();
         for (Map.Entry<UUID, BlockPos> entry : villageAnchors.entrySet()) {
             CompoundTag value = new CompoundTag();
@@ -404,7 +427,74 @@ public final class VillageRegistry extends SavedData {
         tag.put("storageOwners", writeOwners(storageOwners));
         tag.put("bedOwners", writeOwners(bedOwners));
         tag.put("workBlockOwners", writeOwners(workBlockOwners));
+        ListTag checkpointTags = new ListTag();
+        for (Map.Entry<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> entry : houseCheckpoints.entrySet()) {
+            var cp = entry.getValue();
+            if (cp == null) continue;
+            CompoundTag value = new CompoundTag();
+            value.putString("village", entry.getKey().toString());
+            value.putString("kind", cp.projectKind());
+            value.putInt("siteX", cp.siteX());
+            value.putInt("siteY", cp.siteY());
+            value.putInt("siteZ", cp.siteZ());
+            value.putString("primaryMaterial", cp.primaryMaterialId());
+            value.putString("secondaryMaterial", cp.secondaryMaterialId());
+            value.putInt("stepIndex", cp.stepIndex());
+            value.putInt("totalSteps", cp.totalSteps());
+            value.putString("ownerWorker", cp.ownerWorkerId());
+            value.putLong("updatedTick", cp.updatedTick());
+            checkpointTags.add(value);
+        }
+        tag.put("houseCheckpoints", checkpointTags);
         return tag;
+    }
+
+    public static void recordHouseCheckpoint(
+        ServerLevel level,
+        BlockPos center,
+        com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint checkpoint
+    ) {
+        if (level == null || center == null || checkpoint == null) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        VillageRegistry registry = get(level);
+        registry.houseCheckpoints.put(id, checkpoint);
+        registry.setDirty();
+    }
+
+    public static void clearHouseCheckpoint(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        VillageRegistry registry = get(level);
+        if (registry.houseCheckpoints.remove(id) != null) {
+            registry.setDirty();
+        }
+    }
+
+    public static com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint getHouseCheckpoint(
+        ServerLevel level,
+        BlockPos center
+    ) {
+        if (level == null || center == null) return null;
+        UUID id = villageId(level, center);
+        if (id == null) return null;
+        return get(level).houseCheckpoints.get(id);
+    }
+
+    public static void raiseVillageAlarm(ServerLevel level, BlockPos center, long gameTime) {
+        if (level == null || center == null) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        get(level).villageAlarms.put(id, gameTime);
+    }
+
+    public static boolean isVillageAlarmActive(ServerLevel level, BlockPos center, long gameTime) {
+        if (level == null || center == null) return false;
+        UUID id = villageId(level, center);
+        if (id == null) return false;
+        Long raised = get(level).villageAlarms.get(id);
+        return raised != null && com.abs.livingvillages.domain.SettlementSimulationModel.isAlarmActive(raised, gameTime);
     }
 
     private static ListTag writeOwners(Map<Long, UUID> owners) {

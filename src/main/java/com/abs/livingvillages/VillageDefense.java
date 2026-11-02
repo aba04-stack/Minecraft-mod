@@ -77,6 +77,8 @@ public final class VillageDefense {
         Mob threat = findThreat(guard, level, home, radius);
         if (threat != null) {
             data.putLong(NEXT_PATROL, now + PATROL_INTERVAL_TICKS);
+            VillageRegistry.raiseVillageAlarm(level, home, now);
+            evacuateNearbyCivilians(level, home);
             defendAgainst(guard, threat, level, data, now);
             return;
         }
@@ -113,7 +115,8 @@ public final class VillageDefense {
 
     private static void defendAgainst(Villager guard, Mob threat, ServerLevel level, CompoundTag data, long now) {
         // If critically wounded, fall back toward the nearby group instead of charging to death.
-        if (guard.getHealth() <= guard.getMaxHealth() * 0.35F) {
+        float retreatFactor = VillagerProgression.retreatHealthThreshold(guard, 0.35F);
+        if (guard.getHealth() <= guard.getMaxHealth() * retreatFactor) {
             BlockPos retreat = getOrCreateHome(guard, level, LivingVillagesConfig.VILLAGE_DEFENSE_RADIUS_BLOCKS.get());
             boolean alreadyRetreating = data.getBoolean(HAS_ROUTE) && data.getString(ROUTE_KIND).equals("retreat");
             boolean routeMissing = !guard.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET);
@@ -330,5 +333,31 @@ public final class VillageDefense {
         data.putBoolean(HAS_ROUTE, false);
         data.remove(ROUTE_X); data.remove(ROUTE_Y); data.remove(ROUTE_Z);
         data.remove(ROUTE_KIND); data.remove(ROUTE_THREAT_UUID); data.remove(LAST_ROUTE_ORDER);
+    }
+
+    public static void evacuateNearbyCivilians(ServerLevel level, BlockPos home) {
+        if (level == null || home == null) return;
+        boolean alarmActive = VillageRegistry.isVillageAlarmActive(level, home, level.getGameTime());
+        if (!alarmActive) return;
+
+        List<Villager> residents = VillageArea.findVillagers(level, home);
+        for (Villager resident : residents) {
+            if (!resident.isAlive()) continue;
+            if (!com.abs.livingvillages.domain.SettlementSimulationModel.shouldEvacuateCivilian(
+                alarmActive,
+                VillagerRoles.isGuard(resident),
+                resident.isSleeping()
+            )) {
+                continue;
+            }
+            if (resident.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) continue;
+            BlockPos shelter = resident.getBrain().getMemory(MemoryModuleType.HOME)
+                .filter(global -> global.dimension().equals(level.dimension()))
+                .map(net.minecraft.core.GlobalPos::pos)
+                .orElse(home);
+            if (resident.blockPosition().distSqr(shelter) > 4.0D) {
+                resident.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(shelter, 0.75F, 1));
+            }
+        }
     }
 }
