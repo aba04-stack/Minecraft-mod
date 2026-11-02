@@ -798,8 +798,12 @@ public final class VillageBuilder {
         int missingPlanks = Math.max(0, planks - countItem(inventory, plankItem));
         int missingBeds = Math.max(0, 1 - countItem(inventory, bedItem));
         int missingDoors = Math.max(0, 1 - countItem(inventory, doorItem));
-        return simulateInsert(simulation, missingPlanks == 0 ? ItemStack.EMPTY : new ItemStack(plankItem, missingPlanks))
-            && simulateInsert(simulation, missingBeds == 0 ? ItemStack.EMPTY : new ItemStack(bedItem, missingBeds))
+        while (missingPlanks > 0) {
+            int batch = Math.min(plankItem.getDefaultMaxStackSize(), missingPlanks);
+            if (!simulateInsert(simulation, new ItemStack(plankItem, batch))) return false;
+            missingPlanks -= batch;
+        }
+        return simulateInsert(simulation, missingBeds == 0 ? ItemStack.EMPTY : new ItemStack(bedItem, missingBeds))
             && simulateInsert(simulation, missingDoors == 0 ? ItemStack.EMPTY : new ItemStack(doorItem, missingDoors));
     }
 

@@ -1720,7 +1720,7 @@ public final class VillageReservationGameTests {
         int compressedSandstone = VillageIndustry.compressSandToSandstoneIfEligible(desertChest);
         helper.assertTrue(
             compressedSandstone == 16
-                && desertChest.getItem(0).isEmpty()
+                && countItem(desertChest, Items.SAND) == 0
                 && countItem(desertChest, Items.SANDSTONE) == 16,
             "64 Sand must compress 4:1 into 16 Sandstone without creating or losing materials.");
 
@@ -1757,7 +1757,7 @@ public final class VillageReservationGameTests {
             "Builder must support all 16 bed colors, biome structural blocks, and available wooden doors.");
 
         desertBuilder.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_BUILDER);
-        BlockPos houseSite = helper.absolutePos(new BlockPos(10, 1, 0));
+        BlockPos houseSite = helper.absolutePos(new BlockPos(180, 1, 180));
         boolean startedSandstoneHouse = VillageBuilder.startHouseProject(
             helper.getLevel(),
             desertCenter,
@@ -1769,6 +1769,8 @@ public final class VillageReservationGameTests {
         helper.assertTrue(
             startedSandstoneHouse && VillageBuilder.isProjectActive(desertBuilder),
             "Desert settlement must be able to start a house project using 96 Sandstone, Yellow Bed, and Acacia Door.");
+        desertBuilder.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, false);
+        VillageReservations.release(desertBuilder.getPersistentData());
 
         // 5. AI Arbitration, Task Anti-Hang Watchdog & Role Stability (Points 2, 3, 4, 5).
         desertA.getPersistentData().putLong(VillagerRoles.TASK_PROGRESS_TICK_KEY, 100L);
