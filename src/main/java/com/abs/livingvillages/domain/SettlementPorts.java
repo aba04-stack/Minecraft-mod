@@ -65,10 +65,10 @@ public final class SettlementPorts {
         String ingotItemId
     ) {
         if (world == null || storage == null) {
-            return new SettlementSimulationModel.CatchUpResult(0, 0, 0);
+            return new SettlementSimulationModel.CatchUpResult(0, 0, 0, 0L);
         }
         if (!world.isPositionLoaded(x, y, z) || !world.hasOwnedFurnaceNear(x, y, z)) {
-            return new SettlementSimulationModel.CatchUpResult(0, 0, 0);
+            return new SettlementSimulationModel.CatchUpResult(0, 0, 0, 0L);
         }
         int ore = storage.countItem(x, y, z, rawOreItemId);
         int coal = storage.countItem(x, y, z, coalItemId);
