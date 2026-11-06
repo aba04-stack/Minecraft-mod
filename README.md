@@ -93,3 +93,4 @@ sh -n gradlew BUILD_LOCAL.sh
 - **[Архитектура и материальный баланс (`ARCHITECTURE.md`)](ARCHITECTURE.md)**
 - **[Список проверок (`BUILD_CHECKLIST.md`)](BUILD_CHECKLIST.md)** и **[Отчёт проверки (`TEST_REPORT_RU.md`)](TEST_REPORT_RU.md)**
 - **[История изменений (`CHANGELOG_RU.md`)](CHANGELOG_RU.md)**, **[Памятка разработчику (`HANDOFF_TO_NEXT_AI_RU.md`)](HANDOFF_TO_NEXT_AI_RU.md)** и **[Исследование идей модов (`RESEARCH_IDEAS_RU.md`)](RESEARCH_IDEAS_RU.md)**
+19. **[Пещерная разведка и укрепления (docs/CAVE_EXPLORATION_AND_FORTIFICATIONS.md)](docs/CAVE_EXPLORATION_AND_FORTIFICATIONS.md)** — состояние памяти маршрута шахтёра, настоящих факелов, ограничений разведки и план безопасных оград.
