@@ -90,6 +90,8 @@ public final class VillagerAutonomy {
             if (data.getBoolean(TARGET_ACTIVE)) {
                 cancelTrip(villager, data);
             }
+            clearHarvestRoute(villager, data);
+            data.putBoolean(HARVEST_CYCLE_KEY, false);
             return;
         }
 
