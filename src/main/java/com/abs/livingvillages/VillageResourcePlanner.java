@@ -45,7 +45,7 @@ public final class VillageResourcePlanner {
         if (villageId == null) {
             return VillageResourceDemandModel.evaluate(new VillageResourceDemandModel.Stock(
                 residents == null ? 0 : (int) residents.stream().filter(v -> !v.isBaby()).count(),
-                0, 0, 0, 0, 0, 0));
+                0, 0, 0, 0, 0, false, 0));
         }
 
         long now = level.getGameTime();
