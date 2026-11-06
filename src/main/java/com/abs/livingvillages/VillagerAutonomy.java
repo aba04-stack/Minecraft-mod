@@ -53,11 +53,21 @@ public final class VillagerAutonomy {
     private static final String HARVEST_FAILED_Y = PREFIX + "harvest_failed_y";
     private static final String HARVEST_FAILED_Z = PREFIX + "harvest_failed_z";
     private static final String HARVEST_FAILED_UNTIL = PREFIX + "harvest_failed_until";
+    private static final String SEED_FETCH_ACTIVE = PREFIX + "seed_fetch_active";
+    private static final String SEED_FETCH_CHEST_X = PREFIX + "seed_fetch_chest_x";
+    private static final String SEED_FETCH_CHEST_Y = PREFIX + "seed_fetch_chest_y";
+    private static final String SEED_FETCH_CHEST_Z = PREFIX + "seed_fetch_chest_z";
+    private static final String SEED_FETCH_STAND_X = PREFIX + "seed_fetch_stand_x";
+    private static final String SEED_FETCH_STAND_Y = PREFIX + "seed_fetch_stand_y";
+    private static final String SEED_FETCH_STAND_Z = PREFIX + "seed_fetch_stand_z";
+    private static final String SEED_FETCH_STARTED = PREFIX + "seed_fetch_started";
+    private static final String SEED_FETCH_LAST_ORDER = PREFIX + "seed_fetch_last_order";
 
     private static final int MAX_CROPS_PER_PASS = 4;
     private static final long HARVEST_ROUTE_TIMEOUT_TICKS = 1200L;
     private static final long HARVEST_TARGET_COOLDOWN_TICKS = 12000L;
     private static final long HARVEST_ROUTE_REISSUE_TICKS = 40L;
+    private static final long SEED_FETCH_TIMEOUT_TICKS = 1200L;
 
     private static final int SEARCH_STAGGER_TICKS = 400;
     private static final int RETRY_DELAY_TICKS = 80;
@@ -107,6 +117,11 @@ public final class VillagerAutonomy {
         }
 
         long now = level.getGameTime();
+
+        if (data.getBoolean(SEED_FETCH_ACTIVE)) {
+            continueSeedFetch(villager, level, data, now);
+            return;
+        }
 
         // Do not pull a villager away from rest. Cancel only this mod's own route.
         long dayTime = Math.floorMod(level.getDayTime(), 24000L);
