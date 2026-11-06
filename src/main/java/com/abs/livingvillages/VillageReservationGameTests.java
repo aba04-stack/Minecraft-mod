@@ -2106,6 +2106,47 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 40, batch = "daily_life")
+    public static void idleResidentsCreateOneRealSocialRouteAndReleaseItsClaim(GameTestHelper helper) {
+        for (int x = 0; x <= 10; x++) {
+            for (int z = 0; z <= 10; z++) {
+                helper.setBlock(x, 0, z, Blocks.STONE);
+            }
+        }
+        Villager visitor = helper.spawn(EntityType.VILLAGER, 2, 1, 2);
+        Villager peer = helper.spawn(EntityType.VILLAGER, 6, 1, 2);
+        Villager thirdResident = helper.spawn(EntityType.VILLAGER, 6, 1, 6);
+        visitor.getBrain().setActiveActivityIfPossible(net.minecraft.world.entity.schedule.Activity.IDLE);
+        peer.getBrain().setActiveActivityIfPossible(net.minecraft.world.entity.schedule.Activity.IDLE);
+        thirdResident.getBrain().setActiveActivityIfPossible(net.minecraft.world.entity.schedule.Activity.IDLE);
+
+        long now = helper.getLevel().getGameTime();
+        boolean started = VillageDailyLife.tryStartSocialVisit(visitor, helper.getLevel(), now);
+        helper.assertTrue(started
+                && visitor.getPersistentData().getBoolean("livingvillages_daily_life_social_active")
+                && visitor.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET),
+            "An idle adult with a reachable nearby peer must receive a real vanilla WALK_TARGET social route.");
+
+        helper.assertTrue(
+            peer.getPersistentData().getString("livingvillages_daily_life_social_claimed_by")
+                .equals(visitor.getUUID().toString()),
+            "The target resident must have one persistent claim owner for this visit.");
+
+        boolean duplicateStarted = VillageDailyLife.tryStartSocialVisit(thirdResident, helper.getLevel(), now);
+        helper.assertTrue(!duplicateStarted,
+            "A third resident must not crowd the same claimed peer or interrupt the active visitor.");
+
+        VillageDailyLife.finishVisit(visitor, helper.getLevel(), visitor.getPersistentData(), true);
+        helper.assertTrue(!visitor.getPersistentData().getBoolean("livingvillages_daily_life_social_active")
+                && peer.getPersistentData().getString("livingvillages_daily_life_social_claimed_by").isEmpty()
+                && visitor.getPersistentData().getLong("livingvillages_daily_life_next_social_attempt") > now,
+            "Finishing the visit must clear only its route/claim and apply a cooldown.");
+        visitor.discard();
+        peer.discard();
+        thirdResident.discard();
+        helper.succeed();
+    }
+
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;
