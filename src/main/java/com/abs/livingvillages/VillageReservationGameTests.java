@@ -2214,7 +2214,14 @@ public final class VillageReservationGameTests {
 
         Map<String, Integer> fulfilled = com.abs.livingvillages.domain.VillageWorkOrderModel.unmetRequirements(
             List.of(house, farm),
-            Map.of("minecraft:oak_planks", 96, "minecraft:red_bed", 1, "minecraft:wheat_seeds", 24),
+            Map.of(
+                "minecraft:oak_planks", 96,
+                "minecraft:red_bed", 1,
+                "minecraft:wheat_seeds", 24,
+                "minecraft:water_bucket", 1,
+                "minecraft:composter", 1,
+                "minecraft:wooden_hoe", 1
+            ),
             Map.of()
         );
         helper.assertTrue(fulfilled.isEmpty(),
