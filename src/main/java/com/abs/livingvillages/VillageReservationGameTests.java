@@ -1902,7 +1902,7 @@ public final class VillageReservationGameTests {
     public static void resourceDemandScalesWorkforceToRealStockAndLocalSources(GameTestHelper helper) {
         var starter = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
-                8, 0, 0, 0, 0, 12, true, 2));
+                8, 0, 0, 0, 0, 12, 0, 10, true, 2));
         helper.assertTrue(
             starter.needsWood() && starter.needsStone() && starter.needsOre() && starter.needsFood()
                 && starter.desiredLumberjacks() == 2
@@ -1912,7 +1912,7 @@ public final class VillageReservationGameTests {
 
         var stocked = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
-                8, 256, 160, 32, 256, 0, true, 3));
+                8, 256, 160, 32, 256, 0, 0, 0, true, 3));
         helper.assertTrue(
             !stocked.needsWood() && !stocked.needsStone() && !stocked.needsOre() && !stocked.needsFood()
                 && stocked.desiredLumberjacks() == 0
@@ -1922,7 +1922,7 @@ public final class VillageReservationGameTests {
 
         var treeless = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
-                8, 0, 0, 0, 0, 0, false, 2));
+                8, 0, 0, 0, 0, 0, 0, 0, false, 2));
         helper.assertTrue(
             !treeless.needsWood() && treeless.desiredLumberjacks() == 0,
             "A treeless settlement must not assign lumberjacks to a resource source that is not present.");
