@@ -149,8 +149,6 @@ public final class LivingVillages {
                     LOGGER.info("Village elder ordered a house at {}.", result.position());
                     continue;
                 }
-                VillageWorkOrders.markPendingProjectWaiting(
-                    level, villageCenter, "house", level.getGameTime());
             } else if (request == VillageElder.REQUEST_FARM && LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
                 BuildResult result = tryBuildFarm(level, villageCenter);
                 if (result.success()) {
@@ -158,8 +156,6 @@ public final class LivingVillages {
                     LOGGER.info("Village elder ordered a farm at {}.", result.position());
                     continue;
                 }
-                VillageWorkOrders.markPendingProjectWaiting(
-                    level, villageCenter, "farm", level.getGameTime());
             }
 
             // Local elder control allows one village to pause or prioritize differently from others.
@@ -313,12 +309,14 @@ public final class LivingVillages {
         if (villagers.size() < LivingVillagesConfig.MINIMUM_VILLAGERS.get()) {
             String msg = "Недостаточно жителей для запуска плана.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            VillageWorkOrders.markPendingProjectOpen(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
         int beds = countBeds(level, center);
         if (!elderOrdered && villagers.size() < beds) {
             String msg = "В поселении ещё есть свободная потенциальная кровать.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            VillageWorkOrders.markPendingProjectOpen(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
 
@@ -326,6 +324,7 @@ public final class LivingVillages {
         if (containers.isEmpty()) {
             String msg = "Нет хранилища (сундука/бочки) в радиусе поселения.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
         Map<Block, Integer> plankCounts = countPlanks(containers);
@@ -338,23 +337,27 @@ public final class LivingVillages {
         if (plankBlock == null) {
             String msg = "Не хватает материалов: нужно 96 строительных блоков одного вида (доски, песчаник, булыжник или каменный кирпич) в ближайших сундуках.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
         net.minecraft.world.item.Item bedItem = VillageBuilder.selectAvailableBedItem(containers);
         if (bedItem == Items.AIR) {
             String msg = "Не найдена кровать (любого цвета) в сундуках поблизости.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
         net.minecraft.world.item.Item doorItem = VillageBuilder.selectAvailableDoorItem(plankBlock, containers);
         if (doorItem == Items.AIR) {
             String msg = "Для выбранных блоков не найден подходящий настоящий дверной блок.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
         if (countItem(containers, doorItem) < 1) {
             String msg = "Для закрытого дома нужна деревянная дверь. Ремесленник должен изготовить её из 6 досок или получить по обмену.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
 
@@ -362,6 +365,7 @@ public final class LivingVillages {
         if (site == null) {
             String msg = "Не найдено ровное свободное место в радиусе 28 блоков.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            VillageWorkOrders.markPendingProjectOpen(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
 
@@ -370,6 +374,7 @@ public final class LivingVillages {
         if (!VillageBuilder.startHouseProject(level, center, site, plankBlock, doorItem, bedItem)) {
             String msg = "Строитель занят, не назначен или не может вместить материалы в инвентарь.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            VillageWorkOrders.markPendingProjectOpen(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
         String ok = "Строитель начал собирать материалы и возводить хижину по блокам.";
@@ -382,32 +387,38 @@ public final class LivingVillages {
         if (containers.isEmpty()) {
             String msg = "Нет хранилища для ресурсов фермы.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
             return BuildResult.failure(msg);
         }
         CropPlan cropPlan = chooseCropPlan(containers);
         if (cropPlan == null) {
             String msg = "Для фермы нужны 24 одинаковых семени пшеницы, морковки, картофелины или семени свёклы в настоящих хранилищах.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
             return BuildResult.failure(msg);
         }
         if (countItem(containers, Items.WATER_BUCKET) < 1) {
             String msg = "Для фермы нужно настоящее ведро воды в ближайшем хранилище.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
             return BuildResult.failure(msg);
         }
         if (countItem(containers, Items.COMPOSTER) < 1) {
             String msg = "Для фермы нужен настоящий компостер в ближайшем хранилище.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
             return BuildResult.failure(msg);
         }
         if (!VillageFarmBuilder.hasHoe(containers)) {
             String msg = "Для подготовки поля нужна настоящая мотыга в хранилище.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
             return BuildResult.failure(msg);
         }
         if (!canReturnEmptyBucket(containers)) {
             String msg = "Нет свободного места в хранилищах, чтобы вернуть пустое ведро.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
             return BuildResult.failure(msg);
         }
 
@@ -415,11 +426,13 @@ public final class LivingVillages {
         if (site == null) {
             String msg = "Не найден ровный участок 5×5 в радиусе 28 блоков.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            VillageWorkOrders.markPendingProjectOpen(level, center, "farm", level.getGameTime());
             return BuildResult.failure(msg);
         }
         if (!VillageFarmBuilder.startFarmProject(level, center, site, cropPlan.seedItem(), cropPlan.cropBlock())) {
             String msg = "Не найден свободный работник с местом в инвентаре для материалов фермы.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            VillageWorkOrders.markPendingProjectOpen(level, center, "farm", level.getGameTime());
             return BuildResult.failure(msg);
         }
         String ok = "Рабочий начал собирать настоящие семена, воду, компостер и мотыгу. Ферма будет строиться поэтапно.";
