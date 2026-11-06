@@ -283,7 +283,12 @@ public final class VillagerMining {
         int radius = LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get();
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
-        int minY = Math.max(level.getMinBuildHeight() + 1, origin.getY() - 20);
+        int surfaceY = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+            origin.getX(), origin.getZ());
+        // Surface workers keep the cheaper vanilla-like scan. Once a miner is actually underground,
+        // it can search farther down through naturally exposed cave faces.
+        int verticalDepth = origin.getY() < surfaceY - 5 ? 20 : 8;
+        int minY = Math.max(level.getMinBuildHeight() + 1, origin.getY() - verticalDepth);
         int maxY = Math.min(level.getMaxBuildHeight() - 2, origin.getY() + 3);
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
