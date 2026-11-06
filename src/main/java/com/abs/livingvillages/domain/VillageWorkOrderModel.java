@@ -111,6 +111,26 @@ public final class VillageWorkOrderModel {
         return copy(order, nextState, worker, claimUntil, nowTick);
     }
 
+    /**
+     * Enriches an unclaimed placeholder order once a concrete project has a validated material bill.
+     * Existing material requirements are never silently overwritten.
+     */
+    public static Order addRequirementsToOpenOrder(
+        Order order,
+        List<Requirement> requirements,
+        int priority,
+        long nowTick
+    ) {
+        if (order == null || (order.state() != OPEN && order.state() != WAITING_FOR_RESOURCES)
+            || !order.requirements().isEmpty()) return null;
+        List<Requirement> normalized = normalizeRequirements(requirements);
+        if (normalized == null || normalized.isEmpty()) return null;
+        int updatedPriority = Math.max(order.priority(), Math.max(0, Math.min(MAX_PRIORITY, priority)));
+        return new Order(order.id(), order.villageId(), order.kind(), order.dedupeKey(),
+            updatedPriority, order.createdTick(), nowTick, order.expiresAtTick(),
+            order.state(), null, 0L, normalized);
+    }
+
     public static Order claim(Order order, UUID workerId, long nowTick, long leaseTicks) {
         if (order == null || workerId == null || workerId.equals(new UUID(0L, 0L))
             || order.state() != READY || isOrderExpired(order, nowTick)) return null;
