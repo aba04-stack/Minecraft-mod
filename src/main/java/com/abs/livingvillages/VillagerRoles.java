@@ -21,6 +21,8 @@ public final class VillagerRoles {
     public static final String ROLE_GUARD = "guard";
     public static final String ROLE_CRAFTSMAN = "craftsman";
     public static final String ROLE_BUILDER = "builder";
+    public static final String ROLE_LUMBERJACK = "lumberjack";
+    public static final String ROLE_FARMER = "farmer";
     public static final String HOME_X = "livingvillages_specialist_home_x";
     public static final String HOME_Y = "livingvillages_specialist_home_y";
     public static final String HOME_Z = "livingvillages_specialist_home_z";
@@ -47,6 +49,14 @@ public final class VillagerRoles {
 
     public static boolean isBuilder(Villager villager) {
         return villager.getPersistentData().getString(ROLE_KEY).equals(ROLE_BUILDER);
+    }
+
+    public static boolean isLumberjack(Villager villager) {
+        return villager.getPersistentData().getString(ROLE_KEY).equals(ROLE_LUMBERJACK);
+    }
+
+    public static boolean isFarmer(Villager villager) {
+        return villager.getPersistentData().getString(ROLE_KEY).equals(ROLE_FARMER);
     }
 
     public static boolean isUnemployedAdult(Villager villager) {
@@ -86,8 +96,17 @@ public final class VillagerRoles {
         boolean housingNeeded = LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
             && (VillageBuilder.housingNeeded(level, center, all.size()) || VillageElder.hasHouseRequest(all));
 
-        // Config toggles must release a role. Active builder projects are retained while paused,
-        // because their real materials and construction progress live on that worker.
+        VillageResourceDemandModel.Plan resourcePlan = VillageResourcePlanner.getPlan(level, center, all);
+        int excessLumberjacks = Math.max(0, (int) all.stream().filter(VillagerRoles::isLumberjack).count()
+            - resourcePlan.desiredLumberjacks());
+        int excessFarmers = Math.max(0, (int) all.stream().filter(VillagerRoles::isFarmer).count()
+            - resourcePlan.desiredFarmers());
+        int excessMiners = Math.max(0, (int) all.stream().filter(VillagerRoles::isMiner).count()
+            - resourcePlan.desiredMiners());
+        long now = level.getGameTime();
+
+        // Disabled or surplus roles are released only when their current task is complete and
+        // the minimum tenure elapsed. A worker never abandons a tree, vein, or harvest route mid-task.
         for (Villager villager : all) {
             var data = villager.getPersistentData();
             String role = data.getString(ROLE_KEY);
@@ -99,15 +118,28 @@ public final class VillagerRoles {
                 case ROLE_GUARD -> !LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get();
                 case ROLE_CRAFTSMAN -> !LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get();
                 case ROLE_BUILDER -> !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get() && !activeBuilderProject;
+                case ROLE_LUMBERJACK -> !LivingVillagesConfig.ENABLE_VILLAGER_TREE_WORK.get();
+                case ROLE_FARMER -> !LivingVillagesConfig.ENABLE_FARMER_STOCKPILING.get();
                 default -> true;
             };
 
             boolean missingRequiredTool = (ROLE_MINER.equals(role) && availablePickaxes == 0)
                 || (ROLE_GUARD.equals(role) && availableSwords == 0);
             boolean builderNoLongerNeeded = ROLE_BUILDER.equals(role) && !activeBuilderProject && !housingNeeded;
+            boolean tenureElapsed = now - data.getLong(ROLE_ASSIGNED_TICK_KEY)
+                >= com.abs.livingvillages.domain.SettlementSimulationModel.MIN_ROLE_TENURE_TICKS;
+            boolean surplusRole = (ROLE_LUMBERJACK.equals(role) && excessLumberjacks > 0)
+                || (ROLE_FARMER.equals(role) && excessFarmers > 0)
+                || (ROLE_MINER.equals(role) && excessMiners > 0);
+            boolean mayRotate = surplusRole && tenureElapsed && !roleTaskActive(villager, role);
 
-            if (roleDisabled || missingRequiredTool || builderNoLongerNeeded) {
+            if (roleDisabled || missingRequiredTool || builderNoLongerNeeded || mayRotate) {
                 releaseRole(villager);
+                if (mayRotate) {
+                    if (ROLE_LUMBERJACK.equals(role)) excessLumberjacks--;
+                    else if (ROLE_FARMER.equals(role)) excessFarmers--;
+                    else if (ROLE_MINER.equals(role)) excessMiners--;
+                }
             }
         }
 
@@ -137,14 +169,19 @@ public final class VillagerRoles {
 
         int builders = (int) all.stream().filter(VillagerRoles::isBuilder).count();
         int craftspeople = (int) all.stream().filter(VillagerRoles::isCraftsman).count();
+        int lumberjacks = (int) all.stream().filter(VillagerRoles::isLumberjack).count();
+        int farmers = (int) all.stream().filter(VillagerRoles::isFarmer).count();
         int miners = (int) all.stream().filter(VillagerRoles::isMiner).count();
         int guards = (int) all.stream().filter(VillagerRoles::isGuard).count();
 
         int desiredBuilders = housingNeeded ? 1 : 0;
-        // A village with a crafting table needs a craftsman to produce tools, doors, beds, and composters.
         int desiredCraftspeople = workshopExists ? 1 : 0;
-        int desiredMiners = LivingVillagesConfig.ENABLE_MINER_ROLE.get() && adultPopulation >= 2
-            ? Math.min(Math.max(1, (int) adultPopulation / 4), availablePickaxes) : 0;
+        int desiredLumberjacks = LivingVillagesConfig.ENABLE_VILLAGER_TREE_WORK.get()
+            ? resourcePlan.desiredLumberjacks() : 0;
+        int desiredFarmers = LivingVillagesConfig.ENABLE_FARMER_STOCKPILING.get()
+            ? resourcePlan.desiredFarmers() : 0;
+        int desiredMiners = LivingVillagesConfig.ENABLE_MINER_ROLE.get()
+            ? resourcePlan.desiredMiners() : 0;
         int guardDivisor = VillageElder.priorityForVillagers(all) == VillageElder.PRIORITY_DEFENSE ? 4 : 6;
         int desiredGuards = LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get() && adultPopulation >= 3
             ? Math.min(Math.max(1, (int) adultPopulation / guardDivisor), availableSwords) : 0;
@@ -160,6 +197,7 @@ public final class VillagerRoles {
                 || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
                 || data.getBoolean(VillageBuilder.ACTIVE_KEY)
                 || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
+                || data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
                 || data.getBoolean("livingvillages_mining_active")
                 || data.getBoolean("livingvillages_defense_has_route")
                 || data.getBoolean("livingvillages_industry_route_active")) continue;
@@ -168,7 +206,8 @@ public final class VillagerRoles {
         candidates.sort(Comparator.comparing(v -> v.getUUID().toString()));
         if (candidates.isEmpty()) {
             VillageRegistry.recordDiagnostic(level, center, "Роли",
-                "Активны: строит.=" + builders + ", ремесл.=" + craftspeople + ", шахт.=" + miners + ", охр.=" + guards + " (нет свободных кандидатов)");
+                "Активны: строит.=" + builders + ", ремесл.=" + craftspeople + ", лесоруб.=" + lumberjacks
+                    + ", фермер.=" + farmers + ", шахт.=" + miners + ", охр.=" + guards + " (нет свободных кандидатов)");
             return;
         }
 
@@ -176,11 +215,14 @@ public final class VillagerRoles {
         // Housing (when materials are ready) and the workshop have priority over extraction and defense roles.
         if (builders < desiredBuilders) role = ROLE_BUILDER;
         else if (craftspeople < desiredCraftspeople) role = ROLE_CRAFTSMAN;
+        else if (farmers < desiredFarmers) role = ROLE_FARMER;
+        else if (lumberjacks < desiredLumberjacks) role = ROLE_LUMBERJACK;
         else if (miners < desiredMiners) role = ROLE_MINER;
         else if (guards < desiredGuards) role = ROLE_GUARD;
         if (role == null) {
             VillageRegistry.recordDiagnostic(level, center, "Роли",
-                "Распределены: строит.=" + builders + ", ремесл.=" + craftspeople + ", шахт.=" + miners + ", охр.=" + guards);
+                "Распределены: строит.=" + builders + ", ремесл.=" + craftspeople + ", лесоруб.=" + lumberjacks
+                    + ", фермер.=" + farmers + ", шахт.=" + miners + ", охр.=" + guards);
             return;
         }
 
@@ -194,6 +236,8 @@ public final class VillagerRoles {
         Villager selected = null;
         for (Villager candidate : candidates) {
             boolean canStart = ROLE_CRAFTSMAN.equals(role) || ROLE_BUILDER.equals(role)
+                || (ROLE_LUMBERJACK.equals(role) && resourcePlan.needsWood())
+                || (ROLE_FARMER.equals(role) && resourcePlan.needsFood() && resourcePlan.matureCrops() > 0)
                 || (ROLE_MINER.equals(role) && VillageIndustry.hasPickaxeAccessibleTo(candidate))
                 || (ROLE_GUARD.equals(role) && VillageIndustry.hasSwordAccessibleTo(candidate));
             if (canStart) { selected = candidate; break; }
@@ -261,6 +305,8 @@ public final class VillagerRoles {
             case ROLE_CRAFTSMAN -> data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
                 || data.getBoolean("livingvillages_industry_route_active");
             case ROLE_BUILDER -> VillageBuilder.isProjectActive(villager);
+            case ROLE_LUMBERJACK -> data.getBoolean(TREE_TASK_ACTIVE) || data.getBoolean(REPLANT_TASK_ACTIVE);
+            case ROLE_FARMER -> data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY);
             default -> false;
         };
     }
