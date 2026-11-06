@@ -25,10 +25,13 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * A cautious miner behavior for villagers assigned the persistent "miner" role.
@@ -49,6 +52,8 @@ public final class VillagerMining {
     private static final String BREAK_X = P + "break_x", BREAK_Y = P + "break_y", BREAK_Z = P + "break_z";
     private static final String BREAK_PROGRESS = P + "break_progress";
     private static final String TARGET_KIND = P + "target_kind";
+    private static final String ORE_VEIN_QUEUE = P + "ore_vein_queue";
+    private static final int MAX_ORE_VEIN_BLOCKS = 128;
     private static final int TARGET_ORE = 0;
     private static final int TARGET_QUARRY = 1;
 
@@ -122,11 +127,16 @@ public final class VillagerMining {
             return;
         }
 
-        BlockPos target = findNearestOre(level, villager, pickaxe);
+        BlockPos home = VillagerRoles.getHome(villager);
+        if (home == null) home = villager.blockPosition();
+        com.abs.livingvillages.domain.VillageResourceDemandModel.Plan demand =
+            VillageResourcePlanner.getPlan(level, home);
+        if (!demand.needsMining()) return;
+
+        BlockPos target = demand.needsOre() ? findNearestOre(level, villager, pickaxe) : null;
         int targetKind = TARGET_ORE;
-        // Once an exposed ore target is exhausted, use spare daytime to quarry visible stone
-        // if the settlement still needs cobblestone for stone tools and its first furnace.
-        if (target == null && needsCobblestone(level, villager)) {
+        // Use visible stone only when the village stock is below its actual stone-material target.
+        if (target == null && demand.needsStone()) {
             target = findNearestQuarryBlock(level, villager, pickaxe);
             targetKind = TARGET_QUARRY;
         }
@@ -139,6 +149,8 @@ public final class VillagerMining {
         data.putInt(ORE_X, target.getX());
         data.putInt(ORE_Y, target.getY());
         data.putInt(ORE_Z, target.getZ());
+        if (targetKind == TARGET_ORE) data.putLongArray(ORE_VEIN_QUEUE, collectOreVein(level, target));
+        else data.remove(ORE_VEIN_QUEUE);
         data.putLong(STARTED, now);
         data.putLong(LAST_ORDER, now);
         resetProgress(data);
@@ -189,6 +201,18 @@ public final class VillagerMining {
         // stone quarrying only supplies real cobblestone and never blindly tunnels through the world.
         BlockState remainingTarget = level.getBlockState(ore);
         boolean targetWasExhausted = quarryTask ? !isQuarryBlock(remainingTarget) : !isOre(remainingTarget);
+        if (targetWasExhausted && !quarryTask) {
+            BlockPos nextOre = findNextOreInVein(level, villager, data);
+            if (nextOre != null) {
+                data.putInt(ORE_X, nextOre.getX());
+                data.putInt(ORE_Y, nextOre.getY());
+                data.putInt(ORE_Z, nextOre.getZ());
+                clearOwnedRoute(villager, data);
+                resetProgress(data);
+                data.putLong(STARTED, now);
+                return;
+            }
+        }
         if (targetWasExhausted) {
             cancelTask(villager, data);
             data.putLong(NEXT_SEARCH, now + SUCCESS_RETRY_TICKS);
@@ -340,6 +364,49 @@ public final class VillagerMining {
         }
         candidates.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
         return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    /** Snapshot one connected same-type ore vein; hidden unrelated veins are never added. */
+    private static long[] collectOreVein(ServerLevel level, BlockPos start) {
+        Block targetBlock = level.getBlockState(start).getBlock();
+        ArrayDeque<BlockPos> pending = new ArrayDeque<>();
+        Set<Long> visited = new HashSet<>();
+        List<Long> found = new ArrayList<>();
+        pending.add(start.immutable());
+        while (!pending.isEmpty() && found.size() < MAX_ORE_VEIN_BLOCKS) {
+            BlockPos pos = pending.removeFirst();
+            if (Math.abs(pos.getX() - start.getX()) > 8 || Math.abs(pos.getZ() - start.getZ()) > 8
+                || Math.abs(pos.getY() - start.getY()) > 6 || !level.hasChunkAt(pos)) continue;
+            BlockState state = level.getBlockState(pos);
+            if (state.getBlock() != targetBlock || !isOre(state) || !visited.add(pos.asLong())) continue;
+            found.add(pos.asLong());
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dy == 0 && dz == 0) continue;
+                        pending.addLast(pos.offset(dx, dy, dz));
+                    }
+                }
+            }
+        }
+        return found.stream().mapToLong(Long::longValue).toArray();
+    }
+
+    /** Advance to the nearest surviving ore from the initial vein without picking another vein. */
+    private static BlockPos findNextOreInVein(ServerLevel level, Villager villager, CompoundTag data) {
+        long[] queued = data.getLongArray(ORE_VEIN_QUEUE);
+        List<Long> remaining = new ArrayList<>();
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (long packed : queued) {
+            BlockPos pos = BlockPos.of(packed);
+            if (!level.hasChunkAt(pos) || !isOre(level.getBlockState(pos))) continue;
+            remaining.add(packed);
+            double distance = villager.distanceToSqr(Vec3.atCenterOf(pos));
+            if (distance < bestDistance) { bestDistance = distance; best = pos.immutable(); }
+        }
+        data.putLongArray(ORE_VEIN_QUEUE, remaining.stream().mapToLong(Long::longValue).toArray());
+        return best;
     }
 
     private static boolean hasExposedFace(ServerLevel level, BlockPos pos) {
@@ -666,6 +733,7 @@ public final class VillagerMining {
         if (villager.level() instanceof ServerLevel level) clearBreakOverlay(villager, level, data);
         data.putBoolean(ACTIVE, false);
         data.remove(ORE_X); data.remove(ORE_Y); data.remove(ORE_Z); data.remove(STARTED); data.remove(LAST_ORDER); data.remove(TARGET_KIND);
+        data.remove(ORE_VEIN_QUEUE);
         resetProgress(data);
     }
 
