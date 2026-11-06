@@ -55,6 +55,21 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "village_lighting")
+    public static void guardPatrolLightingYieldsToCombatAndRetreat(GameTestHelper helper) {
+        Villager guard = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        helper.assertTrue(VillageDefense.canPerformPatrolLighting(guard),
+            "A guard without a combat task may perform routine lighting.");
+        guard.getPersistentData().putBoolean("livingvillages_defense_combat_active", true);
+        helper.assertTrue(!VillageDefense.canPerformPatrolLighting(guard),
+            "Routine lighting must pause while the guard is fighting.");
+        guard.getPersistentData().putBoolean("livingvillages_defense_combat_active", false);
+        guard.getPersistentData().putString("livingvillages_defense_route_kind", "retreat");
+        helper.assertTrue(!VillageDefense.canPerformPatrolLighting(guard),
+            "Routine lighting must not interrupt a retreat.");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "reservation_competition")
     public static void oneTaskExcludesCompetingTaskUntilItEnds(GameTestHelper helper) {
         placeFloor(helper);
