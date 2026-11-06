@@ -315,7 +315,7 @@ public final class VillagerTreeWork {
      * villager work up a trunk one block at a time, without retargeting a distant tree.
      */
     /** Collect the connected log cluster once so later cuts cannot strand an upper branch. */
-    private static long[] collectConnectedTreeLogs(ServerLevel level, BlockPos start) {
+    static long[] collectConnectedTreeLogs(ServerLevel level, BlockPos start) {
         ArrayDeque<BlockPos> pending = new ArrayDeque<>();
         Set<Long> visited = new HashSet<>();
         List<Long> found = new ArrayList<>();
