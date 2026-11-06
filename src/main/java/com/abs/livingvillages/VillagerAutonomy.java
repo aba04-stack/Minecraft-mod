@@ -19,7 +19,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Small, real autonomy layer for vanilla farmer villagers.
@@ -41,6 +44,12 @@ public final class VillagerAutonomy {
     private static final String TARGET_STARTED = PREFIX + "target_started";
     private static final String LAST_ORDER = PREFIX + "last_order";
     private static final String NEXT_SEARCH = PREFIX + "next_search";
+    public static final String HARVEST_ACTIVE_KEY = PREFIX + "harvest_active";
+    private static final String HARVEST_X = PREFIX + "harvest_x";
+    private static final String HARVEST_Y = PREFIX + "harvest_y";
+    private static final String HARVEST_Z = PREFIX + "harvest_z";
+
+    private static final int MAX_CROPS_PER_PASS = 4;
 
     private static final int SEARCH_STAGGER_TICKS = 400;
     private static final int RETRY_DELAY_TICKS = 80;
@@ -108,8 +117,16 @@ public final class VillagerAutonomy {
             return; // Storage runs are work-hour errands, not a reason to miss sleep.
         }
 
-        // Harvest nearby mature crops and bake carried wheat into bread (3 wheat -> 1 bread).
-        tryHarvestMatureCropAndBakeBread(villager, level, now);
+        // A farmer stays with the field while food is short. Each pass harvests a small batch,
+        // and a distant ripe crop becomes the worker's own resumable walk target.
+        boolean farmerWorker = villager.getVillagerData().getProfession() == VillagerProfession.FARMER
+            || VillagerRoles.isFarmer(villager);
+        BlockPos villageHome = VillagerRoles.getHome(villager);
+        if (villageHome == null) villageHome = villager.blockPosition();
+        boolean foodShortage = VillageResourcePlanner.getPlan(level, villageHome).needsFood();
+        if (farmerWorker && (foodShortage || data.getBoolean(HARVEST_ACTIVE_KEY))) {
+            if (tryHarvestMatureCropAndBakeBread(villager, level, now)) return;
+        }
 
         if (villager.getVillagerData().getProfession() != VillagerProfession.FARMER
             && foodPoints(villager) < MIN_FOOD_POINTS_TO_START) {
@@ -260,66 +277,125 @@ public final class VillagerAutonomy {
         return !level.getBlockState(pos.below()).isAir();
     }
 
-    private static void tryHarvestMatureCropAndBakeBread(Villager villager, ServerLevel level, long nowTick) {
-        if (!level.getGameRules().getBoolean( net.minecraft.world.level.GameRules.RULE_MOBGRIEFING)) return;
-        BlockPos origin = villager.blockPosition();
-        BlockPos bestMature = null;
-        double bestDist = Double.MAX_VALUE;
-        for (int dx = -8; dx <= 8; dx++) {
-            for (int dz = -8; dz <= 8; dz++) {
-                for (int dy = -2; dy <= 2; dy++) {
-                    BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos)) continue;
-                    BlockState state = level.getBlockState(pos);
-                    if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop && crop.isMaxAge(state)) {
-                        double d = villager.distanceToSqr(Vec3.atCenterOf(pos));
-                        if (d < bestDist) {
-                            bestDist = d;
-                            bestMature = pos.immutable();
+    private static boolean tryHarvestMatureCropAndBakeBread(Villager villager, ServerLevel level, long nowTick) {
+        if (!level.getGameRules().getBoolean(net.minecraft.world.level.GameRules.RULE_MOBGRIEFING)) {
+            clearHarvestRoute(villager, villager.getPersistentData());
+            return false;
+        }
+
+        CompoundTag data = villager.getPersistentData();
+        BlockPos origin = VillagerRoles.getHome(villager);
+        if (origin == null) origin = villager.blockPosition();
+        int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
+        Set<Long> skippedWithoutSeed = new HashSet<>();
+        int harvested = 0;
+
+        while (harvested < MAX_CROPS_PER_PASS) {
+            BlockPos bestMature = null;
+            double bestDist = Double.MAX_VALUE;
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    for (int dy = -3; dy <= 3; dy++) {
+                        BlockPos pos = origin.offset(dx, dy, dz);
+                        if (!level.hasChunkAt(pos) || skippedWithoutSeed.contains(pos.asLong())) continue;
+                        BlockState state = level.getBlockState(pos);
+                        if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop
+                            && crop.isMaxAge(state)) {
+                            double distance = villager.distanceToSqr(Vec3.atCenterOf(pos));
+                            if (distance < bestDist) { bestDist = distance; bestMature = pos.immutable(); }
                         }
                     }
                 }
             }
-        }
-        if (bestMature != null) {
-            if (bestDist <= 9.0D) {
-                BlockState state = level.getBlockState(bestMature);
-                if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop && crop.isMaxAge(state)) {
-                    List<ItemStack> drops = Block.getDrops(state, level, bestMature, null, villager, ItemStack.EMPTY);
-                    for (ItemStack drop : drops) {
-                        ItemStack remainder = villager.getInventory().addItem(drop.copy());
-                        if (!remainder.isEmpty()) Block.popResource(level, bestMature, remainder);
-                    }
-                    net.minecraft.world.item.Item seedItem = seedItemForCrop(crop);
-                    if (seedItem != Items.AIR && consumeOneItem(villager.getInventory(), seedItem)) {
-                        level.setBlock(bestMature, crop.getStateForAge(0), 3);
-                    } else {
-                        level.setBlock(bestMature, Blocks.AIR.defaultBlockState(), 3);
-                    }
-                    villager.getInventory().setChanged();
-                    VillagerProgression.recordCompletedWork(
-                        villager,
-                        com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_FARMER,
-                        2,
-                        true,
-                        nowTick
-                    );
-                }
-            } else if (!VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {
-                villager.getBrain().setMemory(
-                    MemoryModuleType.WALK_TARGET,
-                    new WalkTarget(bestMature, WALK_SPEED, 1)
-                );
+
+            if (bestMature == null) {
+                clearHarvestRoute(villager, data);
+                break;
             }
+            if (bestDist > 9.0D) {
+                if (VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {
+                    clearHarvestRoute(villager, data);
+                    break;
+                }
+                boolean sameTarget = data.getBoolean(HARVEST_ACTIVE_KEY)
+                    && bestMature.equals(new BlockPos(data.getInt(HARVEST_X), data.getInt(HARVEST_Y), data.getInt(HARVEST_Z)));
+                if (!sameTarget || !villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
+                    data.putBoolean(HARVEST_ACTIVE_KEY, true);
+                    data.putInt(HARVEST_X, bestMature.getX());
+                    data.putInt(HARVEST_Y, bestMature.getY());
+                    data.putInt(HARVEST_Z, bestMature.getZ());
+                    villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET,
+                        new WalkTarget(bestMature, WALK_SPEED, 1));
+                }
+                return true;
+            }
+
+            BlockState state = level.getBlockState(bestMature);
+            if (!(state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop) || !crop.isMaxAge(state)) {
+                skippedWithoutSeed.add(bestMature.asLong());
+                continue;
+            }
+            net.minecraft.world.item.Item seedItem = seedItemForCrop(crop);
+            if (seedItem == Items.AIR) {
+                skippedWithoutSeed.add(bestMature.asLong());
+                continue;
+            }
+
+            List<ItemStack> drops = new ArrayList<>(Block.getDrops(state, level, bestMature, null, villager, ItemStack.EMPTY));
+            int seedInInventory = countItems(villager.getInventory(), seedItem);
+            int seedInDrops = drops.stream().filter(stack -> stack.is(seedItem)).mapToInt(ItemStack::getCount).sum();
+            if (seedInInventory + seedInDrops <= 0) {
+                // Never destroy a mature crop if the worker cannot replant it with a real seed.
+                skippedWithoutSeed.add(bestMature.asLong());
+                continue;
+            }
+
+            clearHarvestRoute(villager, data);
+            if (seedInInventory == 0) {
+                ItemStack seedDrop = drops.stream().filter(stack -> stack.is(seedItem) && !stack.isEmpty()).findFirst().orElse(null);
+                if (seedDrop == null) {
+                    skippedWithoutSeed.add(bestMature.asLong());
+                    continue;
+                }
+                ItemStack oneSeed = seedDrop.copy();
+                oneSeed.setCount(1);
+                if (!villager.getInventory().addItem(oneSeed).isEmpty()) {
+                    skippedWithoutSeed.add(bestMature.asLong());
+                    continue;
+                }
+                seedDrop.shrink(1);
+            }
+            if (!consumeOneItem(villager.getInventory(), seedItem)) {
+                skippedWithoutSeed.add(bestMature.asLong());
+                continue;
+            }
+
+            for (ItemStack drop : drops) {
+                if (drop.isEmpty()) continue;
+                ItemStack remainder = villager.getInventory().addItem(drop.copy());
+                if (!remainder.isEmpty()) Block.popResource(level, bestMature, remainder);
+            }
+            if (!level.setBlock(bestMature, crop.getStateForAge(0), 3)) {
+                // Preserve the real seed if the crop could not be replanted.
+                villager.spawnAtLocation(new ItemStack(seedItem));
+                skippedWithoutSeed.add(bestMature.asLong());
+                continue;
+            }
+
+            villager.getInventory().setChanged();
+            VillagerProgression.recordCompletedWork(
+                villager,
+                com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_FARMER,
+                2,
+                true,
+                nowTick
+            );
+            harvested++;
         }
 
-        // Convert carried wheat into bread (3 wheat -> 1 bread) in the villager's inventory.
+        // Convert carried wheat into bread (3 wheat -> 1 bread) after the small harvest batch.
         var inv = villager.getInventory();
-        int wheatCount = 0;
-        for (int i = 0; i < inv.getContainerSize(); i++) {
-            ItemStack s = inv.getItem(i);
-            if (s.is(Items.WHEAT)) wheatCount += s.getCount();
-        }
+        int wheatCount = countItems(inv, Items.WHEAT);
         while (wheatCount >= 3) {
             if (!consumeItems(inv, Items.WHEAT, 3)) break;
             ItemStack remainder = inv.addItem(new ItemStack(Items.BREAD, 1));
@@ -327,6 +403,29 @@ public final class VillagerAutonomy {
             inv.setChanged();
             wheatCount -= 3;
         }
+        return harvested > 0;
+    }
+
+    private static int countItems(Container inventory, net.minecraft.world.item.Item item) {
+        int total = 0;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack.is(item)) total += stack.getCount();
+        }
+        return total;
+    }
+
+    private static void clearHarvestRoute(Villager villager, CompoundTag data) {
+        if (data.getBoolean(HARVEST_ACTIVE_KEY)) {
+            BlockPos ownedTarget = new BlockPos(data.getInt(HARVEST_X), data.getInt(HARVEST_Y), data.getInt(HARVEST_Z));
+            villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
+                if (walk.getTarget().currentBlockPosition().equals(ownedTarget)) {
+                    villager.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+                }
+            });
+        }
+        data.putBoolean(HARVEST_ACTIVE_KEY, false);
+        data.remove(HARVEST_X); data.remove(HARVEST_Y); data.remove(HARVEST_Z);
     }
 
     private static net.minecraft.world.item.Item seedItemForCrop(Block crop) {
