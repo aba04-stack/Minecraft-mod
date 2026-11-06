@@ -42,6 +42,7 @@ import com.abs.livingvillages.domain.VillageWorkOrderModel;
 public final class VillageLogistics {
     private static final String P = "livingvillages_logistics_";
     private static final String ACTIVE = P + "active";
+    private static final String CARGO_IN_TRANSIT = P + "cargo_in_transit";
     private static final String CHEST_X = P + "chest_x", CHEST_Y = P + "chest_y", CHEST_Z = P + "chest_z";
     private static final String STAND_X = P + "stand_x", STAND_Y = P + "stand_y", STAND_Z = P + "stand_z";
     private static final String STARTED = P + "started", LAST_ORDER = P + "last_order", NEXT_SCAN = P + "next_scan";
@@ -85,9 +86,12 @@ public final class VillageLogistics {
         Map<String, Integer> materialDeficits = pendingMaterialDeficits(villager, level);
         collectNearbyMaterials(villager, level, materialDeficits);
         if (!hasDeliverableMaterial(villager)) {
+            data.putBoolean(CARGO_IN_TRANSIT, false);
             data.putLong(NEXT_SCAN, level.getGameTime() + SEARCH_RETRY_TICKS);
             return;
         }
+        // This marker survives a missing/full destination chest and prevents duplicate pickup.
+        data.putBoolean(CARGO_IN_TRANSIT, true);
 
         StorageTarget target = findNearestStorageWithRoom(villager, level);
         if (target == null) {
@@ -135,6 +139,7 @@ public final class VillageLogistics {
 
         if (villager.distanceToSqr(Vec3.atCenterOf(standPos)) <= 2.8D * 2.8D) {
             int moved = depositCarriedMaterials(villager, container, now);
+            data.putBoolean(CARGO_IN_TRANSIT, hasDeliverableMaterial(villager));
             cancelTrip(villager, data);
             data.putLong(NEXT_SCAN, now + (moved > 0 ? SUCCESS_RETRY_TICKS : SEARCH_RETRY_TICKS));
             return;
@@ -172,7 +177,8 @@ public final class VillageLogistics {
         Map<String, Integer> inTransit = new HashMap<>();
         for (Villager resident : VillageArea.findVillagers(level, center)) {
             CompoundTag residentData = resident.getPersistentData();
-            if (resident != courier && !residentData.getBoolean(ACTIVE)) continue;
+            if (resident != courier && !residentData.getBoolean(ACTIVE)
+                && !residentData.getBoolean(CARGO_IN_TRANSIT)) continue;
             for (int slot = 0; slot < resident.getInventory().getContainerSize(); slot++) {
                 ItemStack stack = resident.getInventory().getItem(slot);
                 if (stack.isEmpty()) continue;
