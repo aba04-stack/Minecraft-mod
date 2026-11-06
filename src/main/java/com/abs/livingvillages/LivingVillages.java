@@ -149,6 +149,8 @@ public final class LivingVillages {
                     LOGGER.info("Village elder ordered a house at {}.", result.position());
                     continue;
                 }
+                VillageWorkOrders.markPendingProjectWaiting(
+                    level, villageCenter, "house", level.getGameTime());
             } else if (request == VillageElder.REQUEST_FARM && LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
                 BuildResult result = tryBuildFarm(level, villageCenter);
                 if (result.success()) {
@@ -156,6 +158,8 @@ public final class LivingVillages {
                     LOGGER.info("Village elder ordered a farm at {}.", result.position());
                     continue;
                 }
+                VillageWorkOrders.markPendingProjectWaiting(
+                    level, villageCenter, "farm", level.getGameTime());
             }
 
             // Local elder control allows one village to pause or prioritize differently from others.
