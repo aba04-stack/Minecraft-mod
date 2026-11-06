@@ -623,6 +623,12 @@ public final class VillagerAutonomy {
     }
 
     private static void continueSeedFetch(Villager villager, ServerLevel level, CompoundTag data, long nowTick) {
+        if (VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {
+            cancelSeedFetch(villager, data);
+            data.putBoolean(HARVEST_CYCLE_KEY, true);
+            data.putLong(NEXT_SEARCH, nowTick + RETRY_DELAY_TICKS);
+            return;
+        }
         if (nowTick - data.getLong(SEED_FETCH_STARTED) > SEED_FETCH_TIMEOUT_TICKS) {
             cancelSeedFetch(villager, data);
             data.putLong(NEXT_SEARCH, nowTick + RETRY_DELAY_TICKS);
