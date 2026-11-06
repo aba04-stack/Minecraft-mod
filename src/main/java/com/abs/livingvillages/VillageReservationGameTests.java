@@ -2086,19 +2086,24 @@ public final class VillageReservationGameTests {
         var first = VillageWorkOrders.list(helper.getLevel(), center, now).stream()
             .filter(order -> order.kind().equals("house") && order.dedupeKey().equals("house"))
             .findFirst().orElse(null);
+        boolean reopened = VillageWorkOrders.markPendingProjectOpen(
+            helper.getLevel(), center, "house", now + 1L);
+        boolean returnedToWaiting = VillageWorkOrders.markPendingProjectWaiting(
+            helper.getLevel(), center, "house", now + 2L);
         boolean duplicateQueued = VillageWorkOrders.enqueuePendingProject(
             helper.getLevel(), center, "house", 55);
-        var duplicate = VillageWorkOrders.list(helper.getLevel(), center, now + 1L).stream()
+        var duplicate = VillageWorkOrders.list(helper.getLevel(), center, now + 3L).stream()
             .filter(order -> order.kind().equals("house") && order.dedupeKey().equals("house"))
             .findFirst().orElse(null);
         var adopted = VillageWorkOrders.enqueue(
-            helper.getLevel(), center, "house", "house", 55, now + 2L, 5000L, List.of(requirement));
-        helper.assertTrue(firstQueued && duplicateQueued && markedWaiting && first != null && duplicate != null
-                && first.id().equals(duplicate.id()) && first.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.WAITING_FOR_RESOURCES
-                && adopted != null && first.id().equals(adopted.id()) && adopted.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.WAITING_FOR_RESOURCES
+            helper.getLevel(), center, "house", "house", 55, now + 4L, 5000L, List.of(requirement));
+        helper.assertTrue(firstQueued && markedWaiting && reopened && returnedToWaiting && duplicateQueued
+                && first != null && duplicate != null && first.id().equals(duplicate.id())
+                && adopted != null && first.id().equals(adopted.id())
+                && adopted.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.WAITING_FOR_RESOURCES
                 && adopted.requirements().size() == 1
                 && adopted.requirements().get(0).count() == 32,
-            "An elder's pending order must stay unique, show WAITING_FOR_RESOURCES, and adopt its validated material bill when work can start.");
+            "An elder's pending order must stay unique, report resource waits, reopen when materials are present but space/worker is missing, and then adopt its material bill.");
 
         var ready = VillageWorkOrders.setState(
             helper.getLevel(), center, first.id(),
