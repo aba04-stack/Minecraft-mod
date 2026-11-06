@@ -36,7 +36,6 @@ public final class VillageDailyLife {
     private static final String LAST_ACTION = P + "last_action";
     private static final String LAST_PARTNER = P + "last_partner";
 
-    private static final int TICK_STEP = 10;
     private static final int CHECK_INTERVAL_TICKS = 20;
     private static final int SEARCH_RADIUS = 10;
     private static final int MAX_CANDIDATES = 4;
@@ -53,7 +52,7 @@ public final class VillageDailyLife {
             || villager.level().isClientSide()
             || !villager.isAlive()
             || villager.isBaby()
-            || villager.tickCount % TICK_STEP != 0
+            || VillagerRoles.isGuard(villager)
             || !(villager.level() instanceof ServerLevel level)) {
             return;
         }
@@ -176,6 +175,8 @@ public final class VillageDailyLife {
                 && candidate.distanceToSqr(villager) >= 4.0D
                 && candidate.distanceToSqr(villager) <= MAX_SOCIAL_DISTANCE_SQR
                 && !candidate.getPersistentData().getBoolean(ACTIVE)
+                && !VillagerRoles.isGuard(candidate)
+                && isSameVillageIfKnown(villager, candidate, level)
                 && isVanillaIdle(candidate)
                 && !candidate.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
                 && !VillagerRoles.shouldYieldToVanillaVillagerAi(candidate)
@@ -195,6 +196,12 @@ public final class VillageDailyLife {
             if (path != null && path.canReach()) return candidate;
         }
         return null;
+    }
+
+    private static boolean isSameVillageIfKnown(Villager first, Villager second, ServerLevel level) {
+        UUID firstVillage = VillageRegistry.knownVillageIdForResident(level, first.getUUID());
+        UUID secondVillage = VillageRegistry.knownVillageIdForResident(level, second.getUUID());
+        return firstVillage == null || secondVillage == null || firstVillage.equals(secondVillage);
     }
 
     private static int activeVisitorCount(ServerLevel level, Villager target) {
