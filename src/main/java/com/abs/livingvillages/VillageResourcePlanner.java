@@ -138,7 +138,7 @@ public final class VillageResourcePlanner {
         }
 
         if (stack.is(Items.RAW_IRON) || stack.is(Items.RAW_COPPER) || stack.is(Items.RAW_GOLD)
-            || stack.is(Items.COAL) || stack.is(Items.REDSTONE) || stack.is(Items.LAPIS_LAZULI)
+            || stack.is(Items.REDSTONE) || stack.is(Items.LAPIS_LAZULI)
             || stack.is(Items.DIAMOND) || stack.is(Items.EMERALD)
             || stack.is(Items.IRON_INGOT) || stack.is(Items.COPPER_INGOT) || stack.is(Items.GOLD_INGOT)) {
             ore += count;
@@ -146,6 +146,7 @@ public final class VillageResourcePlanner {
 
         if (stack.is(Items.BREAD)) food += count * 4;
         else if (stack.is(Items.CARROT) || stack.is(Items.POTATO) || stack.is(Items.BEETROOT)) food += count;
+        else if (stack.is(Items.WHEAT)) food += count;
         return new int[] {wood, stone, ore, food};
     }
 
