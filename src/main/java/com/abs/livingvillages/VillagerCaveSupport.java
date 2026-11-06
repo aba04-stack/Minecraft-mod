@@ -108,7 +108,7 @@ public final class VillagerCaveSupport {
 
     private static void restockTorches(Villager villager, ServerLevel level) {
         Container inventory = villager.getInventory();
-        if (countTorches(inventory) >= 8 || countTorches(inventory) >= 16) return;
+        if (countTorches(inventory) >= 8) return;
 
         BlockPos center = VillagerRoles.getHome(villager);
         if (center == null) center = villager.blockPosition();
@@ -148,10 +148,6 @@ public final class VillagerCaveSupport {
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.getItem(slot);
             if (stack.is(Items.TORCH)) count += stack.getCount();
-        }
-        if (inventory instanceof net.minecraft.world.entity.player.Inventory playerInventory) {
-            ItemStack offhand = playerInventory.player.getOffhandItem();
-            if (offhand.is(Items.TORCH)) count += offhand.getCount();
         }
         return count;
     }
