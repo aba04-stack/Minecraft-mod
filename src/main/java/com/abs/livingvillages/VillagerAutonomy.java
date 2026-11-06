@@ -330,7 +330,8 @@ public final class VillagerAutonomy {
                             && pos.getZ() == data.getInt(HARVEST_FAILED_Z)) continue;
                         BlockState state = level.getBlockState(pos);
                         if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop
-                            && crop.isMaxAge(state)) {
+                            && crop.isMaxAge(state)
+                            && VillageArea.isBlockInResidentGroup(level, origin, pos)) {
                             double distance = villager.distanceToSqr(Vec3.atCenterOf(pos));
                             if (distance < bestDist) { bestDist = distance; bestMature = pos.immutable(); }
                         }
