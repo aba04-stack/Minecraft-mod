@@ -5,7 +5,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.npc.Villager;
@@ -73,7 +72,7 @@ public final class VillageWorkOrders extends SavedData {
         VillageWorkOrders board = get(level);
         List<VillageWorkOrderModel.Order> orders =
             board.ordersByVillage.computeIfAbsent(villageId, ignored -> new ArrayList<>());
-        board.reconcileOrders(orders, nowTick);
+        if (board.reconcileOrders(orders, nowTick)) board.setDirty();
         for (VillageWorkOrderModel.Order order : orders) {
             if (!order.isTerminal() && order.kind().equals(kind) && order.dedupeKey().equals(dedupeKey)) {
                 return order;
