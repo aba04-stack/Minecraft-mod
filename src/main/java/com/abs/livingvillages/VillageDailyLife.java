@@ -36,7 +36,7 @@ public final class VillageDailyLife {
     private static final String LAST_ACTION = P + "last_action";
     private static final String LAST_PARTNER = P + "last_partner";
 
-    private static final int TICK_STEP = 5;
+    private static final int TICK_STEP = 10;
     private static final int CHECK_INTERVAL_TICKS = 20;
     private static final int SEARCH_RADIUS = 10;
     private static final int MAX_CANDIDATES = 4;
@@ -58,19 +58,20 @@ public final class VillageDailyLife {
             return;
         }
 
+        long now = level.getGameTime();
+        if (!TickBudgetModel.isScheduledThisTick(now, villager.getId(), CHECK_INTERVAL_TICKS)) return;
+
         CompoundTag data = villager.getPersistentData();
         if (!LivingVillagesConfig.ENABLE_DAILY_LIFE.get()) {
             if (data.getBoolean(ACTIVE)) finishVisit(villager, level, data, false);
             return;
         }
 
-        long now = level.getGameTime();
         if (data.getBoolean(ACTIVE)) {
             continueVisit(villager, level, data, now);
             return;
         }
-        if (!TickBudgetModel.isScheduledThisTick(now, villager.getId(), CHECK_INTERVAL_TICKS)
-            || now < data.getLong(NEXT_ATTEMPT)
+        if (now < data.getLong(NEXT_ATTEMPT)
             || !isVanillaIdle(villager)
             || villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
             || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)
@@ -174,6 +175,7 @@ public final class VillageDailyLife {
                 && !candidate.isBaby()
                 && candidate.distanceToSqr(villager) >= 4.0D
                 && candidate.distanceToSqr(villager) <= MAX_SOCIAL_DISTANCE_SQR
+                && !candidate.getPersistentData().getBoolean(ACTIVE)
                 && isVanillaIdle(candidate)
                 && !candidate.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
                 && !VillagerRoles.shouldYieldToVanillaVillagerAi(candidate)
