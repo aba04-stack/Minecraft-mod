@@ -70,14 +70,23 @@ public final class VillageDailyLife {
             continueVisit(villager, level, data, now);
             return;
         }
-        if (now < data.getLong(NEXT_ATTEMPT)
+        tryStartSocialVisit(villager, level, now);
+    }
+
+    static boolean tryStartSocialVisit(Villager villager, ServerLevel level, long now) {
+        if (villager == null || level == null || !villager.isAlive() || villager.isBaby()
+            || !LivingVillagesConfig.ENABLE_DAILY_LIFE.get()) return false;
+        CompoundTag data = villager.getPersistentData();
+        if (data.getBoolean(ACTIVE)
+            || now < data.getLong(NEXT_ATTEMPT)
             || !isVanillaIdle(villager)
             || villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
             || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)
+            || VillagerRoles.isGuard(villager)
             || hasHigherPriorityTask(data)
             || isVillageAlarmActive(villager, level, now)
             || !VillageTickBudget.tryConsumeAiCheck(level)) {
-            return;
+            return false;
         }
 
         Villager peer = findAvailablePeer(villager, level);
@@ -95,12 +104,12 @@ public final class VillageDailyLife {
         if (!canStart || peer == null) {
             if (peer == null) data.putLong(NEXT_ATTEMPT,
                 DailyLifeActivityModel.nextAttemptTick(now, false));
-            return;
+            return false;
         }
 
         if (!claimPeer(villager, peer, level)) {
             data.putLong(NEXT_ATTEMPT, DailyLifeActivityModel.nextAttemptTick(now, false));
-            return;
+            return false;
         }
 
         data.putBoolean(ACTIVE, true);
@@ -110,6 +119,7 @@ public final class VillageDailyLife {
         data.putLong(LAST_ROUTE_ORDER, now);
         setRoute(villager, peer);
         data.putString(LAST_ACTION, "visiting");
+        return true;
     }
 
     private static void continueVisit(Villager villager, ServerLevel level, CompoundTag data, long now) {
@@ -283,7 +293,7 @@ public final class VillageDailyLife {
         });
     }
 
-    private static void finishVisit(Villager villager, ServerLevel level, CompoundTag data, boolean completed) {
+    static void finishVisit(Villager villager, ServerLevel level, CompoundTag data, boolean completed) {
         String targetId = data.getString(TARGET_UUID);
         Villager target = findVillager(level, villager, targetId);
         if (target != null) {
