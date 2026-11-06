@@ -80,11 +80,12 @@ sh -n gradlew BUILD_LOCAL.sh
 10. **[Адаптеры версий и загрузчиков (`docs/VERSION_ADAPTERS.md`)](docs/VERSION_ADAPTERS.md)** — локализация платформенного API и регламент обновления версий.
 11. **[Производительность (`docs/PERFORMANCE.md`)](docs/PERFORMANCE.md)** — троттлинг тиков, квоты, кэширование, потокобезопасность и удалённая симуляция.
 12. **[Бюджеты производительности (`docs/PERFORMANCE_BUDGETS.md`)](docs/PERFORMANCE_BUDGETS.md)** — методика замеров MSPT/TPS/RAM и 7 нагрузочных профилей.
-13. **[Сохранения и миграции (`docs/SAVE_DATA.md`)](docs/SAVE_DATA.md)** — версионирование схем NBT/`SavedData`, миграции и защита данных игрока.
-14. **[Тестирование (`docs/TESTING.md`)](docs/TESTING.md)** — уровни тестов, тест-кейсы всех подсистем и протоколы проверок.
-15. **[Качество релизов (`docs/RELEASE_QUALITY.md`)](docs/RELEASE_QUALITY.md)** — критерии стабильности и условия блокировки релиза (Release Gate).
-16. **[Инженерные стандарты (`docs/ENGINEERING_STANDARDS.md`)](docs/ENGINEERING_STANDARDS.md)** — система статусов, инварианты кода и правила ведения документации.
-17. **[Известные проблемы (`docs/KNOWN_ISSUES.md`)](docs/KNOWN_ISSUES.md)** — реально обнаруженные ограничения и непроверенные сценарии.
+13. **[Экономика ресурсов (`docs/RESOURCE_ECONOMY.md`)](docs/RESOURCE_ECONOMY.md)** — запасы поселения, динамические квоты сборщиков и ограниченные серии добычи/сбора.
+14. **[Сохранения и миграции (`docs/SAVE_DATA.md`)](docs/SAVE_DATA.md)** — версионирование схем NBT/`SavedData`, миграции и защита данных игрока.
+15. **[Тестирование (`docs/TESTING.md`)](docs/TESTING.md)** — уровни тестов, тест-кейсы всех подсистем и протоколы проверок.
+16. **[Качество релизов (`docs/RELEASE_QUALITY.md`)](docs/RELEASE_QUALITY.md)** — критерии стабильности и условия блокировки релиза (Release Gate).
+17. **[Инженерные стандарты (`docs/ENGINEERING_STANDARDS.md`)](docs/ENGINEERING_STANDARDS.md)** — система статусов, инварианты кода и правила ведения документации.
+18. **[Известные проблемы (`docs/KNOWN_ISSUES.md`)](docs/KNOWN_ISSUES.md)** — реально обнаруженные ограничения и непроверенные сценарии.
 
 ### Документация в корне репозитория
 
