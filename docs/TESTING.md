@@ -114,7 +114,7 @@
 - [ ] Очереди ограничены по размеру, не подгружают чанки принудительно и очищаются при завершении/отмене задачи.
 
 Новые GameTests `resourceDemandScalesWorkforceToRealStockAndLocalSources`, `workersProcessConnectedTreesOreVeinsAndWholeRipeCropBatches`, `farmerPlantsEmptyOwnedFarmlandFromRealSeedsInBoundedBatches` и проверка жизненного цикла резерва `farmer_seed_fetch` прошли в CI run [#211](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42247978661): 27/27 GameTests.
-## Дополнительные проверки пещерного маршрута и факелов (CI PENDING)
+## Дополнительные проверки пещерного маршрута и факелов (AUTOMATED CI PASSED — FIELD TEST PENDING)
 
 - [ ] Память маршрута ограничена 48 точками и сохраняется в NBT жителя.
 - [ ] Возврат начинается с ближайшей сохранённой точки, а не всегда с последней точки маршрута.
@@ -128,4 +128,4 @@
 - [ ] Не происходит X-ray-добычи, опасного вскрытия лавы, бесконечной прокладки тоннеля или потери предметов.
 - [ ] Проверить в обычном игровом мире: лестничные проходы, развилки, вода, тупики, занятый выход, заполненный инвентарь и выгрузка чанка.
 
-GameTests caveReturnStartsFromNearestRememberedWaypoint и guardPatrolLightingYieldsToCombatAndRetreat добавлены, но до успешного прогона CI остаются ожидающими проверки. Автоматические тесты не заменяют полевое тестирование пещер.
+GameTests caveReturnStartsFromNearestRememberedWaypoint и guardPatrolLightingYieldsToCombatAndRetreat прошли в CI run [#262](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42252079638). Всего успешно выполнено 29/29 GameTests; также прошли build, dedicated-server и headless-client smoke. Невыполненные пункты выше относятся к полевым сценариям в обычном мире. Автоматические тесты не заменяют полевое тестирование пещер.
