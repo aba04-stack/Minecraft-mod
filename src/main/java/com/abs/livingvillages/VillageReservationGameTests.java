@@ -2081,6 +2081,8 @@ public final class VillageReservationGameTests {
             "minecraft:oak_planks", 32);
         boolean firstQueued = VillageWorkOrders.enqueuePendingProject(
             helper.getLevel(), center, "house", 55);
+        boolean markedWaiting = VillageWorkOrders.markPendingProjectWaiting(
+            helper.getLevel(), center, "house", now);
         var first = VillageWorkOrders.list(helper.getLevel(), center, now).stream()
             .filter(order -> order.kind().equals("house") && order.dedupeKey().equals("house"))
             .findFirst().orElse(null);
@@ -2091,11 +2093,12 @@ public final class VillageReservationGameTests {
             .findFirst().orElse(null);
         var adopted = VillageWorkOrders.enqueue(
             helper.getLevel(), center, "house", "house", 55, now + 2L, 5000L, List.of(requirement));
-        helper.assertTrue(firstQueued && duplicateQueued && first != null && duplicate != null
-                && adopted != null && first.id().equals(duplicate.id()) && first.id().equals(adopted.id())
+        helper.assertTrue(firstQueued && duplicateQueued && markedWaiting && first != null && duplicate != null
+                && first.id().equals(duplicate.id()) && first.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.WAITING_FOR_RESOURCES
+                && adopted != null && first.id().equals(adopted.id()) && adopted.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.WAITING_FOR_RESOURCES
                 && adopted.requirements().size() == 1
                 && adopted.requirements().get(0).count() == 32,
-            "An elder's pending order must be deduplicated and then enriched with the validated material bill when a project starts.");
+            "An elder's pending order must stay unique, show WAITING_FOR_RESOURCES, and adopt its validated material bill when work can start.");
 
         var ready = VillageWorkOrders.setState(
             helper.getLevel(), center, first.id(),
