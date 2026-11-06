@@ -367,7 +367,7 @@ public final class VillagerMining {
     }
 
     /** Snapshot one connected same-type ore vein; hidden unrelated veins are never added. */
-    private static long[] collectOreVein(ServerLevel level, BlockPos start) {
+    static long[] collectOreVein(ServerLevel level, BlockPos start) {
         Block targetBlock = level.getBlockState(start).getBlock();
         ArrayDeque<BlockPos> pending = new ArrayDeque<>();
         Set<Long> visited = new HashSet<>();
