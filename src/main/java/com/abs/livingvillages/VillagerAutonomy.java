@@ -463,6 +463,14 @@ public final class VillagerAutonomy {
                     return true;
                 }
 
+                clearHarvestRoute(villager, data);
+                if (data.contains(HARVEST_FAILED_UNTIL)
+                    && target.getX() == data.getInt(HARVEST_FAILED_X)
+                    && target.getY() == data.getInt(HARVEST_FAILED_Y)
+                    && target.getZ() == data.getInt(HARVEST_FAILED_Z)) {
+                    data.remove(HARVEST_FAILED_X); data.remove(HARVEST_FAILED_Y);
+                    data.remove(HARVEST_FAILED_Z); data.remove(HARVEST_FAILED_UNTIL);
+                }
                 if (countItems(villager.getInventory(), plantingItem) <= 0) break;
                 if (!level.setBlock(target, cropBlock.defaultBlockState(), 3)) continue;
                 if (!consumeOneItem(villager.getInventory(), plantingItem)) {
@@ -484,7 +492,14 @@ public final class VillagerAutonomy {
         // Keep the cycle active only when this bounded batch was full or a route/fetch is pending.
         boolean moreRipe = ripeCrops.stream().anyMatch(pos -> {
             BlockState state = level.getBlockState(pos);
-            return state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop && crop.isMaxAge(state);
+            if (!(state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop) || !crop.isMaxAge(state)) {
+                return false;
+            }
+            net.minecraft.world.item.Item seed = seedItemForCrop(crop);
+            if (seed == Items.AIR) return false;
+            if (countItems(villager.getInventory(), seed) > 0) return true;
+            return Block.getDrops(state, level, pos, null, villager, ItemStack.EMPTY).stream()
+                .anyMatch(drop -> drop.is(seed) && drop.getCount() > 0);
         });
         boolean morePlantable = emptyFarmland.stream().anyMatch(pos -> level.getBlockState(pos).isAir()
             && level.getBlockState(pos.below()).is(Blocks.FARMLAND));
