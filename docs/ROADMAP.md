@@ -117,9 +117,9 @@
 - **Проверка:** внутриигровые тесты `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade` и `interactiveRequestPreferencesLivestockCareTrustAndElderLivestockSummaryWorkInWorld` (всего 24 внутриигровых `@GameTest`).
 ---
 
-## Этап 7. Спросо-ориентированная экономика и непрерывные рабочие серии (`PARTIALLY TESTED / CI_PENDING`)
+## Этап 7. Спросо-ориентированная экономика и непрерывные рабочие серии (`TESTED — automated CI`)
 
-> Этап реализован в `feature/demand-driven-village-economy` от `arena/fbf16766-minecraft-mod`. CI run [#150](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42242949596) для коммита `a1621e247ced9d4c7792bf711a94772ae0bd519f` прошёл сборку, 26 GameTests, smoke-test сервера и headless-клиента. Ветка остаётся отдельной; `arena`, `main` и опубликованный релиз не изменены.
+> Этап реализован в `feature/demand-driven-village-economy` от `arena/fbf16766-minecraft-mod`. Полный актуальный CI run [#211](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42247978661) для коммита `a679c342e45073d1de11a4f52093318f333e1967` прошёл статические проверки, сборку, 27/27 GameTests, smoke-test dedicated server и headless-клиента. JAR загружен как workflow artifact; публикация Release пропущена. Ветка остаётся отдельной; `arena`, `main` и опубликованный релиз не изменены.
 
 ### Подэтап 7.1. Первичная оценка запасов и динамические квоты рабочих (`TESTED`)
 - **Результат:** добавлены независимая доменная модель `VillageResourceDemandModel` и серверный адаптер `VillageResourcePlanner`. Они считают реальные запасы дерева, каменных материалов, руды/металлов и еды, проверяют локальные источники и выдают желаемые квоты лесорубов, шахтёров и фермеров.
@@ -131,9 +131,9 @@
 - **Проверка:** `workersProcessConnectedTreesOreVeinsAndWholeRipeCropBatches` прошёл в CI run #150 (26/26 GameTests).
 
  
-### Подэтап 7.4. Полный начальный цикл фермерского поля (`IMPLEMENTED / CI_PENDING`)
+### Подэтап 7.4. Полный начальный цикл фермерского поля (`TESTED`)
 - **Результат:** фермер обнаруживает принадлежащие деревне зрелые культуры и пустые освещённые грядки; собирает/пересаживает урожай и засевает пустое поле партиями до 4. При отсутствии посадочного материала он резервирует собственный склад и забирает до 16 реальных семян/посадочных клубней обычной навигацией. Без ресурсов поле не меняется.
-- **Проверка:** добавлены GameTests `farmerPlantsEmptyOwnedFarmlandFromRealSeedsInBoundedBatches` и проверка срока резерва `farmer_seed_fetch`; последний полный прогон выявил сбой существующего теста изоляции соседей. После очистки временных тестовых жителей нужен повторный чистый CI run.
+- **Проверка:** GameTests `farmerPlantsEmptyOwnedFarmlandFromRealSeedsInBoundedBatches` и жизненный цикл резерва `farmer_seed_fetch` прошли в CI run [#211](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42247978661). В том же run успешно выполнены сборка, 27/27 GameTests, dedicated-server smoke и headless-client smoke.
 
 ### Подэтап 7.3. Баланс экономики и нагрузочные испытания (`PLANNED`)
 - Разделить остатки железа, меди, золота, угля/топлива, инструментов, семян и строительных материалов; учитывать резервы заказов без двойного счёта.
