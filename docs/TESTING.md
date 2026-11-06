@@ -37,13 +37,18 @@
 
 
 
-### 2.1. Первичная проверка feature-ветки экономики (`CI_PENDING` для актуального HEAD)
+### 2.1. Итоговая CI-проверка feature-ветки экономики (`TESTED`)
 
-- **Промежуточный коммит:** `12d74032d0973b48d584b28a952fa235b201da13`.
-- **GitHub Actions run:** [#127](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42241808415).
-- **Подтверждено по логам:** статическая проверка прошла; `./gradlew build` завершился с `BUILD SUCCESSFUL`; `./gradlew runGameTestServer` выполнил все **26 GameTests**, включая партии `resource_demand` и `multi_block_work` (26/26 passed).
-- **Не подтверждено:** запуск выделенного сервера был отменён после начала smoke-теста из-за следующего обновления feature-ветки; smoke-тест клиента был пропущен. После последующих небольших исправлений кода и документации полный прогон актуального HEAD ещё требуется.
-
+- **Проверенный кодовый коммит:** `a1621e247ced9d4c7792bf711a94772ae0bd519f`.
+- **GitHub Actions run:** [#150](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42242949596).
+- **Статическая проверка:** `PASS`.
+- **Полная сборка:** `./gradlew build` — `BUILD SUCCESSFUL`.
+- **Игровые тесты:** `./gradlew runGameTestServer` — **26/26 GameTests passed**, включая `resource_demand` и `multi_block_work`.
+- **Выделенный сервер:** smoke-test достиг состояния готовности сервера — `PASS`.
+- **Headless-клиент:** smoke-test с программным OpenGL — `PASS`.
+- **Артефакт:** CI JAR успешно загружен как workflow artifact. Шаг публикации GitHub Release пропущен для feature-ветки, чтобы не менять опубликованный релиз.
+- **Ограничения:** этот CI не заменяет длительное интерактивное тестирование в обычном мире, проверку больших/нестандартных деревьев и глубоких жил, а также профилирование MSPT/TPS/RAM. Производительность на слабом ПК остаётся `UNVERIFIED`.
+- **Границы изменений:** проверка выполнена в `feature/demand-driven-village-economy`, PR #2 нацелен на `arena/fbf16766-minecraft-mod`; автоматического слияния в `arena` или `main` не было.
 
 ---
 
