@@ -296,12 +296,13 @@ public final class VillagerCaveSupport {
             return;
         }
 
+        BlockPos routeTarget = target.immutable();
         Optional<WalkTarget> current = villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET);
-        boolean sameTarget = current.map(walk -> walk.getTarget().currentBlockPosition().equals(target)).orElse(false);
+        boolean sameTarget = current.map(walk -> walk.getTarget().currentBlockPosition().equals(routeTarget)).orElse(false);
         boolean retry = now - data.getLong(RETURN_LAST_ORDER) >= ROUTE_REISSUE_TICKS;
         if (!sameTarget && (current.isEmpty() || retry) || sameTarget && retry) {
-            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target, WALK_SPEED, 1));
-            data.putLong(RETURN_TARGET, target.asLong());
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(routeTarget, WALK_SPEED, 1));
+            data.putLong(RETURN_TARGET, routeTarget.asLong());
             data.putLong(RETURN_LAST_ORDER, now);
         }
     }
