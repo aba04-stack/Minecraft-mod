@@ -400,7 +400,13 @@ public final class VillagerMining {
         double bestDistance = Double.MAX_VALUE;
         for (long packed : queued) {
             BlockPos pos = BlockPos.of(packed);
-            if (!level.hasChunkAt(pos) || !isOre(level.getBlockState(pos))) continue;
+            if (!level.hasChunkAt(pos)) continue;
+            BlockState state = level.getBlockState(pos);
+            ItemStack pickaxe = villager.getItemBySlot(EquipmentSlot.MAINHAND);
+            if (!isOre(state) || !toolCanMine(pickaxe, state)
+                || !isSafeMineTarget(level, villager, pos, state)
+                || !hasExposedFace(level, pos)
+                || findWorkPosition(level, villager, pos) == null) continue;
             remaining.add(packed);
             double distance = villager.distanceToSqr(Vec3.atCenterOf(pos));
             if (distance < bestDistance) { bestDistance = distance; best = pos.immutable(); }
