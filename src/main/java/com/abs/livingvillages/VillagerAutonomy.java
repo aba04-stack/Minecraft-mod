@@ -667,8 +667,7 @@ public final class VillagerAutonomy {
                 if (!stored.is(item)) continue;
                 int offeredCount = Math.min(stored.getCount(), limit - movedTotal);
                 ItemStack offered = new ItemStack(item, offeredCount);
-                ItemStack remainder = inventory.addItem(offered);
-                int moved = offeredCount - remainder.getCount();
+                int moved = insertInto(inventory, offered, offeredCount);
                 if (moved > 0) {
                     stored.shrink(moved);
                     if (stored.isEmpty()) storage.setItem(slot, ItemStack.EMPTY);
