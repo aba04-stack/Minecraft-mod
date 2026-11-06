@@ -278,8 +278,25 @@ public final class VillagerCaveSupport {
         boolean headingHome = index < 0;
         if (headingHome) {
             BlockPos home = VillagerRoles.getHome(villager);
-            if (home == null || !level.hasChunkAt(home)) {
+            if (home == null) {
                 finishReturn(villager, data);
+                return;
+            }
+            if (!level.hasChunkAt(home)) {
+                // Keep the route in NBT and wait. Never force-load the village chunk or discard
+                // the only remembered way out merely because the player moved away.
+                if (data.contains(RETURN_TARGET)) {
+                    BlockPos owned = BlockPos.of(data.getLong(RETURN_TARGET));
+                    villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
+                        if (walk.getTarget().currentBlockPosition().equals(owned)) {
+                            villager.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+                        }
+                    });
+                    data.remove(RETURN_TARGET);
+                }
+                if (now - data.getLong(RETURN_LAST_PROGRESS) >= WAYPOINT_STALL_TICKS) {
+                    data.putLong(RETURN_LAST_PROGRESS, now);
+                }
                 return;
             }
             if (villager.blockPosition().distSqr(home) <= ARRIVAL_DISTANCE_SQUARED) {
