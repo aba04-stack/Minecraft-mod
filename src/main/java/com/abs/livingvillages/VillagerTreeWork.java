@@ -28,10 +28,13 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Lumber work for unemployed adult villagers. Uses the normal villager navigation system,
@@ -50,6 +53,8 @@ public final class VillagerTreeWork {
     private static final String PROGRESS_KIND = P + "progress_kind", PROGRESS = P + "progress";
     private static final String TREE_BASE_X = P + "tree_base_x", TREE_BASE_Y = P + "tree_base_y", TREE_BASE_Z = P + "tree_base_z";
     private static final String TREE_SAPLING_KEY = P + "tree_sapling_key";
+    private static final String TREE_LOG_QUEUE = P + "tree_log_queue";
+    private static final int MAX_TREE_LOGS_PER_JOB = 512;
 
     private static final String REPLANT_ACTIVE = P + "replant_active";
     private static final String REPLANT_SOURCE_X = P + "replant_source_x", REPLANT_SOURCE_Y = P + "replant_source_y", REPLANT_SOURCE_Z = P + "replant_source_z";
@@ -149,6 +154,7 @@ public final class VillagerTreeWork {
         data.putInt(LOG_Y, log.getY());
         data.putInt(LOG_Z, log.getZ());
         BlockPos treeBase = findTreeBase(level, log);
+        data.putLongArray(TREE_LOG_QUEUE, collectConnectedTreeLogs(level, log));
         data.putInt(TREE_BASE_X, treeBase.getX());
         data.putInt(TREE_BASE_Y, treeBase.getY());
         data.putInt(TREE_BASE_Z, treeBase.getZ());
@@ -169,7 +175,10 @@ public final class VillagerTreeWork {
         }
         String role = villager.getPersistentData().getString(VillagerRoles.ROLE_KEY);
         CompoundTag data = villager.getPersistentData();
-        boolean roleAllowsForestWork = (role.isEmpty()
+        BlockPos home = VillagerRoles.getHome(villager);
+        if (home == null) home = villager.blockPosition();
+        if (!VillageResourcePlanner.getPlan((ServerLevel) villager.level(), home).needsWood()) return false;
+        boolean roleAllowsForestWork = (VillagerRoles.isLumberjack(villager)
                 || (VillagerRoles.ROLE_BUILDER.equals(role) && !VillageBuilder.isProjectActive(villager))
                 || (VillagerRoles.ROLE_CRAFTSMAN.equals(role) && !VillageCraftingJobs.isBusy(villager)))
             && !data.getBoolean(VillagePopulation.ACTIVE_KEY)
@@ -305,24 +314,46 @@ public final class VillagerTreeWork {
      * After cutting a block, continue with another log close to the cut point. This lets a
      * villager work up a trunk one block at a time, without retargeting a distant tree.
      */
-    private static BlockPos findNextLogInSameTree(ServerLevel level, BlockPos cutPosition, Villager villager) {
-        List<BlockPos> candidates = new ArrayList<>();
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                for (int dy = -1; dy <= 4; dy++) {
-                    BlockPos pos = cutPosition.offset(dx, dy, dz);
-                    if (pos.equals(cutPosition) || !level.hasChunkAt(pos)
-                        || !level.getBlockState(pos).is(BlockTags.LOGS)) continue;
-                    // Continue only through a physically connected log cluster. Nearby leaves alone
-                    // must not make the worker switch to another tree in a dense forest.
-                    if (hasNearbyLog(level, pos)) {
-                        candidates.add(pos.immutable());
+    /** Collect the connected log cluster once so later cuts cannot strand an upper branch. */
+    private static long[] collectConnectedTreeLogs(ServerLevel level, BlockPos start) {
+        ArrayDeque<BlockPos> pending = new ArrayDeque<>();
+        Set<Long> visited = new HashSet<>();
+        List<Long> found = new ArrayList<>();
+        pending.add(start.immutable());
+        while (!pending.isEmpty() && found.size() < MAX_TREE_LOGS_PER_JOB) {
+            BlockPos pos = pending.removeFirst();
+            if (Math.abs(pos.getX() - start.getX()) > 6 || Math.abs(pos.getZ() - start.getZ()) > 6
+                || Math.abs(pos.getY() - start.getY()) > 32 || !level.hasChunkAt(pos)
+                || !level.getBlockState(pos).is(BlockTags.LOGS)) continue;
+            if (!visited.add(pos.asLong())) continue;
+            found.add(pos.asLong());
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dy == 0 && dz == 0) continue;
+                        pending.addLast(pos.offset(dx, dy, dz));
                     }
                 }
             }
         }
-        candidates.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
-        return candidates.isEmpty() ? null : candidates.get(0);
+        return found.stream().mapToLong(Long::longValue).toArray();
+    }
+
+    /** Return the nearest still-existing log from the original tree snapshot, not a neighboring tree. */
+    private static BlockPos findNextQueuedLog(ServerLevel level, Villager villager, CompoundTag data) {
+        long[] queued = data.getLongArray(TREE_LOG_QUEUE);
+        List<Long> remaining = new ArrayList<>();
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (long packed : queued) {
+            BlockPos pos = BlockPos.of(packed);
+            if (!level.hasChunkAt(pos) || !level.getBlockState(pos).is(BlockTags.LOGS)) continue;
+            remaining.add(packed);
+            double distance = villager.distanceToSqr(Vec3.atCenterOf(pos));
+            if (distance < bestDistance) { bestDistance = distance; best = pos.immutable(); }
+        }
+        data.putLongArray(TREE_LOG_QUEUE, remaining.stream().mapToLong(Long::longValue).toArray());
+        return best;
     }
 
     private static boolean hasNearbyLog(ServerLevel level, BlockPos pos) {
@@ -526,7 +557,7 @@ public final class VillagerTreeWork {
                     true,
                     level.getGameTime()
                 );
-                BlockPos nextLog = findNextLogInSameTree(level, target, villager);
+                BlockPos nextLog = findNextQueuedLog(level, villager, data);
                 if (nextLog != null) {
                     clearOwnedRoute(villager, data);
                     setTargetLog(data, nextLog);
@@ -981,6 +1012,7 @@ public final class VillagerTreeWork {
         data.remove(ROUTE_X); data.remove(ROUTE_Y); data.remove(ROUTE_Z);
         data.remove(STARTED_AT); data.remove(LAST_ORDER);
         data.remove(TREE_BASE_X); data.remove(TREE_BASE_Y); data.remove(TREE_BASE_Z); data.remove(TREE_SAPLING_KEY);
+        data.remove(TREE_LOG_QUEUE);
         resetProgress(data);
     }
 
