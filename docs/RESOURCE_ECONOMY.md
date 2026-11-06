@@ -1,6 +1,6 @@
 # Экономика ресурсов и распределение рабочих (RESOURCE_ECONOMY)
 
-> **Статус реализации:** CI_PENDING в ветке feature/demand-driven-village-economy. Автоматические тесты добавлены, но до успешного GitHub Actions прогона эта спецификация не считается проверенной.
+> **Статус реализации:** TESTED в feature-ветке. CI run [#150](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42242949596) для коммита `a1621e247ced9d4c7792bf711a94772ae0bd519f`: статические проверки, `./gradlew build`, 26/26 GameTests, запуск dedicated server и headless client прошли. Профилирование MSPT/TPS/RAM и длительная проверка в обычном игровом клиенте остаются открытыми.
 >
 > **Связанные документы:** [Техническое задание](PROJECT_SPEC.md) · [Поведение жителей](AI_BEHAVIOR.md) · [Дорожная карта](ROADMAP.md) · [Известные проблемы](KNOWN_ISSUES.md) · [Бюджеты производительности](PERFORMANCE_BUDGETS.md).
 
