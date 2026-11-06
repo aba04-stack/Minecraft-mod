@@ -49,8 +49,17 @@ public final class VillagerAutonomy {
     private static final String HARVEST_X = PREFIX + "harvest_x";
     private static final String HARVEST_Y = PREFIX + "harvest_y";
     private static final String HARVEST_Z = PREFIX + "harvest_z";
+    private static final String HARVEST_STARTED = PREFIX + "harvest_started";
+    private static final String HARVEST_LAST_ORDER = PREFIX + "harvest_last_order";
+    private static final String HARVEST_FAILED_X = PREFIX + "harvest_failed_x";
+    private static final String HARVEST_FAILED_Y = PREFIX + "harvest_failed_y";
+    private static final String HARVEST_FAILED_Z = PREFIX + "harvest_failed_z";
+    private static final String HARVEST_FAILED_UNTIL = PREFIX + "harvest_failed_until";
 
     private static final int MAX_CROPS_PER_PASS = 4;
+    private static final long HARVEST_ROUTE_TIMEOUT_TICKS = 1200L;
+    private static final long HARVEST_TARGET_COOLDOWN_TICKS = 12000L;
+    private static final long HARVEST_ROUTE_REISSUE_TICKS = 40L;
 
     private static final int SEARCH_STAGGER_TICKS = 400;
     private static final int RETRY_DELAY_TICKS = 80;
@@ -289,6 +298,18 @@ public final class VillagerAutonomy {
             return false;
         }
         data.putBoolean(HARVEST_CYCLE_KEY, true);
+        if (data.getBoolean(HARVEST_ACTIVE_KEY)
+            && nowTick - data.getLong(HARVEST_STARTED) > HARVEST_ROUTE_TIMEOUT_TICKS) {
+            data.putInt(HARVEST_FAILED_X, data.getInt(HARVEST_X));
+            data.putInt(HARVEST_FAILED_Y, data.getInt(HARVEST_Y));
+            data.putInt(HARVEST_FAILED_Z, data.getInt(HARVEST_Z));
+            data.putLong(HARVEST_FAILED_UNTIL, nowTick + HARVEST_TARGET_COOLDOWN_TICKS);
+            clearHarvestRoute(villager, data);
+        }
+        if (data.contains(HARVEST_FAILED_UNTIL) && nowTick >= data.getLong(HARVEST_FAILED_UNTIL)) {
+            data.remove(HARVEST_FAILED_X); data.remove(HARVEST_FAILED_Y); data.remove(HARVEST_FAILED_Z);
+            data.remove(HARVEST_FAILED_UNTIL);
+        }
         BlockPos origin = VillagerRoles.getHome(villager);
         if (origin == null) origin = villager.blockPosition();
         int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
@@ -303,6 +324,10 @@ public final class VillagerAutonomy {
                     for (int dy = -3; dy <= 3; dy++) {
                         BlockPos pos = origin.offset(dx, dy, dz);
                         if (!level.hasChunkAt(pos) || skippedWithoutSeed.contains(pos.asLong())) continue;
+                        if (data.contains(HARVEST_FAILED_UNTIL) && nowTick < data.getLong(HARVEST_FAILED_UNTIL)
+                            && pos.getX() == data.getInt(HARVEST_FAILED_X)
+                            && pos.getY() == data.getInt(HARVEST_FAILED_Y)
+                            && pos.getZ() == data.getInt(HARVEST_FAILED_Z)) continue;
                         BlockState state = level.getBlockState(pos);
                         if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop
                             && crop.isMaxAge(state)) {
@@ -325,13 +350,20 @@ public final class VillagerAutonomy {
                 }
                 boolean sameTarget = data.getBoolean(HARVEST_ACTIVE_KEY)
                     && bestMature.equals(new BlockPos(data.getInt(HARVEST_X), data.getInt(HARVEST_Y), data.getInt(HARVEST_Z)));
-                if (!sameTarget || !villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
+                if (!sameTarget) {
                     data.putBoolean(HARVEST_ACTIVE_KEY, true);
                     data.putInt(HARVEST_X, bestMature.getX());
                     data.putInt(HARVEST_Y, bestMature.getY());
                     data.putInt(HARVEST_Z, bestMature.getZ());
+                    data.putLong(HARVEST_STARTED, nowTick);
+                    data.putLong(HARVEST_LAST_ORDER, nowTick);
                     villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET,
                         new WalkTarget(bestMature, WALK_SPEED, 1));
+                } else if (!villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
+                    && nowTick - data.getLong(HARVEST_LAST_ORDER) >= HARVEST_ROUTE_REISSUE_TICKS) {
+                    villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET,
+                        new WalkTarget(bestMature, WALK_SPEED, 1));
+                    data.putLong(HARVEST_LAST_ORDER, nowTick);
                 }
                 return true;
             }
@@ -357,6 +389,13 @@ public final class VillagerAutonomy {
             }
 
             clearHarvestRoute(villager, data);
+            if (data.contains(HARVEST_FAILED_UNTIL)
+                && bestMature.getX() == data.getInt(HARVEST_FAILED_X)
+                && bestMature.getY() == data.getInt(HARVEST_FAILED_Y)
+                && bestMature.getZ() == data.getInt(HARVEST_FAILED_Z)) {
+                data.remove(HARVEST_FAILED_X); data.remove(HARVEST_FAILED_Y); data.remove(HARVEST_FAILED_Z);
+                data.remove(HARVEST_FAILED_UNTIL);
+            }
             if (seedInInventory == 0) {
                 ItemStack seedDrop = drops.stream().filter(stack -> stack.is(seedItem) && !stack.isEmpty()).findFirst().orElse(null);
                 if (seedDrop == null) {
@@ -432,6 +471,7 @@ public final class VillagerAutonomy {
         }
         data.putBoolean(HARVEST_ACTIVE_KEY, false);
         data.remove(HARVEST_X); data.remove(HARVEST_Y); data.remove(HARVEST_Z);
+        data.remove(HARVEST_STARTED); data.remove(HARVEST_LAST_ORDER);
     }
 
     private static net.minecraft.world.item.Item seedItemForCrop(Block crop) {
