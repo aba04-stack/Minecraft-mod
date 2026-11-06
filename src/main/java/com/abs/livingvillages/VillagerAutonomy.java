@@ -328,8 +328,9 @@ public final class VillagerAutonomy {
         if (origin == null) origin = villager.blockPosition();
         int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
 
-        // Scan the field once, then work the nearest ripe crops from this bounded snapshot.
+        // One bounded scan discovers both ripe crops and empty, village-owned farmland.
         List<BlockPos> ripeCrops = new ArrayList<>();
+        List<BlockPos> emptyFarmland = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
@@ -339,49 +340,41 @@ public final class VillagerAutonomy {
                         && pos.getX() == data.getInt(HARVEST_FAILED_X)
                         && pos.getY() == data.getInt(HARVEST_FAILED_Y)
                         && pos.getZ() == data.getInt(HARVEST_FAILED_Z)) continue;
+
                     BlockState state = level.getBlockState(pos);
                     if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop
                         && crop.isMaxAge(state)
                         && VillageArea.isBlockInResidentGroup(level, origin, pos)) {
                         ripeCrops.add(pos.immutable());
+                    } else if (state.isAir() && level.hasChunkAt(pos.below())
+                        && level.getBlockState(pos.below()).is(Blocks.FARMLAND)
+                        && level.getMaxLocalRawBrightness(pos) >= 8
+                        && VillageArea.isBlockInResidentGroup(level, origin, pos.below())) {
+                        emptyFarmland.add(pos.immutable());
                     }
                 }
             }
         }
-        ripeCrops.sort((first, second) -> Double.compare(
-            villager.distanceToSqr(Vec3.atCenterOf(first)),
-            villager.distanceToSqr(Vec3.atCenterOf(second))));
 
-        int harvested = 0;
+        java.util.Comparator<BlockPos> nearestFirst = java.util.Comparator.comparingDouble(
+            pos -> villager.distanceToSqr(Vec3.atCenterOf(pos)));
+        ripeCrops.sort(nearestFirst);
+        emptyFarmland.sort(nearestFirst);
+
+        int workDone = 0;
         for (BlockPos target : ripeCrops) {
-            if (harvested >= MAX_CROPS_PER_PASS) break;
+            if (workDone >= MAX_CROPS_PER_PASS) break;
             BlockState state = level.getBlockState(target);
             if (!(state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop)
                 || !crop.isMaxAge(state)) continue;
 
-            double distanceSqr = villager.distanceToSqr(Vec3.atCenterOf(target));
-            if (distanceSqr > 9.0D) {
+            if (villager.distanceToSqr(Vec3.atCenterOf(target)) > 9.0D) {
                 if (VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {
                     clearHarvestRoute(villager, data);
-                    break;
+                    data.putLong(NEXT_SEARCH, nowTick + RETRY_DELAY_TICKS);
+                    return false;
                 }
-                boolean sameTarget = data.getBoolean(HARVEST_ACTIVE_KEY)
-                    && target.equals(new BlockPos(data.getInt(HARVEST_X), data.getInt(HARVEST_Y), data.getInt(HARVEST_Z)));
-                if (!sameTarget) {
-                    data.putBoolean(HARVEST_ACTIVE_KEY, true);
-                    data.putInt(HARVEST_X, target.getX());
-                    data.putInt(HARVEST_Y, target.getY());
-                    data.putInt(HARVEST_Z, target.getZ());
-                    data.putLong(HARVEST_STARTED, nowTick);
-                    data.putLong(HARVEST_LAST_ORDER, nowTick);
-                    villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET,
-                        new WalkTarget(target, WALK_SPEED, 1));
-                } else if (!villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
-                    && nowTick - data.getLong(HARVEST_LAST_ORDER) >= HARVEST_ROUTE_REISSUE_TICKS) {
-                    villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET,
-                        new WalkTarget(target, WALK_SPEED, 1));
-                    data.putLong(HARVEST_LAST_ORDER, nowTick);
-                }
+                setHarvestRoute(villager, data, target, nowTick);
                 return true;
             }
 
@@ -393,7 +386,7 @@ public final class VillagerAutonomy {
             int seedInDrops = drops.stream().filter(stack -> stack.is(seedItem))
                 .mapToInt(ItemStack::getCount).sum();
             if (seedInInventory + seedInDrops <= 0) {
-                // Never destroy a mature crop if the worker cannot replant it with a real seed.
+                // A ripe crop is left untouched when it cannot be replanted with a real seed.
                 continue;
             }
 
@@ -405,7 +398,6 @@ public final class VillagerAutonomy {
                 data.remove(HARVEST_FAILED_X); data.remove(HARVEST_FAILED_Y); data.remove(HARVEST_FAILED_Z);
                 data.remove(HARVEST_FAILED_UNTIL);
             }
-
             if (seedInInventory == 0) {
                 ItemStack seedDrop = drops.stream()
                     .filter(stack -> stack.is(seedItem) && !stack.isEmpty()).findFirst().orElse(null);
@@ -417,7 +409,7 @@ public final class VillagerAutonomy {
             }
             if (!consumeOneItem(villager.getInventory(), seedItem)) continue;
 
-            // Replant first. Only commit the crop drops after the world accepted the new crop state.
+            // Replant first. Commit drops only after the world accepted the replacement crop.
             if (!level.setBlock(target, crop.getStateForAge(0), 3)) {
                 villager.spawnAtLocation(new ItemStack(seedItem));
                 continue;
@@ -427,7 +419,6 @@ public final class VillagerAutonomy {
                 ItemStack remainder = villager.getInventory().addItem(drop.copy());
                 if (!remainder.isEmpty()) Block.popResource(level, target, remainder);
             }
-
             villager.getInventory().setChanged();
             VillagerProgression.recordCompletedWork(
                 villager,
@@ -436,10 +427,71 @@ public final class VillagerAutonomy {
                 true,
                 nowTick
             );
-            harvested++;
+            workDone++;
         }
 
-        // Convert carried wheat into bread (3 wheat -> 1 bread) after the small harvest batch.
+        // Once ripe crops are handled, fill empty owned farmland using real seeds/planting items.
+        if (workDone < MAX_CROPS_PER_PASS && !emptyFarmland.isEmpty()) {
+            net.minecraft.world.item.Item plantingItem = firstPlantingItem(villager.getInventory());
+            if (plantingItem == Items.AIR) {
+                if (startSeedFetch(villager, level, origin, nowTick)) return true;
+                data.putBoolean(HARVEST_CYCLE_KEY, false);
+                data.putLong(NEXT_SEARCH, nowTick + SUCCESS_DELAY_TICKS);
+                VillageRegistry.recordDiagnostic(level, origin, "Фермер",
+                    "Ожидаются настоящие семена или посадочные клубни на складе");
+                return workDone > 0;
+            }
+
+            Block cropBlock = cropForPlantingItem(plantingItem);
+            for (BlockPos target : emptyFarmland) {
+                if (workDone >= MAX_CROPS_PER_PASS) break;
+                if (!level.hasChunkAt(target) || !level.getBlockState(target).isAir()
+                    || !level.getBlockState(target.below()).is(Blocks.FARMLAND)
+                    || level.getMaxLocalRawBrightness(target) < 8
+                    || !VillageArea.isBlockInResidentGroup(level, origin, target.below())) continue;
+
+                if (villager.distanceToSqr(Vec3.atCenterOf(target)) > 9.0D) {
+                    if (VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {
+                        data.putBoolean(HARVEST_CYCLE_KEY, false);
+                        data.putLong(NEXT_SEARCH, nowTick + RETRY_DELAY_TICKS);
+                        return workDone > 0;
+                    }
+                    setHarvestRoute(villager, data, target, nowTick);
+                    return true;
+                }
+
+                ItemStack stateSeed = new ItemStack(plantingItem);
+                if (countItems(villager.getInventory(), plantingItem) <= 0) break;
+                if (!level.setBlock(target, cropBlock.defaultBlockState(), 3)) continue;
+                if (!consumeOneItem(villager.getInventory(), plantingItem)) {
+                    level.setBlock(target, Blocks.AIR.defaultBlockState(), 3);
+                    break;
+                }
+                villager.getInventory().setChanged();
+                VillagerProgression.recordCompletedWork(
+                    villager,
+                    com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_FARMER,
+                    1,
+                    true,
+                    nowTick
+                );
+                workDone++;
+            }
+        }
+
+        // Keep the cycle active only when this bounded batch was full or a route/fetch is pending.
+        boolean moreRipe = ripeCrops.stream().anyMatch(pos -> {
+            BlockState state = level.getBlockState(pos);
+            return state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop && crop.isMaxAge(state);
+        });
+        boolean morePlantable = emptyFarmland.stream().anyMatch(pos -> level.getBlockState(pos).isAir()
+            && level.getBlockState(pos.below()).is(Blocks.FARMLAND));
+        boolean cyclePending = workDone >= MAX_CROPS_PER_PASS
+            || moreRipe || (morePlantable && firstPlantingItem(villager.getInventory()) != Items.AIR);
+        data.putBoolean(HARVEST_CYCLE_KEY, cyclePending);
+        if (!cyclePending) data.putLong(NEXT_SEARCH, nowTick + SUCCESS_DELAY_TICKS);
+
+        // Convert carried wheat into bread after the bounded field work.
         var inv = villager.getInventory();
         int wheatCount = countItems(inv, Items.WHEAT);
         while (wheatCount >= 3) {
@@ -449,12 +501,163 @@ public final class VillagerAutonomy {
             inv.setChanged();
             wheatCount -= 3;
         }
+        return workDone > 0 || cyclePending || data.getBoolean(HARVEST_ACTIVE_KEY);
+    }
 
-        if (harvested < MAX_CROPS_PER_PASS && !data.getBoolean(HARVEST_ACTIVE_KEY)) {
-            // Every ripe crop from the current scan was processed or deliberately preserved.
-            data.putBoolean(HARVEST_CYCLE_KEY, false);
+    private static void setHarvestRoute(Villager villager, CompoundTag data, BlockPos target, long nowTick) {
+        boolean sameTarget = data.getBoolean(HARVEST_ACTIVE_KEY)
+            && target.equals(new BlockPos(data.getInt(HARVEST_X), data.getInt(HARVEST_Y), data.getInt(HARVEST_Z)));
+        if (!sameTarget) {
+            data.putBoolean(HARVEST_ACTIVE_KEY, true);
+            data.putInt(HARVEST_X, target.getX());
+            data.putInt(HARVEST_Y, target.getY());
+            data.putInt(HARVEST_Z, target.getZ());
+            data.putLong(HARVEST_STARTED, nowTick);
+            data.putLong(HARVEST_LAST_ORDER, nowTick);
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target, WALK_SPEED, 1));
+        } else if (!villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
+            && nowTick - data.getLong(HARVEST_LAST_ORDER) >= HARVEST_ROUTE_REISSUE_TICKS) {
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target, WALK_SPEED, 1));
+            data.putLong(HARVEST_LAST_ORDER, nowTick);
         }
-        return harvested > 0 || data.getBoolean(HARVEST_ACTIVE_KEY);
+    }
+
+    private static net.minecraft.world.item.Item firstPlantingItem(Container inventory) {
+        for (net.minecraft.world.item.Item item : List.of(
+            Items.WHEAT_SEEDS, Items.CARROT, Items.POTATO, Items.BEETROOT_SEEDS)) {
+            if (countItems(inventory, item) > 0) return item;
+        }
+        return Items.AIR;
+    }
+
+    private static Block cropForPlantingItem(net.minecraft.world.item.Item item) {
+        if (item == Items.WHEAT_SEEDS) return Blocks.WHEAT;
+        if (item == Items.CARROT) return Blocks.CARROTS;
+        if (item == Items.POTATO) return Blocks.POTATOES;
+        if (item == Items.BEETROOT_SEEDS) return Blocks.BEETROOTS;
+        return Blocks.AIR;
+    }
+
+    private static boolean startSeedFetch(Villager villager, ServerLevel level, BlockPos villageCenter, long nowTick) {
+        StorageTarget target = findNearestStorageWithSeeds(villager, level, villageCenter);
+        if (target == null || !VillageReservations.tryReserveStoragePositions(
+            level, villager, List.of(target.chest()), "farmer_seed_fetch")) return false;
+        CompoundTag data = villager.getPersistentData();
+        data.putBoolean(SEED_FETCH_ACTIVE, true);
+        data.putInt(SEED_FETCH_CHEST_X, target.chest().getX());
+        data.putInt(SEED_FETCH_CHEST_Y, target.chest().getY());
+        data.putInt(SEED_FETCH_CHEST_Z, target.chest().getZ());
+        data.putInt(SEED_FETCH_STAND_X, target.stand().getX());
+        data.putInt(SEED_FETCH_STAND_Y, target.stand().getY());
+        data.putInt(SEED_FETCH_STAND_Z, target.stand().getZ());
+        data.putLong(SEED_FETCH_STARTED, nowTick);
+        data.putLong(SEED_FETCH_LAST_ORDER, nowTick);
+        villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET,
+            new WalkTarget(target.stand(), WALK_SPEED, 1));
+        return true;
+    }
+
+    private static StorageTarget findNearestStorageWithSeeds(
+            Villager villager, ServerLevel level, BlockPos villageCenter) {
+        int radius = Math.min(12, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        StorageTarget best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -4; dy <= 4; dy++) {
+                    BlockPos chestPos = villageCenter.offset(dx, dy, dz);
+                    if (!level.hasChunkAt(chestPos) || !isStorageBlock(level.getBlockState(chestPos))
+                        || !VillageRegistry.isStorageForVillage(level, villageCenter, chestPos)
+                        || !VillageReservations.isStorageAvailable(level, chestPos, villager)
+                        || !(level.getBlockEntity(chestPos) instanceof Container container)
+                        || firstPlantingItem(container) == Items.AIR) continue;
+                    for (Direction direction : HORIZONTAL_DIRECTIONS) {
+                        BlockPos stand = chestPos.relative(direction);
+                        if (!isSafeStandPosition(level, stand)) continue;
+                        double distance = villager.distanceToSqr(Vec3.atCenterOf(stand));
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            best = new StorageTarget(chestPos.immutable(), stand.immutable());
+                        }
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static void continueSeedFetch(Villager villager, ServerLevel level, CompoundTag data, long nowTick) {
+        if (nowTick - data.getLong(SEED_FETCH_STARTED) > SEED_FETCH_TIMEOUT_TICKS) {
+            cancelSeedFetch(villager, data);
+            data.putLong(NEXT_SEARCH, nowTick + RETRY_DELAY_TICKS);
+            return;
+        }
+        BlockPos chest = new BlockPos(data.getInt(SEED_FETCH_CHEST_X),
+            data.getInt(SEED_FETCH_CHEST_Y), data.getInt(SEED_FETCH_CHEST_Z));
+        BlockPos stand = new BlockPos(data.getInt(SEED_FETCH_STAND_X),
+            data.getInt(SEED_FETCH_STAND_Y), data.getInt(SEED_FETCH_STAND_Z));
+        BlockPos home = VillagerRoles.getHome(villager);
+        if (home == null) home = villager.blockPosition();
+        if (!level.hasChunkAt(chest) || !isStorageBlock(level.getBlockState(chest))
+            || !VillageRegistry.isStorageForVillage(level, home, chest)
+            || !VillageReservations.isStorageAvailable(level, chest, villager)
+            || !(level.getBlockEntity(chest) instanceof Container container)) {
+            cancelSeedFetch(villager, data);
+            data.putLong(NEXT_SEARCH, nowTick + RETRY_DELAY_TICKS);
+            return;
+        }
+
+        if (villager.distanceToSqr(Vec3.atCenterOf(stand)) <= 2.8D * 2.8D) {
+            int moved = withdrawPlantingItems(villager.getInventory(), container, 16);
+            cancelSeedFetch(villager, data);
+            data.putLong(NEXT_SEARCH, nowTick + (moved > 0 ? 20L : RETRY_DELAY_TICKS));
+            if (moved <= 0) data.putBoolean(HARVEST_CYCLE_KEY, false);
+            return;
+        }
+        if (!villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
+            && nowTick - data.getLong(SEED_FETCH_LAST_ORDER) >= 40L) {
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET,
+                new WalkTarget(stand, WALK_SPEED, 1));
+            data.putLong(SEED_FETCH_LAST_ORDER, nowTick);
+        }
+    }
+
+    private static int withdrawPlantingItems(Container inventory, Container storage, int limit) {
+        int movedTotal = 0;
+        for (net.minecraft.world.item.Item item : List.of(
+            Items.WHEAT_SEEDS, Items.CARROT, Items.POTATO, Items.BEETROOT_SEEDS)) {
+            for (int slot = 0; slot < storage.getContainerSize() && movedTotal < limit; slot++) {
+                ItemStack stored = storage.getItem(slot);
+                if (!stored.is(item)) continue;
+                int offeredCount = Math.min(stored.getCount(), limit - movedTotal);
+                ItemStack offered = new ItemStack(item, offeredCount);
+                ItemStack remainder = inventory.addItem(offered);
+                int moved = offeredCount - remainder.getCount();
+                if (moved > 0) {
+                    stored.shrink(moved);
+                    if (stored.isEmpty()) storage.setItem(slot, ItemStack.EMPTY);
+                    movedTotal += moved;
+                    storage.setChanged();
+                    inventory.setChanged();
+                }
+            }
+        }
+        return movedTotal;
+    }
+
+    private static void cancelSeedFetch(Villager villager, CompoundTag data) {
+        BlockPos ownedStand = new BlockPos(data.getInt(SEED_FETCH_STAND_X),
+            data.getInt(SEED_FETCH_STAND_Y), data.getInt(SEED_FETCH_STAND_Z));
+        villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
+            if (walk.getTarget().currentBlockPosition().equals(ownedStand)) {
+                villager.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+            }
+        });
+        VillageReservations.release(data, "farmer_seed_fetch");
+        data.putBoolean(SEED_FETCH_ACTIVE, false);
+        data.remove(SEED_FETCH_CHEST_X); data.remove(SEED_FETCH_CHEST_Y); data.remove(SEED_FETCH_CHEST_Z);
+        data.remove(SEED_FETCH_STAND_X); data.remove(SEED_FETCH_STAND_Y); data.remove(SEED_FETCH_STAND_Z);
+        data.remove(SEED_FETCH_STARTED); data.remove(SEED_FETCH_LAST_ORDER);
     }
 
     private static int countItems(Container inventory, net.minecraft.world.item.Item item) {
