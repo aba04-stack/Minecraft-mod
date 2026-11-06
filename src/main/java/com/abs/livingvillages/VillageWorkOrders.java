@@ -73,8 +73,18 @@ public final class VillageWorkOrders extends SavedData {
         List<VillageWorkOrderModel.Order> orders =
             board.ordersByVillage.computeIfAbsent(villageId, ignored -> new ArrayList<>());
         if (board.reconcileOrders(orders, nowTick)) board.setDirty();
-        for (VillageWorkOrderModel.Order order : orders) {
+        for (int i = 0; i < orders.size(); i++) {
+            VillageWorkOrderModel.Order order = orders.get(i);
             if (!order.isTerminal() && order.kind().equals(kind) && order.dedupeKey().equals(dedupeKey)) {
+                if (order.requirements().isEmpty() && !normalized.isEmpty()) {
+                    VillageWorkOrderModel.Order enriched =
+                        VillageWorkOrderModel.addRequirementsToOpenOrder(order, normalized, priority, nowTick);
+                    if (enriched != null) {
+                        orders.set(i, enriched);
+                        board.setDirty();
+                        return enriched;
+                    }
+                }
                 return order;
             }
         }
@@ -102,6 +112,20 @@ public final class VillageWorkOrders extends SavedData {
         orders.add(created);
         board.setDirty();
         return created;
+    }
+
+    /** Creates the persistent placeholder entry when the elder queues a house/farm request. */
+    public static boolean enqueuePendingProject(
+        ServerLevel level,
+        BlockPos center,
+        String kind,
+        int priority
+    ) {
+        if (!("house".equals(kind) || "farm".equals(kind))) return false;
+        long now = level == null ? 0L : level.getGameTime();
+        VillageWorkOrderModel.Order order = enqueue(
+            level, center, kind, kind, priority, now, DEFAULT_ORDER_TTL_TICKS, List.of());
+        return order != null && !order.isTerminal();
     }
 
     public static List<VillageWorkOrderModel.Order> list(
@@ -240,7 +264,7 @@ public final class VillageWorkOrders extends SavedData {
             if (key == null) return false;
             requirements.add(new VillageWorkOrderModel.Requirement(key.toString(), entry.getValue()));
         }
-        String dedupeKey = kind + ":" + site.asLong();
+        String dedupeKey = kind;
         long now = level.getGameTime();
         int priority = kind.equals("farm") ? 60 : 55;
         VillageWorkOrderModel.Order order = enqueue(
@@ -288,7 +312,7 @@ public final class VillageWorkOrders extends SavedData {
         if (level == null || center == null || kind == null || site == null
             || replacement == null || !replacement.isAlive() || !previousWorkerConfirmedAbsent) return false;
         long now = level.getGameTime();
-        String dedupeKey = kind + ":" + site.asLong();
+        String dedupeKey = kind;
         VillageWorkOrderModel.Order order = enqueue(
             level, center, kind, dedupeKey, kind.equals("farm") ? 60 : 55,
             now, DEFAULT_ORDER_TTL_TICKS, List.of());
