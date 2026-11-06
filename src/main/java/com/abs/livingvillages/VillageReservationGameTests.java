@@ -2079,14 +2079,20 @@ public final class VillageReservationGameTests {
 
         var requirement = new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement(
             "minecraft:oak_planks", 32);
-        var first = VillageWorkOrders.enqueue(
-            helper.getLevel(), center, "house", "house", 55, now, 5000L, List.of());
-        var duplicate = VillageWorkOrders.enqueue(
-            helper.getLevel(), center, "house", "house", 55, now + 1L, 5000L, List.of());
+        boolean firstQueued = VillageWorkOrders.enqueuePendingProject(
+            helper.getLevel(), center, "house", 55);
+        var first = VillageWorkOrders.list(helper.getLevel(), center, now).stream()
+            .filter(order -> order.kind().equals("house") && order.dedupeKey().equals("house"))
+            .findFirst().orElse(null);
+        boolean duplicateQueued = VillageWorkOrders.enqueuePendingProject(
+            helper.getLevel(), center, "house", 55);
+        var duplicate = VillageWorkOrders.list(helper.getLevel(), center, now + 1L).stream()
+            .filter(order -> order.kind().equals("house") && order.dedupeKey().equals("house"))
+            .findFirst().orElse(null);
         var adopted = VillageWorkOrders.enqueue(
             helper.getLevel(), center, "house", "house", 55, now + 2L, 5000L, List.of(requirement));
-        helper.assertTrue(first != null && duplicate != null && adopted != null
-                && first.id().equals(duplicate.id()) && first.id().equals(adopted.id())
+        helper.assertTrue(firstQueued && duplicateQueued && first != null && duplicate != null
+                && adopted != null && first.id().equals(duplicate.id()) && first.id().equals(adopted.id())
                 && adopted.requirements().size() == 1
                 && adopted.requirements().get(0).count() == 32,
             "An elder's pending order must be deduplicated and then enriched with the validated material bill when a project starts.");
