@@ -1898,6 +1898,100 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "resource_demand")
+    public static void resourceDemandScalesWorkforceToRealStockAndLocalSources(GameTestHelper helper) {
+        var starter = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 0, 0, 0, 0, 12, true, 2));
+        helper.assertTrue(
+            starter.needsWood() && starter.needsStone() && starter.needsOre() && starter.needsFood()
+                && starter.desiredLumberjacks() == 2
+                && starter.desiredMiners() == 2
+                && starter.desiredFarmers() == 1,
+            "Low physical stock with local trees, ripe crops and tools must request the matching workers.");
+
+        var stocked = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, true, 3));
+        helper.assertTrue(
+            !stocked.needsWood() && !stocked.needsStone() && !stocked.needsOre() && !stocked.needsFood()
+                && stocked.desiredLumberjacks() == 0
+                && stocked.desiredMiners() == 0
+                && stocked.desiredFarmers() == 0,
+            "Workers must not keep extracting resources after stock reaches its targets.");
+
+        var treeless = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 0, 0, 0, 0, 0, false, 2));
+        helper.assertTrue(
+            !treeless.needsWood() && treeless.desiredLumberjacks() == 0,
+            "A treeless settlement must not assign lumberjacks to a resource source that is not present.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "multi_block_work")
+    public static void workersProcessConnectedTreesOreVeinsAndWholeRipeCropBatches(GameTestHelper helper) {
+        // A connected five-log tree and one nearby but disconnected building beam.
+        BlockPos[] treeLogs = {
+            new BlockPos(1, 1, 1), new BlockPos(1, 2, 1), new BlockPos(1, 3, 1),
+            new BlockPos(2, 3, 1), new BlockPos(2, 4, 1)
+        };
+        for (BlockPos pos : treeLogs) helper.setBlock(pos, Blocks.OAK_LOG);
+        helper.setBlock(new BlockPos(6, 1, 1), Blocks.OAK_LOG);
+        long[] treeQueue = VillagerTreeWork.collectConnectedTreeLogs(
+            helper.getLevel(), helper.absolutePos(treeLogs[0]));
+        helper.assertTrue(treeQueue.length == 5,
+            "A lumberjack job must snapshot every log in the connected tree, without taking a nearby separate log.");
+
+        // Three connected iron ore blocks next to a different ore type.
+        BlockPos[] ironVein = {new BlockPos(8, 1, 1), new BlockPos(9, 1, 1), new BlockPos(10, 1, 1)};
+        for (BlockPos pos : ironVein) helper.setBlock(pos, Blocks.IRON_ORE);
+        helper.setBlock(new BlockPos(11, 1, 1), Blocks.COAL_ORE);
+        long[] oreQueue = VillagerMining.collectOreVein(
+            helper.getLevel(), helper.absolutePos(ironVein[0]));
+        helper.assertTrue(oreQueue.length == 3,
+            "A miner must queue the connected iron vein, not stop after one ore or switch to an adjacent coal vein.");
+
+        // Five mature wheat crops: the first bounded pass harvests four, the next finishes the field.
+        BlockPos[] crops = {
+            new BlockPos(5, 1, 4), new BlockPos(6, 1, 4), new BlockPos(7, 1, 4),
+            new BlockPos(5, 1, 5), new BlockPos(6, 1, 5)
+        };
+        var ripeWheat = Blocks.WHEAT.defaultBlockState().setValue(
+            net.minecraft.world.level.block.CropBlock.AGE,
+            net.minecraft.world.level.block.CropBlock.MAX_AGE);
+        for (BlockPos crop : crops) {
+            helper.setBlock(crop.below(), Blocks.FARMLAND);
+            helper.setBlock(crop, ripeWheat);
+        }
+        Villager farmer = helper.spawn(EntityType.VILLAGER, 7, 1, 5);
+        farmer.setNoAi(true);
+        farmer.getInventory().addItem(new ItemStack(Items.WHEAT_SEEDS, 10));
+
+        boolean firstPass = VillagerAutonomy.tryHarvestMatureCropAndBakeBread(farmer, helper.getLevel(), 100L);
+        int remainingAfterFirst = 0;
+        for (BlockPos crop : crops) {
+            var state = helper.getLevel().getBlockState(helper.absolutePos(crop));
+            if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock block && block.isMaxAge(state)) {
+                remainingAfterFirst++;
+            }
+        }
+        helper.assertTrue(firstPass && remainingAfterFirst == 1,
+            "One harvest pass must process a batch of ripe crops instead of leaving after the first plant.");
+
+        boolean secondPass = VillagerAutonomy.tryHarvestMatureCropAndBakeBread(farmer, helper.getLevel(), 200L);
+        int remainingAfterSecond = 0;
+        for (BlockPos crop : crops) {
+            var state = helper.getLevel().getBlockState(helper.absolutePos(crop));
+            if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock block && block.isMaxAge(state)) {
+                remainingAfterSecond++;
+            }
+        }
+        helper.assertTrue(secondPass && remainingAfterSecond == 0,
+            "The farmer's harvest cycle must continue until every ripe crop in the field has been processed.");
+        helper.succeed();
+    }
+
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;
