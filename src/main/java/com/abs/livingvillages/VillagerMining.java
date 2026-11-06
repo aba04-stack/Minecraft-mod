@@ -88,6 +88,7 @@ public final class VillagerMining {
             return;
         }
         CompoundTag data = villager.getPersistentData();
+        if (VillagerCaveSupport.isReturning(villager)) return;
         if (!VillagerRoles.isMiner(villager)) {
             if (data.getBoolean(ACTIVE)) cancelTask(villager, data);
             return;
@@ -282,7 +283,7 @@ public final class VillagerMining {
         int radius = LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get();
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
-        int minY = Math.max(level.getMinBuildHeight() + 1, origin.getY() - 8);
+        int minY = Math.max(level.getMinBuildHeight() + 1, origin.getY() - 20);
         int maxY = Math.min(level.getMaxBuildHeight() - 2, origin.getY() + 3);
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
@@ -461,7 +462,7 @@ public final class VillagerMining {
     private static boolean isSafeMineTarget(ServerLevel level, Villager villager, BlockPos pos, BlockState state) {
         if (!level.hasChunkAt(pos) || state.isAir() || state.getDestroySpeed(level, pos) < 0.0F
             || state.hasBlockEntity() || !level.getFluidState(pos).isEmpty()) return false;
-        if (pos.getY() < villager.blockPosition().getY() - 4
+        if (pos.getY() < villager.blockPosition().getY() - 20
             || pos.getY() > villager.blockPosition().getY() + 3) return false;
         // Never dig the block immediately underneath the worker. This prevents the basic AI
         // from opening a pit under itself while chasing a vein.
