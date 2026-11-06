@@ -2106,6 +2106,82 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 40, batch = "work_order_board")
+    public static void workOrdersAreDeduplicatedClaimedReservedAndPersisted(GameTestHelper helper) {
+        placeFloor(helper);
+        Villager owner = helper.spawn(EntityType.VILLAGER, 0, 1, 1);
+        Villager challenger = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        BlockPos center = owner.blockPosition();
+        long now = helper.getLevel().getGameTime();
+
+        var requirement = new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement(
+            "minecraft:oak_planks", 32);
+        var first = VillageWorkOrders.enqueue(
+            helper.getLevel(), center, "house", "house:test-site", 55, now, 5000L, List.of(requirement));
+        var duplicate = VillageWorkOrders.enqueue(
+            helper.getLevel(), center, "house", "house:test-site", 55, now + 1L, 5000L, List.of(requirement));
+        helper.assertTrue(first != null && duplicate != null && first.id().equals(duplicate.id()),
+            "Repeated planner scans must return the same active order instead of creating duplicates.");
+
+        var ready = VillageWorkOrders.setState(
+            helper.getLevel(), center, first.id(),
+            com.abs.livingvillages.domain.VillageWorkOrderModel.READY, now + 2L);
+        var claimed = VillageWorkOrders.claim(
+            helper.getLevel(), center, first.id(), owner.getUUID(), now + 3L, 40L);
+        var competingClaim = VillageWorkOrders.claim(
+            helper.getLevel(), center, first.id(), challenger.getUUID(), now + 3L, 40L);
+        helper.assertTrue(ready != null && claimed != null && competingClaim == null,
+            "Only one worker may claim a ready settlement order.");
+
+        var started = VillageWorkOrders.beginWork(
+            helper.getLevel(), center, first.id(), owner.getUUID(), now + 4L, 40L);
+        Map<String, Integer> reserved = VillageWorkOrders.reservedItemCounts(
+            helper.getLevel(), center, null, now + 4L);
+        helper.assertTrue(started != null && reserved.getOrDefault("minecraft:oak_planks", 0) == 32,
+            "An in-progress order must reserve its real material quantities in the ledger.");
+
+        boolean insufficient = com.abs.livingvillages.domain.VillageWorkOrderModel.canReserve(
+            List.of(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement(
+                "minecraft:oak_planks", 33)),
+            Map.of("minecraft:oak_planks", 64), reserved);
+        boolean sufficient = com.abs.livingvillages.domain.VillageWorkOrderModel.canReserve(
+            List.of(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement(
+                "minecraft:oak_planks", 32)),
+            Map.of("minecraft:oak_planks", 64), reserved);
+        helper.assertTrue(!insufficient && sufficient,
+            "The quantity ledger must prevent over-reserving physical stock while allowing a fully covered bill.");
+
+        CompoundTag saved = VillageWorkOrders.get(helper.getLevel()).save(
+            new CompoundTag(), helper.getLevel().registryAccess());
+        VillageWorkOrders restored = VillageWorkOrders.load(saved, helper.getLevel().registryAccess());
+        CompoundTag roundTrip = restored.save(new CompoundTag(), helper.getLevel().registryAccess());
+        helper.assertTrue(roundTrip.getList("orders", Tag.TAG_COMPOUND).size() == 1,
+            "The village work-order board must survive an NBT save/load round trip.");
+
+        var released = VillageWorkOrders.releaseExpiredClaim(
+            helper.getLevel(), center, first.id(), now + 44L);
+        helper.assertTrue(released != null
+                && released.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.READY
+                && released.workerId() == null,
+            "An expired worker lease must return an abandoned order to READY and clear its owner.");
+
+        var reclaimed = VillageWorkOrders.claim(
+            helper.getLevel(), center, first.id(), challenger.getUUID(), now + 45L, 40L);
+        var restarted = VillageWorkOrders.beginWork(
+            helper.getLevel(), center, first.id(), challenger.getUUID(), now + 46L, 40L);
+        var completed = VillageWorkOrders.setState(
+            helper.getLevel(), center, first.id(),
+            com.abs.livingvillages.domain.VillageWorkOrderModel.COMPLETED, now + 47L);
+        helper.assertTrue(reclaimed != null && restarted != null && completed != null
+                && completed.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.COMPLETED
+                && !com.abs.livingvillages.domain.VillageWorkOrderModel.canTransition(
+                    completed.state(), com.abs.livingvillages.domain.VillageWorkOrderModel.READY),
+            "A replacement worker may finish a released order, and terminal orders cannot be reopened.");
+        owner.discard();
+        challenger.discard();
+        helper.succeed();
+    }
+
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;
