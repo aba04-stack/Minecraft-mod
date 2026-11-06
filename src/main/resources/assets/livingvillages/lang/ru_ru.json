@@ -49,4 +49,4 @@
   "livingvillages.config.enable_tactical_monster_ai": "Тактический ИИ монстров с честным восприятием (без всеведения)",
   "livingvillages.config.monster_tactical_radius_blocks": "Радиус тактической оценки мобов (блоки)",
   "livingvillages.config.max_ai_checks_per_tick": "Максимум тяжёлых проверок ИИ за серверный тик",
-  "livingvillages.config.enable_animal_behavior": "Улучшенное поведение животных: реакция стада на опасность, защита детёнышей, поиск корма/укрытия и разведение",}
+  "livingvillages.config.enable_animal_behavior": "Улучшенное поведение животных: реакция стада на опасность, защита детёнышей, поиск корма/укрытия и разведение"}
