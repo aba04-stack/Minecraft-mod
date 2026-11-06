@@ -740,6 +740,15 @@ public final class VillagerMining {
         }
     }
 
+    /** Suspend the active extraction order before cave safety-return takes ownership of navigation. */
+    public static void suspendForCaveReturn(Villager villager) {
+        if (villager == null) return;
+        CompoundTag data = villager.getPersistentData();
+        if (!data.getBoolean(ACTIVE)) return;
+        cancelTask(villager, data);
+        data.putLong(NEXT_SEARCH, villager.level().getGameTime() + 200L);
+    }
+
     private static void cancelTask(Villager villager, CompoundTag data) {
         clearOwnedRoute(villager, data);
         if (villager.level() instanceof ServerLevel level) clearBreakOverlay(villager, level, data);
