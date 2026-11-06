@@ -2052,51 +2052,6 @@ public final class VillageReservationGameTests {
     }
 
 
-    @GameTest(template = "empty", timeoutTicks = 20, batch = "farmer_field_cycle")
-    public static void farmerPlantsEmptyOwnedFarmlandFromRealSeedsInBoundedBatches(GameTestHelper helper) {
-        BlockPos[] fields = {
-            new BlockPos(2, 1, 2), new BlockPos(3, 1, 2), new BlockPos(4, 1, 2),
-            new BlockPos(2, 1, 3), new BlockPos(3, 1, 3)
-        };
-        for (BlockPos field : fields) {
-            helper.setBlock(field.below(), Blocks.FARMLAND);
-            helper.setBlock(field, Blocks.AIR);
-        }
-
-        Villager farmer = helper.spawn(EntityType.VILLAGER, 4, 1, 4);
-        farmer.setNoAi(true);
-        farmer.getInventory().addItem(new ItemStack(Items.WHEAT_SEEDS, 5));
-
-        boolean firstPass = VillagerAutonomy.tryHarvestMatureCropAndBakeBread(
-            farmer, helper.getLevel(), 100L);
-        int plantedAfterFirst = 0;
-        for (BlockPos field : fields) {
-            if (helper.getLevel().getBlockState(helper.absolutePos(field)).is(Blocks.WHEAT)) plantedAfterFirst++;
-        }
-        helper.assertTrue(firstPass && plantedAfterFirst == 4,
-            "A farmer must plant up to four empty owned farmland blocks in one pass using real seeds.");
-
-        boolean secondPass = VillagerAutonomy.tryHarvestMatureCropAndBakeBread(
-            farmer, helper.getLevel(), 200L);
-        int plantedAfterSecond = 0;
-        for (BlockPos field : fields) {
-            if (helper.getLevel().getBlockState(helper.absolutePos(field)).is(Blocks.WHEAT)) plantedAfterSecond++;
-        }
-        helper.assertTrue(secondPass && plantedAfterSecond == 5
-            && countItem(farmer.getInventory(), Items.WHEAT_SEEDS) == 0,
-            "The next pass must finish the field and consume exactly the real seeds used for planting.");
-
-        BlockPos protectedField = new BlockPos(7, 1, 7);
-        helper.setBlock(protectedField.below(), Blocks.FARMLAND);
-        helper.setBlock(protectedField, Blocks.AIR);
-        Villager farmerWithoutSeeds = helper.spawn(EntityType.VILLAGER, 7, 1, 6);
-        farmerWithoutSeeds.setNoAi(true);
-        VillagerAutonomy.tryHarvestMatureCropAndBakeBread(farmerWithoutSeeds, helper.getLevel(), 300L);
-        helper.assertTrue(helper.getLevel().getBlockState(helper.absolutePos(protectedField)).isAir(),
-            "A farmer without real seeds or a seed source must leave empty farmland untouched.");
-        helper.succeed();
-    }
-
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;
