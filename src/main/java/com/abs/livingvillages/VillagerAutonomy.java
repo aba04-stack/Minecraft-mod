@@ -400,16 +400,17 @@ public final class VillagerAutonomy {
                 data.remove(HARVEST_FAILED_X); data.remove(HARVEST_FAILED_Y); data.remove(HARVEST_FAILED_Z);
                 data.remove(HARVEST_FAILED_UNTIL);
             }
-            if (seedInInventory == 0) {
+            boolean seedFromInventory = seedInInventory > 0;
+            if (!seedFromInventory) {
                 ItemStack seedDrop = drops.stream()
                     .filter(stack -> stack.is(seedItem) && !stack.isEmpty()).findFirst().orElse(null);
                 if (seedDrop == null) continue;
-                ItemStack oneSeed = seedDrop.copy();
-                oneSeed.setCount(1);
-                if (!villager.getInventory().addItem(oneSeed).isEmpty()) continue;
+                // Use one seed directly from this crop's real drops; a full villager inventory
+                // must not force the farmer to abandon an otherwise safely replantable crop.
                 seedDrop.shrink(1);
+            } else if (!consumeOneItem(villager.getInventory(), seedItem)) {
+                continue;
             }
-            if (!consumeOneItem(villager.getInventory(), seedItem)) continue;
 
             // Replant first. Commit drops only after the world accepted the replacement crop.
             if (!level.setBlock(target, crop.getStateForAge(0), 3)) {
@@ -462,7 +463,6 @@ public final class VillagerAutonomy {
                     return true;
                 }
 
-                ItemStack stateSeed = new ItemStack(plantingItem);
                 if (countItems(villager.getInventory(), plantingItem) <= 0) break;
                 if (!level.setBlock(target, cropBlock.defaultBlockState(), 3)) continue;
                 if (!consumeOneItem(villager.getInventory(), plantingItem)) {
