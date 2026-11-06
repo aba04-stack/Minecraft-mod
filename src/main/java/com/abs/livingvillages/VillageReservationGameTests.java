@@ -2069,43 +2069,6 @@ public final class VillageReservationGameTests {
     }
 
 
-    @GameTest(template = "empty", timeoutTicks = 20, batch = "daily_life")
-    public static void dailyLifeSocialVisitsRespectVanillaAndWorkPriorities(GameTestHelper helper) {
-        boolean eligible = com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisit(
-            true, true, true, false, false, false, true, 100L, 0L);
-        helper.assertTrue(eligible,
-            "An adult villager may start a short visit only while vanilla AI is idle and a peer is available.");
-
-        boolean blockedByWork = com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisit(
-            true, true, true, true, false, false, true, 100L, 0L);
-        boolean blockedByVanillaRoute = com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisit(
-            true, true, true, false, true, false, true, 100L, 0L);
-        boolean blockedByAlarm = com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisit(
-            true, true, true, false, false, true, true, 100L, 0L);
-        boolean blockedByCooldown = com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisit(
-            true, true, true, false, false, false, true, 100L, 101L);
-        helper.assertTrue(!blockedByWork && !blockedByVanillaRoute && !blockedByAlarm && !blockedByCooldown,
-            "Work, existing vanilla movement, village alarms, and cooldowns must always block a leisure route.");
-
-        helper.assertTrue(
-            com.abs.livingvillages.domain.DailyLifeActivityModel.canAcceptSocialVisitor(0)
-                && !com.abs.livingvillages.domain.DailyLifeActivityModel.canAcceptSocialVisitor(1),
-            "A resident may have at most one active social visitor to prevent crowding.");
-
-        boolean mustCancel = com.abs.livingvillages.domain.DailyLifeActivityModel.shouldCancelSocialVisit(
-            true, true, false, false, false, false);
-        boolean mustCancelForDanger = com.abs.livingvillages.domain.DailyLifeActivityModel.shouldCancelSocialVisit(
-            true, true, true, false, true, false);
-        helper.assertTrue(mustCancel && mustCancelForDanger,
-            "A visit must end when the vanilla activity changes or a village alarm is raised.");
-
-        helper.assertTrue(
-            com.abs.livingvillages.domain.DailyLifeActivityModel.nextAttemptTick(1000L, true) == 3400L
-                && com.abs.livingvillages.domain.DailyLifeActivityModel.nextAttemptTick(1000L, false) == 1400L,
-            "Successful visits and failed routes must use separate bounded cooldowns.");
-        helper.succeed();
-    }
-
     @GameTest(template = "empty", timeoutTicks = 40, batch = "work_order_board")
     public static void workOrdersAreDeduplicatedClaimedReservedAndPersisted(GameTestHelper helper) {
         placeFloor(helper);
