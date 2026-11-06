@@ -311,10 +311,14 @@ public final class VillageElder {
                 } else if (!LivingVillagesConfig.ENABLE_HOUSING_PROJECTS.get()
                     || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) {
                     notice = "Нельзя заказать дом: включи строительство домов и роль строителя в настройках мода.";
+                } else if (!(elder.level() instanceof ServerLevel level)
+                    || !VillageWorkOrders.enqueuePendingProject(
+                        level, elder.blockPosition(), "house", 55)) {
+                    notice = "Не удалось добавить заказ дома: очередь поселения заполнена или недоступна.";
                 } else {
                     data.putInt(REQUEST_KEY, REQUEST_HOUSE);
                     data.putInt(PRIORITY_KEY, PRIORITY_HOUSING);
-                    notice = "Заказ дома поставлен в очередь. Строительство начнётся, когда будут доступны строитель, материалы и место.";
+                    notice = "Заказ дома записан в очередь поселения. Он будет ждать строителя, материалов и подходящего места.";
                 }
             }
             case ACTION_REQUEST_FARM -> {
@@ -322,10 +326,14 @@ public final class VillageElder {
                     notice = "Нельзя заказать ферму: сначала включи автономное развитие в настройках мода.";
                 } else if (!LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
                     notice = "Нельзя заказать ферму: включи строительство ферм в настройках мода.";
+                } else if (!(elder.level() instanceof ServerLevel level)
+                    || !VillageWorkOrders.enqueuePendingProject(
+                        level, elder.blockPosition(), "farm", 60)) {
+                    notice = "Не удалось добавить заказ фермы: очередь поселения заполнена или недоступна.";
                 } else {
                     data.putInt(REQUEST_KEY, REQUEST_FARM);
                     data.putInt(PRIORITY_KEY, PRIORITY_FOOD);
-                    notice = "Заказ фермы поставлен в очередь. Нужны настоящие семена, вода, мотыга и компостер.";
+                    notice = "Заказ фермы записан в очередь поселения. Он будет ждать настоящие семена, воду, мотыгу и компостер.";
                 }
             }
             case ACTION_DEFENSE_PRIORITY -> {
