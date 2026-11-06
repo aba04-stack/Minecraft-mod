@@ -26,6 +26,7 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.BooleanValue ENABLE_MINER_ROLE;
     public static final ModConfigSpec.BooleanValue ENABLE_MINER_CAVE_EXPLORATION;
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_GUARDS;
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_LIGHTING;
     public static final ModConfigSpec.BooleanValue ENABLE_RESOURCE_LOGISTICS;
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_INDUSTRY;
     public static final ModConfigSpec.BooleanValue ENABLE_PHYSICAL_CRAFTING;
@@ -142,6 +143,11 @@ public final class LivingVillagesConfig {
             .comment("Назначать защитников деревни: они экипируются из сундуков и атакуют ближайших враждебных существ.")
             .translation("livingvillages.config.enable_village_guards")
             .define("enable_village_guards", true);
+
+        ENABLE_VILLAGE_LIGHTING = builder
+            .comment("Защитники освещают тёмные участки своих патрульных маршрутов настоящими факелами из запасов поселения; во время боя освещение приостанавливается.")
+            .translation("livingvillages.config.enable_village_lighting")
+            .define("enable_village_lighting", true);
 
         ENABLE_RESOURCE_LOGISTICS = builder
             .comment("Рабочие подбирают близкие реальные ресурсы и переносят их в настоящий склад; ничего не создаётся.")
