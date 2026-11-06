@@ -1985,6 +1985,8 @@ public final class VillageReservationGameTests {
                 8, 0, 0, 0, 0, 0, 16, 0, false, 2));
         helper.assertTrue(fieldWithoutSeeds.desiredFarmers() == 0,
             "An empty field with no actual seeds must not create an idle farmer job.");
+        farmer.discard();
+        farmerWithoutSeeds.discard();
         helper.succeed();
     }
 
@@ -2048,6 +2050,7 @@ public final class VillageReservationGameTests {
         }
         helper.assertTrue(secondPass && remainingAfterSecond == 0,
             "The farmer's harvest cycle must continue until every ripe crop in the field has been processed.");
+        farmer.discard();
         helper.succeed();
     }
 
