@@ -157,6 +157,34 @@ public final class VillageWorkOrders extends SavedData {
         return false;
     }
 
+    /** Returns an order to OPEN when materials are available but another start condition is missing. */
+    public static boolean markPendingProjectOpen(
+        ServerLevel level,
+        BlockPos center,
+        String kind,
+        long nowTick
+    ) {
+        if (level == null || center == null || !("house".equals(kind) || "farm".equals(kind))) return false;
+        UUID villageId = VillageRegistry.villageId(level, center);
+        if (villageId == null) return false;
+        VillageWorkOrders board = get(level);
+        List<VillageWorkOrderModel.Order> orders = board.ordersByVillage.get(villageId);
+        if (orders == null) return false;
+        for (int i = 0; i < orders.size(); i++) {
+            VillageWorkOrderModel.Order current = orders.get(i);
+            if (!current.kind().equals(kind) || !current.dedupeKey().equals(kind) || current.isTerminal()) continue;
+            if (current.state() == VillageWorkOrderModel.OPEN) return true;
+            if (current.state() != VillageWorkOrderModel.WAITING_FOR_RESOURCES) return false;
+            VillageWorkOrderModel.Order open = VillageWorkOrderModel.transition(
+                current, VillageWorkOrderModel.OPEN, nowTick);
+            if (open == null) return false;
+            orders.set(i, open);
+            board.setDirty();
+            return true;
+        }
+        return false;
+    }
+
     public static List<VillageWorkOrderModel.Order> list(
         ServerLevel level,
         BlockPos center,
