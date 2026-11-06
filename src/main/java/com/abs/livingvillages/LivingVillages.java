@@ -66,6 +66,7 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillagerAutonomy::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerTreeWork::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerMining::onVillagerTick);
+        NeoForge.EVENT_BUS.addListener(VillagerCaveSupport::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageDefense::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageIndustry::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageCraftingJobs::onVillagerTick);
