@@ -175,7 +175,7 @@ public final class VillageDailyLife {
         }
     }
 
-    private static Villager findAvailablePeer(Villager villager, ServerLevel level) {
+    static Villager findAvailablePeer(Villager villager, ServerLevel level) {
         AABB search = villager.getBoundingBox().inflate(SEARCH_RADIUS, 4.0D, SEARCH_RADIUS);
         List<Villager> candidates = level.getEntitiesOfClass(
             Villager.class,
@@ -253,7 +253,7 @@ public final class VillageDailyLife {
         return null;
     }
 
-    private static boolean isVanillaIdle(Villager villager) {
+    static boolean isVanillaIdle(Villager villager) {
         return villager.getBrain().getActiveNonCoreActivity().orElse(null) == Activity.IDLE;
     }
 
