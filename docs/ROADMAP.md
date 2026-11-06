@@ -1,6 +1,6 @@
 # Дорожная карта разработки Living Civilization
 
-> **Связанные документы:** [Техническое задание (`PROJECT_SPEC.md`)](PROJECT_SPEC.md) · [Инженерные стандарты (`ENGINEERING_STANDARDS.md`)](ENGINEERING_STANDARDS.md) · [Известные проблемы (`KNOWN_ISSUES.md`)](KNOWN_ISSUES.md) · [Тестирование (`TESTING.md`)](TESTING.md) · [Качество релизов (`RELEASE_QUALITY.md`)](RELEASE_QUALITY.md)
+> **Связанные документы:** [Техническое задание (`PROJECT_SPEC.md`)](PROJECT_SPEC.md) · [Инженерные стандарты (`ENGINEERING_STANDARDS.md`)](ENGINEERING_STANDARDS.md) · [Известные проблемы (`KNOWN_ISSUES.md`)](KNOWN_ISSUES.md) · [Тестирование (`TESTING.md`)](TESTING.md) · [Качество релизов (`RELEASE_QUALITY.md`)](RELEASE_QUALITY.md) · [Экономика ресурсов (`RESOURCE_ECONOMY.md`)](RESOURCE_ECONOMY.md)
 
 Настоящая дорожная карта описывает последовательность этапов превращения прототипа `Living Villages 0.15.0` в полноценную, стабильную и расширяемую систему **Living Civilization**.
 
@@ -115,3 +115,24 @@
   - Развитие поселений в пустыне без деревьев: честное сжатие `4 SAND -> 1 SANDSTONE` (`VillageIndustry.compressSandToSandstoneIfEligible`), добыча песчаника и терракоты шахтёрами (`VillagerMining`) и межпоселенческий обмен песчаника/булыжника на доски (`VillageRegistry.executeBiomeResourceTradeIfEligible`).
   - Арбитраж с ванильным ИИ (`shouldYieldToVanillaVillagerAi`, `shouldYieldToVanillaAnimalAi`), защита от зависания задач (`VillagerRoles.recoverIfTaskStuck`, `MAX_TASK_STUCK_TICKS = 400`) и защита от метания между профессиями (`MIN_ROLE_TENURE_TICKS = 600`).
 - **Проверка:** внутриигровые тесты `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade` и `interactiveRequestPreferencesLivestockCareTrustAndElderLivestockSummaryWorkInWorld` (всего 24 внутриигровых `@GameTest`).
+---
+
+## Этап 7. Спросо-ориентированная экономика и непрерывные рабочие серии (`CI_PENDING` в feature-ветке)
+
+> Этап создан в `feature/demand-driven-village-economy` от актуальной ветки `arena`. Он не считается проверенным и не меняет `main` или опубликованный релиз до успешного CI и отдельного решения о слиянии.
+
+### Подэтап 7.1. Первичная оценка запасов и динамические квоты рабочих (`IMPLEMENTED / CI_PENDING`)
+- **Результат:** добавлены независимая доменная модель `VillageResourceDemandModel` и серверный адаптер `VillageResourcePlanner`. Они считают реальные запасы дерева, каменных материалов, руды/металлов и еды, проверяют локальные источники и выдают желаемые квоты лесорубов, шахтёров и фермеров.
+- **Ограничения первой версии:** модель укрупнённая; не ведёт отдельный баланс всех видов руды, топлива, семян и зарезервированных материалов. Снимок кэшируется на 100 игровых тиков; назначение ролей выполняется по одному жителю за проход.
+- **Проверка:** `resourceDemandScalesWorkforceToRealStockAndLocalSources` (ожидает CI).
+
+### Подэтап 7.2. Завершение связной рабочей серии (`IMPLEMENTED / CI_PENDING`)
+- **Результат:** лесоруб фиксирует ограниченную очередь связного дерева (до 512 брёвен), шахтёр — жилу одного типа руды (до 128 блоков), фермер собирает до 4 зрелых культур за проход и повторяет цикл до завершения доступного урожая. Реальные инструменты, семена, видимость, досягаемость и правила мира сохраняются.
+- **Проверка:** `workersProcessConnectedTreesOreVeinsAndWholeRipeCropBatches` (ожидает CI).
+
+### Подэтап 7.3. Баланс экономики и нагрузочные испытания (`PLANNED`)
+- Разделить остатки железа, меди, золота, угля/топлива, инструментов, семян и строительных материалов; учитывать резервы заказов без двойного счёта.
+- Научить планировщик отличать нехватку конкретных предметов, а не только укрупнённых категорий, и проверять наличие доступной добычи до назначения шахтёра.
+- Добавить обслуживание посевов/роста культур, сводку дефицитов в панели старосты и долгие тесты нескольких соседних деревень.
+- **Проверка:** полная сборка, все GameTests, интерактивный клиентский прогон и профили MSPT/TPS/RAM на малых и крупных поселениях.
+
