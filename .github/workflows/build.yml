@@ -2,7 +2,7 @@ name: Build mod
 
 on:
   push:
-    branches: [main, 'arena/**']
+    branches: [main, 'arena/**', 'feature/**']
   pull_request:
   workflow_dispatch:
 
@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
       - name: Smoke-test dedicated server startup
-        if: github.event_name == 'pull_request' || startsWith(github.ref_name, 'arena/')
+        if: github.event_name == 'pull_request' || startsWith(github.ref_name, 'arena/') || startsWith(github.ref_name, 'feature/')
         shell: bash
         run: |
           set -euo pipefail
@@ -80,7 +80,7 @@ jobs:
           if [ -f run/server/logs/latest.log ]; then tail -n 200 run/server/logs/latest.log; fi
           exit 1
       - name: Smoke-test client startup with software OpenGL
-        if: github.event_name == 'pull_request' || startsWith(github.ref_name, 'arena/')
+        if: github.event_name == 'pull_request' || startsWith(github.ref_name, 'arena/') || startsWith(github.ref_name, 'feature/')
         shell: bash
         run: |
           sudo apt-get update -qq
