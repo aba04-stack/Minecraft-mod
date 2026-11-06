@@ -192,7 +192,8 @@ public final class VillageResourcePlanner {
                     BlockPos pos = center.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos)) continue;
                     BlockState state = level.getBlockState(pos);
-                    if (state.getBlock() instanceof CropBlock crop && crop.isMaxAge(state)) count++;
+                    if (state.getBlock() instanceof CropBlock crop && crop.isMaxAge(state)
+                        && VillageArea.isBlockInResidentGroup(level, center, pos)) count++;
                 }
             }
         }
