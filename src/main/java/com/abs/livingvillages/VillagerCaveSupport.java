@@ -73,8 +73,19 @@ public final class VillagerCaveSupport {
             continueReturnHome(villager, level, data, now);
             return;
         }
+        if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()) return;
+
+        // Guards light the dark parts of their own patrol route, but yield completely during
+        // combat, retreat and post-combat aid. This reuses the same real-item torch logistics.
+        if (VillagerRoles.isGuard(villager)
+            && LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get()
+            && LivingVillagesConfig.ENABLE_VILLAGE_LIGHTING.get()
+            && VillageDefense.canPerformPatrolLighting(villager)) {
+            restockTorches(villager, level, data, now);
+            placeTorchAtDarkSpot(villager, level, data, now);
+        }
+
         if (!VillagerRoles.isMiner(villager)
-            || !LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_MINER_ROLE.get()
             || !LivingVillagesConfig.ENABLE_MINER_CAVE_EXPLORATION.get()) return;
 
