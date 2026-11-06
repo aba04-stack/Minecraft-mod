@@ -210,6 +210,36 @@ public final class VillageWorkOrderModel {
         return totals;
     }
 
+    /**
+     * Calculates what queued projects still need after subtracting accessible physical stock
+     * and items already carried by couriers. Only OPEN/WAITING orders create collection demand.
+     */
+    public static Map<String, Integer> unmetRequirements(
+        List<Order> orders,
+        Map<String, Integer> accessibleStock,
+        Map<String, Integer> inTransit
+    ) {
+        Map<String, Integer> demand = new HashMap<>();
+        if (orders != null) {
+            for (Order order : orders) {
+                if (order == null || (order.state() != OPEN && order.state() != WAITING_FOR_RESOURCES)) continue;
+                for (Requirement requirement : order.requirements()) {
+                    if (requirement != null && requirement.isValid()) {
+                        demand.merge(requirement.itemId(), requirement.count(), Integer::sum);
+                    }
+                }
+            }
+        }
+        Map<String, Integer> missing = new HashMap<>();
+        for (Map.Entry<String, Integer> entry : demand.entrySet()) {
+            long stored = accessibleStock == null ? 0L : Math.max(0, accessibleStock.getOrDefault(entry.getKey(), 0));
+            long carried = inTransit == null ? 0L : Math.max(0, inTransit.getOrDefault(entry.getKey(), 0));
+            long shortage = Math.max(0L, (long) entry.getValue() - stored - carried);
+            if (shortage > 0L) missing.put(entry.getKey(), (int) Math.min(Integer.MAX_VALUE, shortage));
+        }
+        return Map.copyOf(missing);
+    }
+
     public static List<Requirement> normalizeRequirements(List<Requirement> requirements) {
         if (requirements == null || requirements.isEmpty()) return List.of();
         if (requirements.size() > MAX_REQUIREMENTS_PER_ORDER) return null;

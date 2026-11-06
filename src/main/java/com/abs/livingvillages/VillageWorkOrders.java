@@ -128,6 +128,23 @@ public final class VillageWorkOrders extends SavedData {
         return order != null && !order.isTerminal();
     }
 
+    /**
+     * Records the concrete material bill for an OPEN/WAITING house or farm request.
+     * Repeated planner scans reuse the same key and cannot create duplicates.
+     */
+    public static VillageWorkOrderModel.Order recordPendingProjectRequirements(
+        ServerLevel level,
+        BlockPos center,
+        String kind,
+        int priority,
+        long nowTick,
+        List<VillageWorkOrderModel.Requirement> requirements
+    ) {
+        if (level == null || center == null || !("house".equals(kind) || "farm".equals(kind))
+            || requirements == null || requirements.isEmpty()) return null;
+        return enqueue(level, center, kind, kind, priority, nowTick, DEFAULT_ORDER_TTL_TICKS, requirements);
+    }
+
     /** Marks a placeholder house/farm request as waiting after a planner attempt cannot start it. */
     public static boolean markPendingProjectWaiting(
         ServerLevel level,

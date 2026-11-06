@@ -1,6 +1,8 @@
 package com.abs.livingvillages;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 import net.minecraft.core.Direction;
@@ -8,9 +10,11 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -31,6 +35,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
+import com.abs.livingvillages.domain.VillageWorkOrderModel;
 
 /**
  * Living Villages 0.15.0 for Minecraft Java 1.21.1 + NeoForge.
@@ -328,36 +334,62 @@ public final class LivingVillages {
             return BuildResult.failure(msg);
         }
         Map<Block, Integer> plankCounts = countPlanks(containers);
-        Block plankBlock = plankCounts.entrySet().stream()
-            .filter(entry -> entry.getValue() >= HOUSE_PLANKS_REQUIRED)
-            .max(Map.Entry.comparingByValue())
-            .map(Map.Entry::getKey)
-            .orElse(null);
+        VillageWorkOrderModel.Order pendingHouse = findPendingProjectOrder(level, center, "house");
+        Item pinnedPlankItem = pendingRequirementItem(pendingHouse,
+            item -> VillageBuilder.isSupportedStructuralBlock(Block.byItem(item)));
+        Block plankBlock = pinnedPlankItem != Items.AIR
+            ? Block.byItem(pinnedPlankItem)
+            : plankCounts.entrySet().stream()
+                .filter(entry -> entry.getValue() > 0 && VillageBuilder.isSupportedStructuralBlock(entry.getKey()))
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(null);
 
-        if (plankBlock == null) {
-            String msg = "Не хватает материалов: нужно 96 строительных блоков одного вида (доски, песчаник, булыжник или каменный кирпич) в ближайших сундуках.";
+        if (plankBlock == null || plankBlock.asItem() == Items.AIR) {
+            String msg = "Не найден строительный материал для проекта дома. Нужны доски, песчаник, булыжник или каменный кирпич.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
             VillageWorkOrders.markPendingProjectWaiting(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
-        net.minecraft.world.item.Item bedItem = VillageBuilder.selectAvailableBedItem(containers);
-        if (bedItem == Items.AIR) {
-            String msg = "Не найдена кровать (любого цвета) в сундуках поблизости.";
+
+        Item bedItem = pendingRequirementItem(pendingHouse, VillageBuilder::isSupportedBedItem);
+        if (bedItem == Items.AIR) bedItem = VillageBuilder.selectAvailableBedItem(containers);
+        if (bedItem == Items.AIR) bedItem = Items.RED_BED;
+
+        Item doorItem = pendingRequirementItem(pendingHouse, item -> Block.byItem(item) instanceof DoorBlock);
+        if (doorItem == Items.AIR) doorItem = VillageBuilder.selectAvailableDoorItem(plankBlock, containers);
+        if (doorItem == Items.AIR) doorItem = Items.OAK_DOOR;
+
+        long now = level.getGameTime();
+        VillageWorkOrderModel.Order recorded = VillageWorkOrders.recordPendingProjectRequirements(
+            level, center, "house", 55, now, List.of(
+                new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(plankBlock.asItem()).toString(), HOUSE_PLANKS_REQUIRED),
+                new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(bedItem).toString(), 1),
+                new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(doorItem).toString(), 1)
+            )
+        );
+        if (recorded == null) {
+            String msg = "Не удалось сохранить потребность материалов для дома в очереди поселения.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
-            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", level.getGameTime());
             return BuildResult.failure(msg);
         }
-        net.minecraft.world.item.Item doorItem = VillageBuilder.selectAvailableDoorItem(plankBlock, containers);
-        if (doorItem == Items.AIR) {
-            String msg = "Для выбранных блоков не найден подходящий настоящий дверной блок.";
+
+        if (plankCounts.getOrDefault(plankBlock, 0) < HOUSE_PLANKS_REQUIRED) {
+            String msg = "Не хватает строительных блоков одного вида (всего нужно 96). Курьеры будут искать недостающие предметы.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
-            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", level.getGameTime());
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", now);
+            return BuildResult.failure(msg);
+        }
+        if (countItem(containers, bedItem) < 1) {
+            String msg = "Не найдена кровать выбранного типа. Заявка сохранена; нужен настоящий предмет кровати.";
+            VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", now);
             return BuildResult.failure(msg);
         }
         if (countItem(containers, doorItem) < 1) {
-            String msg = "Для закрытого дома нужна деревянная дверь. Ремесленник должен изготовить её из 6 досок или получить по обмену.";
+            String msg = "Не найдена подходящая дверь. Заявка сохранена; ремесленник может изготовить дверь из досок.";
             VillageRegistry.recordDiagnostic(level, center, "Дом", msg);
-            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", level.getGameTime());
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "house", now);
             return BuildResult.failure(msg);
         }
 
@@ -651,6 +683,26 @@ public final class LivingVillages {
             }
         }
         return counts;
+    }
+
+    private VillageWorkOrderModel.Order findPendingProjectOrder(ServerLevel level, BlockPos center, String kind) {
+        return VillageWorkOrders.list(level, center, level.getGameTime()).stream()
+            .filter(order -> order.kind().equals(kind) && order.dedupeKey().equals(kind)
+                && (order.state() == VillageWorkOrderModel.OPEN
+                    || order.state() == VillageWorkOrderModel.WAITING_FOR_RESOURCES))
+            .findFirst()
+            .orElse(null);
+    }
+
+    private Item pendingRequirementItem(VillageWorkOrderModel.Order order, Predicate<Item> predicate) {
+        if (order == null || predicate == null) return Items.AIR;
+        for (VillageWorkOrderModel.Requirement requirement : order.requirements()) {
+            ResourceLocation id = ResourceLocation.tryParse(requirement.itemId());
+            if (id == null) continue;
+            Item item = BuiltInRegistries.ITEM.get(id);
+            if (item != Items.AIR && predicate.test(item)) return item;
+        }
+        return Items.AIR;
     }
 
     private int countItem(List<Container> containers, net.minecraft.world.item.Item item) {

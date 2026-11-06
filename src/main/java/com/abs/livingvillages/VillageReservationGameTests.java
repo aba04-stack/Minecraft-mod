@@ -2164,6 +2164,56 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "work_order_material_demand")
+    public static void pendingWorkOrderDemandSubtractsStorageAndCourierCargo(GameTestHelper helper) {
+        var house = new com.abs.livingvillages.domain.VillageWorkOrderModel.Order(
+            java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), "house", "house",
+            55, 0L, 0L, 10000L,
+            com.abs.livingvillages.domain.VillageWorkOrderModel.WAITING_FOR_RESOURCES,
+            null, 0L,
+            List.of(
+                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:oak_planks", 96),
+                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:red_bed", 1)
+            )
+        );
+        var farm = new com.abs.livingvillages.domain.VillageWorkOrderModel.Order(
+            java.util.UUID.randomUUID(), house.villageId(), "farm", "farm",
+            60, 0L, 0L, 10000L,
+            com.abs.livingvillages.domain.VillageWorkOrderModel.OPEN,
+            null, 0L,
+            List.of(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:wheat_seeds", 24))
+        );
+        var alreadyStarted = new com.abs.livingvillages.domain.VillageWorkOrderModel.Order(
+            java.util.UUID.randomUUID(), house.villageId(), "house", "other-house",
+            50, 0L, 0L, 10000L,
+            com.abs.livingvillages.domain.VillageWorkOrderModel.IN_PROGRESS,
+            java.util.UUID.randomUUID(), 9000L,
+            List.of(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:oak_planks", 48))
+        );
+
+        Map<String, Integer> missing = com.abs.livingvillages.domain.VillageWorkOrderModel.unmetRequirements(
+            List.of(house, farm, alreadyStarted),
+            Map.of("minecraft:oak_planks", 60, "minecraft:red_bed", 1, "minecraft:wheat_seeds", 8),
+            Map.of("minecraft:oak_planks", 12, "minecraft:wheat_seeds", 4)
+        );
+        helper.assertTrue(
+            missing.size() == 2
+                && missing.getOrDefault("minecraft:oak_planks", 0) == 24
+                && missing.getOrDefault("minecraft:wheat_seeds", 0) == 12
+                && !missing.containsKey("minecraft:red_bed"),
+            "Courier demand must subtract accessible chest stock and in-transit cargo, ignoring started orders."
+        );
+
+        Map<String, Integer> fulfilled = com.abs.livingvillages.domain.VillageWorkOrderModel.unmetRequirements(
+            List.of(house, farm),
+            Map.of("minecraft:oak_planks", 96, "minecraft:red_bed", 1, "minecraft:wheat_seeds", 24),
+            Map.of()
+        );
+        helper.assertTrue(fulfilled.isEmpty(),
+            "A queued project with its full bill in accessible storage must not request extra deliveries.");
+        helper.succeed();
+    }
+
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;

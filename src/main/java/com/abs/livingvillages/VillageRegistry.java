@@ -14,6 +14,7 @@ import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -1032,6 +1033,27 @@ public final class VillageRegistry extends SavedData {
             }
         }
         return containers;
+    }
+
+    /**
+     * Counts actual items in owned storage that is not reserved by another active task.
+     */
+    public static Map<String, Integer> countAvailableOwnedStorageItems(
+        ServerLevel level,
+        BlockPos center,
+        Set<String> wantedItemIds
+    ) {
+        if (level == null || center == null || wantedItemIds == null || wantedItemIds.isEmpty()) return Map.of();
+        Map<String, Integer> totals = new HashMap<>();
+        for (Container container : findAvailableOwnedStorages(level, center)) {
+            for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                ItemStack stack = container.getItem(slot);
+                if (stack.isEmpty()) continue;
+                String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                if (wantedItemIds.contains(itemId)) totals.merge(itemId, stack.getCount(), Integer::sum);
+            }
+        }
+        return Map.copyOf(totals);
     }
 
     private static Container findNearestOwnedStorageWithItem(ServerLevel level, BlockPos center, Item item, int minCount) {

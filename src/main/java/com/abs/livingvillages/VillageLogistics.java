@@ -1,6 +1,7 @@
 package com.abs.livingvillages;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
@@ -14,6 +15,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.tags.BlockTags;
@@ -23,7 +26,13 @@ import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import com.abs.livingvillages.domain.VillageWorkOrderModel;
 
 /**
  * Physical village logistics. Workers pick up nearby loose raw materials, then walk to an
@@ -72,8 +81,9 @@ public final class VillageLogistics {
             || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)
             || level.getGameTime() < data.getLong(NEXT_SCAN)) return;
 
-        // Pick up only nearby physical drops, never items from an arbitrary distance.
-        collectNearbyMaterials(villager, level);
+        // Pending construction materials take priority over generic stockpiling.
+        Map<String, Integer> materialDeficits = pendingMaterialDeficits(villager, level);
+        collectNearbyMaterials(villager, level, materialDeficits);
         if (!hasDeliverableMaterial(villager)) {
             data.putLong(NEXT_SCAN, level.getGameTime() + SEARCH_RETRY_TICKS);
             return;
@@ -137,18 +147,74 @@ public final class VillageLogistics {
         }
     }
 
-    private static void collectNearbyMaterials(Villager villager, ServerLevel level) {
-        AABB area = villager.getBoundingBox().inflate(PICKUP_RADIUS, 1.5D, PICKUP_RADIUS);
-        for (ItemEntity entity : level.getEntitiesOfClass(ItemEntity.class, area,
-            item -> item.isAlive() && isRawResource(item.getItem()))) {
-            if (villager.distanceToSqr(entity) > (double) PICKUP_RADIUS * PICKUP_RADIUS) continue;
-            ItemStack offered = entity.getItem().copy();
-            ItemStack remainder = villager.getInventory().addItem(offered);
-            if (remainder.isEmpty()) {
-                entity.discard();
-            } else if (remainder.getCount() < entity.getItem().getCount()) {
-                entity.getItem().setCount(remainder.getCount());
+    /**
+     * Returns null when no materialized pending demand exists (legacy stockpiling mode),
+     * or an exact shortage map for OPEN/WAITING orders.
+     */
+    private static Map<String, Integer> pendingMaterialDeficits(Villager courier, ServerLevel level) {
+        BlockPos center = VillagerRoles.getHome(courier);
+        if (center == null) center = courier.blockPosition();
+        List<VillageWorkOrderModel.Order> orders =
+            VillageWorkOrders.list(level, center, level.getGameTime());
+
+        Set<String> wantedIds = new HashSet<>();
+        for (VillageWorkOrderModel.Order order : orders) {
+            if (order.state() != VillageWorkOrderModel.OPEN
+                && order.state() != VillageWorkOrderModel.WAITING_FOR_RESOURCES) continue;
+            for (VillageWorkOrderModel.Requirement requirement : order.requirements()) {
+                if (requirement != null && requirement.isValid()) wantedIds.add(requirement.itemId());
             }
+        }
+        if (wantedIds.isEmpty()) return null;
+
+        Map<String, Integer> accessibleStock =
+            VillageRegistry.countAvailableOwnedStorageItems(level, center, wantedIds);
+        Map<String, Integer> inTransit = new HashMap<>();
+        for (Villager resident : VillageArea.findVillagers(level, center)) {
+            CompoundTag residentData = resident.getPersistentData();
+            if (resident != courier && !residentData.getBoolean(ACTIVE)) continue;
+            for (int slot = 0; slot < resident.getInventory().getContainerSize(); slot++) {
+                ItemStack stack = resident.getInventory().getItem(slot);
+                if (stack.isEmpty()) continue;
+                String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                if (wantedIds.contains(itemId)) inTransit.merge(itemId, stack.getCount(), Integer::sum);
+            }
+        }
+        return new HashMap<>(VillageWorkOrderModel.unmetRequirements(orders, accessibleStock, inTransit));
+    }
+
+    private static void collectNearbyMaterials(
+        Villager villager,
+        ServerLevel level,
+        Map<String, Integer> materialDeficits
+    ) {
+        AABB area = villager.getBoundingBox().inflate(PICKUP_RADIUS, 1.5D, PICKUP_RADIUS);
+        List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, area,
+            item -> item.isAlive() && isRawResource(item.getItem())
+                && villager.distanceToSqr(item) <= (double) PICKUP_RADIUS * PICKUP_RADIUS);
+        drops.sort(Comparator
+            .comparingInt((ItemEntity entity) -> materialDeficits == null ? 0
+                : -materialDeficits.getOrDefault(BuiltInRegistries.ITEM.getKey(entity.getItem().getItem()).toString(), 0))
+            .thenComparingDouble(villager::distanceToSqr));
+
+        for (ItemEntity entity : drops) {
+            if (!entity.isAlive()) continue;
+            ItemStack entityStack = entity.getItem();
+            String itemId = BuiltInRegistries.ITEM.getKey(entityStack.getItem()).toString();
+            int requested = materialDeficits == null ? entityStack.getCount()
+                : materialDeficits.getOrDefault(itemId, 0);
+            if (requested <= 0) continue;
+
+            ItemStack offered = entityStack.copy();
+            offered.setCount(Math.min(offered.getCount(), requested));
+            int offeredCount = offered.getCount();
+            ItemStack remainder = villager.getInventory().addItem(offered);
+            int moved = offeredCount - remainder.getCount();
+            if (moved <= 0) continue;
+
+            entityStack.shrink(moved);
+            if (entityStack.isEmpty()) entity.discard();
+            if (materialDeficits != null) materialDeficits.put(itemId, Math.max(0, requested - moved));
             villager.getInventory().setChanged();
         }
     }
@@ -270,7 +336,9 @@ public final class VillageLogistics {
             if (state.is(BlockTags.LOGS) || state.is(BlockTags.PLANKS) || state.is(BlockTags.SAPLINGS)
                 || state.is(BlockTags.WOOL) || VillageBuilder.isSupportedStructuralBlock(block)) return true;
         }
-        return stack.is(Items.STICK) || stack.is(Items.COAL) || stack.is(Items.CHARCOAL)
+        return (VillageBuilder.isSupportedBedItem(stack.getItem())
+                || Block.byItem(stack.getItem()) instanceof DoorBlock)
+            || stack.is(Items.STICK) || stack.is(Items.COAL) || stack.is(Items.CHARCOAL)
             || stack.is(Items.COBBLESTONE) || stack.is(Items.COBBLED_DEEPSLATE)
             || stack.is(Items.SAND) || stack.is(Items.RED_SAND) || stack.is(Items.STONE)
             || stack.is(Items.RAW_IRON) || stack.is(Items.RAW_COPPER) || stack.is(Items.RAW_GOLD)
