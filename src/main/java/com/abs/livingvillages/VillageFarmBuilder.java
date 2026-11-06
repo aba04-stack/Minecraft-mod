@@ -156,6 +156,12 @@ public final class VillageFarmBuilder {
             break;
         }
         if (worker == null || hoeItem == Items.AIR || storageOrigin == null) return false;
+        java.util.Map<Item, Integer> materialBill = java.util.Map.of(
+            seedItem, CROP_COUNT, Items.WATER_BUCKET, 1, Items.COMPOSTER, 1, hoeItem, 1);
+        if (!VillageWorkOrders.startProject(level, center, "farm", site, worker, materialBill)) {
+            VillageReservations.release(worker.getPersistentData(), "farm");
+            return false;
+        }
 
         CompoundTag data = worker.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
@@ -215,6 +221,9 @@ public final class VillageFarmBuilder {
         )) {
             return false;
         }
+        BlockPos resumedSite = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        if (!VillageWorkOrders.rebindOrphanedProject(
+            level, center, "farm", resumedSite, replacement, !ownerAliveInVillage)) return false;
 
         CompoundTag data = replacement.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
@@ -276,7 +285,7 @@ public final class VillageFarmBuilder {
             case FETCH_HOE -> fetchHoe(worker, level, data, now);
             case BUILDING -> buildNextStep(worker, level, data, site, now);
             case RETURN_BUCKET -> returnEmptyBucket(worker, level, data, now);
-            default -> clearProject(worker, data);
+            default -> clearProject(worker, data, false);
         }
     }
 
@@ -505,7 +514,7 @@ public final class VillageFarmBuilder {
 
     private static void returnEmptyBucket(Villager worker, ServerLevel level, CompoundTag data, long now) {
         if (countItem(worker.getInventory(), Items.BUCKET) == 0) {
-            clearProject(worker, data);
+            clearProject(worker, data, false);
             return;
         }
         if (data.getBoolean(ROUTE_ACTIVE) && data.getInt(ROUTE_KIND) == ROUTE_TO_OUTPUT) {
@@ -536,14 +545,14 @@ public final class VillageFarmBuilder {
                 true,
                 now
             );
-            clearProject(worker, data);
+            clearProject(worker, data, true);
             return;
         }
         if (now < data.getLong(NEXT_ACTION)) return;
         StorageTarget target = findNearestStorageWithRoom(worker, level, new ItemStack(Items.BUCKET, 1));
         if (target == null) {
             // Do not lose the empty bucket when there is no safe storage destination.
-            clearProject(worker, data);
+            clearProject(worker, data, false);
             return;
         }
         setRoute(worker, data, target.stand(), target.storage(), ROUTE_TO_OUTPUT, now, Items.BUCKET);
@@ -698,8 +707,10 @@ public final class VillageFarmBuilder {
         data.remove(ROUTE_STAND_X); data.remove(ROUTE_STAND_Y); data.remove(ROUTE_STAND_Z); data.remove(LAST_ROUTE);
     }
 
-    private static void clearProject(Villager worker, CompoundTag data) {
+    private static void clearProject(Villager worker, CompoundTag data, boolean completed) {
         if (worker.level() instanceof ServerLevel serverLevel) {
+            if (completed) VillageWorkOrders.completeProject(serverLevel, worker);
+            else VillageWorkOrders.cancelProject(serverLevel, worker);
             VillageRegistry.clearFarmCheckpoint(serverLevel, worker.blockPosition());
         }
         clearOwnedRoute(worker, data);
