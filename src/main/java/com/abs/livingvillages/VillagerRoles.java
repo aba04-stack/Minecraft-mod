@@ -241,7 +241,9 @@ public final class VillagerRoles {
         for (Villager candidate : candidates) {
             boolean canStart = ROLE_CRAFTSMAN.equals(role) || ROLE_BUILDER.equals(role)
                 || (ROLE_LUMBERJACK.equals(role) && resourcePlan.needsWood())
-                || (ROLE_FARMER.equals(role) && resourcePlan.needsFood() && resourcePlan.matureCrops() > 0)
+                || (ROLE_FARMER.equals(role) && resourcePlan.needsFood()
+                    && (resourcePlan.matureCrops() > 0
+                        || (resourcePlan.plantableFarmland() > 0 && resourcePlan.availableSeeds() > 0)))
                 || (ROLE_MINER.equals(role) && VillageIndustry.hasPickaxeAccessibleTo(candidate))
                 || (ROLE_GUARD.equals(role) && VillageIndustry.hasSwordAccessibleTo(candidate));
             if (canStart) { selected = candidate; break; }
