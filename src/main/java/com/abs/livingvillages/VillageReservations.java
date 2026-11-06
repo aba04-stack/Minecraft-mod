@@ -232,6 +232,7 @@ public final class VillageReservations {
             case "food_delivery" -> data.getBoolean(VillagePopulation.ACTIVE_KEY);
             case "logistics_delivery" -> data.getBoolean("livingvillages_logistics_active");
             case "food_stockpiling" -> data.getBoolean("livingvillages_autonomy_target_active");
+            case "farmer_seed_fetch" -> data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY);
             default -> false;
         };
         if (!taskActive) {
