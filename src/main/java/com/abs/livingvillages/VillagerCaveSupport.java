@@ -240,6 +240,7 @@ public final class VillagerCaveSupport {
     private static void beginReturnHome(Villager villager, CompoundTag data, long now) {
         long[] trail = data.getLongArray(TRAIL);
         if (trail.length == 0) return;
+        VillagerMining.suspendForCaveReturn(villager);
         data.putBoolean(RETURNING, true);
         data.putInt(RETURN_INDEX, nearestTrailIndex(villager.blockPosition(), trail));
         data.putLong(RETURN_LAST_PROGRESS, now);
