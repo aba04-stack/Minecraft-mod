@@ -128,6 +128,35 @@ public final class VillageWorkOrders extends SavedData {
         return order != null && !order.isTerminal();
     }
 
+    /** Marks a placeholder house/farm request as waiting after a planner attempt cannot start it. */
+    public static boolean markPendingProjectWaiting(
+        ServerLevel level,
+        BlockPos center,
+        String kind,
+        long nowTick
+    ) {
+        if (level == null || center == null || !("house".equals(kind) || "farm".equals(kind))) return false;
+        UUID villageId = VillageRegistry.villageId(level, center);
+        if (villageId == null) return false;
+        VillageWorkOrders board = get(level);
+        List<VillageWorkOrderModel.Order> orders = board.ordersByVillage.get(villageId);
+        if (orders == null) return false;
+        for (int i = 0; i < orders.size(); i++) {
+            VillageWorkOrderModel.Order current = orders.get(i);
+            if (!current.kind().equals(kind) || !current.dedupeKey().equals(kind)
+                || current.isTerminal()) continue;
+            if (current.state() == VillageWorkOrderModel.WAITING_FOR_RESOURCES) return true;
+            if (current.state() != VillageWorkOrderModel.OPEN) return false;
+            VillageWorkOrderModel.Order waiting = VillageWorkOrderModel.transition(
+                current, VillageWorkOrderModel.WAITING_FOR_RESOURCES, nowTick);
+            if (waiting == null) return false;
+            orders.set(i, waiting);
+            board.setDirty();
+            return true;
+        }
+        return false;
+    }
+
     public static List<VillageWorkOrderModel.Order> list(
         ServerLevel level,
         BlockPos center,
