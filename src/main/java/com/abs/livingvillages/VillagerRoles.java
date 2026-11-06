@@ -156,7 +156,9 @@ public final class VillagerRoles {
         if (!LivingVillagesConfig.ENABLE_MINER_ROLE.get()
             && !LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get()
             && !LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()
-            && !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) {
+            && !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
+            && !LivingVillagesConfig.ENABLE_VILLAGER_TREE_WORK.get()
+            && !LivingVillagesConfig.ENABLE_FARMER_STOCKPILING.get()) {
             VillageRegistry.recordDiagnostic(level, center, "Роли", "Все специализированные роли отключены в настройках");
             return;
         }
@@ -198,6 +200,7 @@ public final class VillagerRoles {
                 || data.getBoolean(VillageBuilder.ACTIVE_KEY)
                 || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
                 || data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
+                || data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY)
                 || data.getBoolean("livingvillages_mining_active")
                 || data.getBoolean("livingvillages_defense_has_route")
                 || data.getBoolean("livingvillages_industry_route_active")) continue;
@@ -306,7 +309,8 @@ public final class VillagerRoles {
                 || data.getBoolean("livingvillages_industry_route_active");
             case ROLE_BUILDER -> VillageBuilder.isProjectActive(villager);
             case ROLE_LUMBERJACK -> data.getBoolean(TREE_TASK_ACTIVE) || data.getBoolean(REPLANT_TASK_ACTIVE);
-            case ROLE_FARMER -> data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY);
+            case ROLE_FARMER -> data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
+                || data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY);
             default -> false;
         };
     }
