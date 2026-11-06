@@ -2121,6 +2121,16 @@ public final class VillageReservationGameTests {
         thirdResident.getBrain().setActiveActivityIfPossible(net.minecraft.world.entity.schedule.Activity.IDLE);
 
         long now = helper.getLevel().getGameTime();
+        helper.assertTrue(VillageDailyLife.isVanillaIdle(visitor),
+            "Visitor Brain must be IDLE before a social visit; active=" + visitor.getBrain().getActiveNonCoreActivity().orElse(null));
+        helper.assertTrue(VillageDailyLife.isVanillaIdle(peer),
+            "Peer Brain must be IDLE before a social visit; active=" + peer.getBrain().getActiveNonCoreActivity().orElse(null));
+        helper.assertTrue(!VillagerRoles.shouldYieldToVanillaVillagerAi(visitor),
+            "Visitor must not be yielding to vanilla sleep/trade/panic/evacuation behavior.");
+        helper.assertTrue(!VillageRegistry.isVillageAlarmActive(helper.getLevel(), visitor.blockPosition(), now),
+            "The social test world must not be under a village alarm.");
+        helper.assertTrue(VillageDailyLife.findAvailablePeer(visitor, helper.getLevel()) == peer,
+            "The nearby idle peer must have a reachable path from the visitor.");
         boolean started = VillageDailyLife.tryStartSocialVisit(visitor, helper.getLevel(), now);
         helper.assertTrue(started
                 && visitor.getPersistentData().getBoolean("livingvillages_daily_life_social_active")
