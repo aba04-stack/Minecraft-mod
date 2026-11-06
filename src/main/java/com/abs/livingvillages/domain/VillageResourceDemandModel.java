@@ -12,6 +12,8 @@ public final class VillageResourceDemandModel {
         int oreUnits,
         int foodPoints,
         int matureCrops,
+        int plantableFarmland,
+        int availableSeeds,
         boolean treesAvailable,
         int availablePickaxes
     ) {}
@@ -26,6 +28,8 @@ public final class VillageResourceDemandModel {
         boolean needsOre,
         boolean needsFood,
         int matureCrops,
+        int plantableFarmland,
+        int availableSeeds,
         boolean treesAvailable,
         int desiredLumberjacks,
         int desiredMiners,
@@ -40,7 +44,7 @@ public final class VillageResourceDemandModel {
 
     public static Plan evaluate(Stock stock) {
         if (stock == null) {
-            return new Plan(96, 48, 4, 32, true, true, true, true, 0, false, 0, 0, 0);
+            return new Plan(96, 48, 4, 32, true, true, true, true, 0, 0, 0, false, 0, 0, 0);
         }
 
         int adults = Math.max(0, stock.adultPopulation());
@@ -49,6 +53,8 @@ public final class VillageResourceDemandModel {
         int ore = Math.max(0, stock.oreUnits());
         int food = Math.max(0, stock.foodPoints());
         int crops = Math.max(0, stock.matureCrops());
+        int plantableFarmland = Math.max(0, stock.plantableFarmland());
+        int availableSeeds = Math.max(0, stock.availableSeeds());
         boolean treesAvailable = stock.treesAvailable();
         int pickaxes = Math.max(0, stock.availablePickaxes());
 
@@ -68,13 +74,14 @@ public final class VillageResourceDemandModel {
         int desiredLumberjacks = needsWood ? populationWorkSlots : 0;
         int desiredMiners = needsStone || needsOre
             ? Math.min(pickaxes, Math.max(1, Math.min(3, (adults + 4) / 6))) : 0;
-        int desiredFarmers = needsFood && crops > 0
+        int desiredFarmers = needsFood && (crops > 0 || (plantableFarmland > 0 && availableSeeds > 0))
             ? Math.max(1, Math.min(2, (adults + 7) / 8)) : 0;
 
         return new Plan(
             targetWood, targetStone, targetOre, targetFood,
             needsWood, needsStone, needsOre, needsFood,
-            crops, treesAvailable, desiredLumberjacks, desiredMiners, desiredFarmers
+            crops, plantableFarmland, availableSeeds, treesAvailable,
+            desiredLumberjacks, desiredMiners, desiredFarmers
         );
     }
 
