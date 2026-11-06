@@ -33,8 +33,7 @@ public final class VillageResourcePlanner {
         if (level == null || center == null) {
             return VillageResourceDemandModel.evaluate(null);
         }
-        List<Villager> residents = VillageArea.findVillagers(level, center);
-        return getPlan(level, center, residents);
+        return getPlan(level, center, null);
     }
 
     public static VillageResourceDemandModel.Plan getPlan(
