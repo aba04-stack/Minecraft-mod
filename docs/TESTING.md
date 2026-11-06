@@ -35,6 +35,16 @@
 | `./gradlew runGameTestServer` | GitHub Actions CI (`Temurin Java 21`) | `PASS` | Успешное прохождение всех 12 внутриигровых `@GameTest` в `VillageReservationGameTests` (резервирование сундуков, `VillageRegistry`, изоляция соседних деревень, прокачка профессий `VillagerProgression` с миграцией схемы и честное восприятие `VillageMonsterAI`, run `41431805194`). |
 | Дымовой запуск `./gradlew runServer` и `bash tools/smoke_test_client.sh` (`ElderScreen`) | GitHub Actions CI (`Temurin Java 21` + `xvfb`) | `PASS` | Выделенный сервер выходит в состояние `Done!`, headless-клиент открывает `ElderScreen` и подтверждает геометрию всех 7 кнопок. |
 
+
+
+### 2.1. Первичная проверка feature-ветки экономики (`CI_PENDING` для актуального HEAD)
+
+- **Промежуточный коммит:** `12d74032d0973b48d584b28a952fa235b201da13`.
+- **GitHub Actions run:** [#127](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42241808415).
+- **Подтверждено по логам:** статическая проверка прошла; `./gradlew build` завершился с `BUILD SUCCESSFUL`; `./gradlew runGameTestServer` выполнил все **26 GameTests**, включая партии `resource_demand` и `multi_block_work` (26/26 passed).
+- **Не подтверждено:** запуск выделенного сервера был отменён после начала smoke-теста из-за следующего обновления feature-ветки; smoke-тест клиента был пропущен. После последующих небольших исправлений кода и документации полный прогон актуального HEAD ещё требуется.
+
+
 ---
 
 ## 3. Обязательный каталог проверок по подсистемам
