@@ -53,7 +53,7 @@ public final class VillagerAutonomy {
     private static final String HARVEST_FAILED_Y = PREFIX + "harvest_failed_y";
     private static final String HARVEST_FAILED_Z = PREFIX + "harvest_failed_z";
     private static final String HARVEST_FAILED_UNTIL = PREFIX + "harvest_failed_until";
-    private static final String SEED_FETCH_ACTIVE = PREFIX + "seed_fetch_active";
+    public static final String SEED_FETCH_ACTIVE_KEY = PREFIX + "seed_fetch_active";
     private static final String SEED_FETCH_CHEST_X = PREFIX + "seed_fetch_chest_x";
     private static final String SEED_FETCH_CHEST_Y = PREFIX + "seed_fetch_chest_y";
     private static final String SEED_FETCH_CHEST_Z = PREFIX + "seed_fetch_chest_z";
@@ -108,6 +108,7 @@ public final class VillagerAutonomy {
                 cancelTrip(villager, data);
             }
             clearHarvestRoute(villager, data);
+            if (data.getBoolean(SEED_FETCH_ACTIVE_KEY)) cancelSeedFetch(villager, data);
             data.putBoolean(HARVEST_CYCLE_KEY, false);
             return;
         }
@@ -118,11 +119,6 @@ public final class VillagerAutonomy {
 
         long now = level.getGameTime();
 
-        if (data.getBoolean(SEED_FETCH_ACTIVE)) {
-            continueSeedFetch(villager, level, data, now);
-            return;
-        }
-
         // Do not pull a villager away from rest. Cancel only this mod's own route.
         long dayTime = Math.floorMod(level.getDayTime(), 24000L);
         if (villager.isSleeping() || dayTime >= 12000L) {
@@ -130,6 +126,11 @@ public final class VillagerAutonomy {
                 cancelTrip(villager, data);
                 data.putLong(NEXT_SEARCH, now + RETRY_DELAY_TICKS);
             }
+            return;
+        }
+
+        if (data.getBoolean(SEED_FETCH_ACTIVE_KEY)) {
+            continueSeedFetch(villager, level, data, now);
             return;
         }
 
@@ -149,8 +150,9 @@ public final class VillagerAutonomy {
         BlockPos villageHome = VillagerRoles.getHome(villager);
         if (villageHome == null) villageHome = villager.blockPosition();
         boolean foodShortage = VillageResourcePlanner.getPlan(level, villageHome).needsFood();
-        if (farmerWorker && (foodShortage || data.getBoolean(HARVEST_CYCLE_KEY)
-            || data.getBoolean(HARVEST_ACTIVE_KEY))) {
+        if (farmerWorker && (data.getBoolean(HARVEST_CYCLE_KEY)
+            || data.getBoolean(HARVEST_ACTIVE_KEY)
+            || (foodShortage && now >= data.getLong(NEXT_SEARCH)))) {
             if (tryHarvestMatureCropAndBakeBread(villager, level, now)) return;
         }
 
@@ -543,7 +545,7 @@ public final class VillagerAutonomy {
         if (target == null || !VillageReservations.tryReserveStoragePositions(
             level, villager, List.of(target.chest()), "farmer_seed_fetch")) return false;
         CompoundTag data = villager.getPersistentData();
-        data.putBoolean(SEED_FETCH_ACTIVE, true);
+        data.putBoolean(SEED_FETCH_ACTIVE_KEY, true);
         data.putInt(SEED_FETCH_CHEST_X, target.chest().getX());
         data.putInt(SEED_FETCH_CHEST_Y, target.chest().getY());
         data.putInt(SEED_FETCH_CHEST_Z, target.chest().getZ());
@@ -654,7 +656,7 @@ public final class VillagerAutonomy {
             }
         });
         VillageReservations.release(data, "farmer_seed_fetch");
-        data.putBoolean(SEED_FETCH_ACTIVE, false);
+        data.putBoolean(SEED_FETCH_ACTIVE_KEY, false);
         data.remove(SEED_FETCH_CHEST_X); data.remove(SEED_FETCH_CHEST_Y); data.remove(SEED_FETCH_CHEST_Z);
         data.remove(SEED_FETCH_STAND_X); data.remove(SEED_FETCH_STAND_Y); data.remove(SEED_FETCH_STAND_Z);
         data.remove(SEED_FETCH_STARTED); data.remove(SEED_FETCH_LAST_ORDER);
