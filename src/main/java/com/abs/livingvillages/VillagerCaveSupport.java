@@ -34,6 +34,7 @@ public final class VillagerCaveSupport {
     private static final String LAST_WAYPOINT = P + "last_waypoint";
     private static final String LAST_TORCH = P + "last_torch";
     private static final String LAST_TORCH_TICK = P + "last_torch_tick";
+    private static final String NEXT_TORCH_RESTOCK = P + "next_torch_restock";
     private static final String RETURNING = P + "returning";
     private static final String RETURN_INDEX = P + "return_index";
     private static final String RETURN_TARGET = P + "return_target";
@@ -77,7 +78,7 @@ public final class VillagerCaveSupport {
             || !LivingVillagesConfig.ENABLE_MINER_CAVE_EXPLORATION.get()) return;
 
         recordCaveWaypoint(villager, level, data);
-        restockTorches(villager, level);
+        restockTorches(villager, level, data, now);
         placeTorchAtDarkSpot(villager, level, data, now);
 
         long dayTime = Math.floorMod(level.getDayTime(), 24000L);
@@ -106,9 +107,12 @@ public final class VillagerCaveSupport {
         data.putLong(LAST_WAYPOINT, level.getGameTime());
     }
 
-    private static void restockTorches(Villager villager, ServerLevel level) {
+    private static void restockTorches(Villager villager, ServerLevel level, CompoundTag data, long now) {
+        if (now < data.getLong(NEXT_TORCH_RESTOCK)) return;
+        // The storage scan is deliberately much slower than the miner's work tick.
+        data.putLong(NEXT_TORCH_RESTOCK, now + 400L);
         Container inventory = villager.getInventory();
-        if (countTorches(inventory) >= 8) return;
+        if (countTorches(villager) >= 8) return;
 
         BlockPos center = VillagerRoles.getHome(villager);
         if (center == null) center = villager.blockPosition();
@@ -125,7 +129,7 @@ public final class VillagerCaveSupport {
                     for (int slot = 0; slot < storage.getContainerSize(); slot++) {
                         ItemStack stored = storage.getItem(slot);
                         if (!stored.is(Items.TORCH) || stored.getCount() <= 8) continue;
-                        int requested = Math.min(16 - countTorches(inventory), stored.getCount() - 8);
+                        int requested = Math.min(16 - countTorches(villager), stored.getCount() - 8);
                         if (requested <= 0) return;
                         ItemStack offered = new ItemStack(Items.TORCH, requested);
                         ItemStack remainder = inventory.addItem(offered);
@@ -136,26 +140,29 @@ public final class VillagerCaveSupport {
                             storage.setChanged();
                             inventory.setChanged();
                         }
-                        if (countTorches(inventory) >= 8) return;
+                        if (countTorches(villager) >= 8) return;
                     }
                 }
             }
         }
     }
 
-    private static int countTorches(Container inventory) {
+    private static int countTorches(Villager villager) {
         int count = 0;
+        Container inventory = villager.getInventory();
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.getItem(slot);
             if (stack.is(Items.TORCH)) count += stack.getCount();
         }
+        ItemStack offhand = villager.getOffhandItem();
+        if (offhand.is(Items.TORCH)) count += offhand.getCount();
         return count;
     }
 
     private static void placeTorchAtDarkSpot(Villager villager, ServerLevel level, CompoundTag data, long now) {
         if (!level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
             || now - data.getLong(LAST_TORCH_TICK) < TORCH_COOLDOWN_TICKS) return;
-        if (countTorches(villager.getInventory()) <= 0 && !villager.getOffhandItem().is(Items.TORCH)) return;
+        if (countTorches(villager) <= 0) return;
 
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>(9);
