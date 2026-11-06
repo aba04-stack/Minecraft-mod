@@ -45,6 +45,7 @@ public final class VillagerAutonomy {
     private static final String LAST_ORDER = PREFIX + "last_order";
     private static final String NEXT_SEARCH = PREFIX + "next_search";
     public static final String HARVEST_ACTIVE_KEY = PREFIX + "harvest_active";
+    public static final String HARVEST_CYCLE_KEY = PREFIX + "harvest_cycle_active";
     private static final String HARVEST_X = PREFIX + "harvest_x";
     private static final String HARVEST_Y = PREFIX + "harvest_y";
     private static final String HARVEST_Z = PREFIX + "harvest_z";
@@ -124,7 +125,8 @@ public final class VillagerAutonomy {
         BlockPos villageHome = VillagerRoles.getHome(villager);
         if (villageHome == null) villageHome = villager.blockPosition();
         boolean foodShortage = VillageResourcePlanner.getPlan(level, villageHome).needsFood();
-        if (farmerWorker && (foodShortage || data.getBoolean(HARVEST_ACTIVE_KEY))) {
+        if (farmerWorker && (foodShortage || data.getBoolean(HARVEST_CYCLE_KEY)
+            || data.getBoolean(HARVEST_ACTIVE_KEY))) {
             if (tryHarvestMatureCropAndBakeBread(villager, level, now)) return;
         }
 
@@ -278,12 +280,13 @@ public final class VillagerAutonomy {
     }
 
     private static boolean tryHarvestMatureCropAndBakeBread(Villager villager, ServerLevel level, long nowTick) {
+        CompoundTag data = villager.getPersistentData();
         if (!level.getGameRules().getBoolean(net.minecraft.world.level.GameRules.RULE_MOBGRIEFING)) {
-            clearHarvestRoute(villager, villager.getPersistentData());
+            clearHarvestRoute(villager, data);
+            data.putBoolean(HARVEST_CYCLE_KEY, false);
             return false;
         }
-
-        CompoundTag data = villager.getPersistentData();
+        data.putBoolean(HARVEST_CYCLE_KEY, true);
         BlockPos origin = VillagerRoles.getHome(villager);
         if (origin == null) origin = villager.blockPosition();
         int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
@@ -310,6 +313,7 @@ public final class VillagerAutonomy {
 
             if (bestMature == null) {
                 clearHarvestRoute(villager, data);
+                data.putBoolean(HARVEST_CYCLE_KEY, false);
                 break;
             }
             if (bestDist > 9.0D) {
