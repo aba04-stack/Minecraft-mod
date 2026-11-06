@@ -39,6 +39,22 @@ import java.util.Set;
 public final class VillageReservationGameTests {
     private VillageReservationGameTests() {}
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_memory")
+    public static void caveReturnStartsFromNearestRememberedWaypoint(GameTestHelper helper) {
+        BlockPos current = new BlockPos(12, 18, 4);
+        long[] trail = new long[] {
+            new BlockPos(0, 18, 0).asLong(),
+            new BlockPos(10, 18, 4).asLong(),
+            new BlockPos(18, 18, 4).asLong(),
+            new BlockPos(24, 18, 4).asLong()
+        };
+        helper.assertTrue(VillagerCaveSupport.nearestTrailIndex(current, trail) == 1,
+            "A miner must reverse from the nearest waypoint, not blindly walk toward the deepest recorded point.");
+        helper.assertTrue(VillagerCaveSupport.nearestTrailIndex(current, new long[0]) == -1,
+            "An empty cave trail must not create a return route.");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "reservation_competition")
     public static void oneTaskExcludesCompetingTaskUntilItEnds(GameTestHelper helper) {
         placeFloor(helper);
