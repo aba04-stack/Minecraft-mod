@@ -113,9 +113,10 @@ public final class VillageResourcePlanner {
         }
 
         int matureCrops = countMatureCrops(level, center);
+        boolean treesAvailable = hasHarvestableTree(level, center);
         int pickaxes = VillageIndustry.countAvailablePickaxes(level, center);
         return new VillageResourceDemandModel.Stock(
-            adults, woodUnits, stoneUnits, oreUnits, foodPoints, matureCrops, pickaxes);
+            adults, woodUnits, stoneUnits, oreUnits, foodPoints, matureCrops, treesAvailable, pickaxes);
     }
 
     private static int[] addStack(ItemStack stack, int wood, int stone, int ore, int food) {
@@ -148,6 +149,39 @@ public final class VillageResourcePlanner {
         return new int[] {wood, stone, ore, food};
     }
 
+    private static boolean hasHarvestableTree(ServerLevel level, BlockPos center) {
+        int radius = Math.min(12, LivingVillagesConfig.TREE_SEARCH_RADIUS_BLOCKS.get());
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -2; dy <= 16; dy++) {
+                    BlockPos pos = center.offset(dx, dy, dz);
+                    if (!level.hasChunkAt(pos) || !level.getBlockState(pos).is(BlockTags.LOGS)) continue;
+                    int logs = 0;
+                    int leaves = 0;
+                    for (int ox = -2; ox <= 2 && logs < 3; ox++) {
+                        for (int oz = -2; oz <= 2 && logs < 3; oz++) {
+                            for (int oy = -2; oy <= 4 && logs < 3; oy++) {
+                                BlockPos check = pos.offset(ox, oy, oz);
+                                if (level.hasChunkAt(check) && level.getBlockState(check).is(BlockTags.LOGS)) logs++;
+                            }
+                        }
+                    }
+                    if (logs < 3) continue;
+                    for (int ox = -4; ox <= 4 && leaves < 3; ox++) {
+                        for (int oz = -4; oz <= 4 && leaves < 3; oz++) {
+                            for (int oy = -2; oy <= 6 && leaves < 3; oy++) {
+                                BlockPos check = pos.offset(ox, oy, oz);
+                                if (level.hasChunkAt(check) && level.getBlockState(check).is(BlockTags.LEAVES)) leaves++;
+                            }
+                        }
+                    }
+                    if (leaves >= 3) return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static int countMatureCrops(ServerLevel level, BlockPos center) {
         int count = 0;
         int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
@@ -178,6 +212,7 @@ public final class VillageResourcePlanner {
             + ", камень=" + plan.needsStone()
             + ", руда=" + plan.needsOre()
             + ", еда=" + plan.needsFood()
+            + "; деревья рядом=" + plan.treesAvailable()
             + "; рабочие: лесорубы=" + plan.desiredLumberjacks()
             + ", шахтёры=" + plan.desiredMiners()
             + ", фермеры=" + plan.desiredFarmers();
