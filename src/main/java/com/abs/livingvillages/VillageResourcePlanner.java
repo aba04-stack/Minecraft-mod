@@ -45,7 +45,7 @@ public final class VillageResourcePlanner {
         if (villageId == null) {
             return VillageResourceDemandModel.evaluate(new VillageResourceDemandModel.Stock(
                 residents == null ? 0 : (int) residents.stream().filter(v -> !v.isBaby()).count(),
-                0, 0, 0, 0, 0, false, 0));
+                0, 0, 0, 0, 0, 0, 0, false, 0));
         }
 
         long now = level.getGameTime();
@@ -71,6 +71,7 @@ public final class VillageResourcePlanner {
         int stoneUnits = 0;
         int oreUnits = 0;
         int foodPoints = 0;
+        int seedUnits = 0;
         int adults = 0;
 
         int storageRadius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
@@ -82,7 +83,9 @@ public final class VillageResourcePlanner {
                         || !VillageRegistry.isStorageForVillage(level, center, pos)
                         || !(level.getBlockEntity(pos) instanceof Container container)) continue;
                     for (int slot = 0; slot < container.getContainerSize(); slot++) {
-                        int[] totals = addStack(container.getItem(slot), woodUnits, stoneUnits, oreUnits, foodPoints);
+                        ItemStack stored = container.getItem(slot);
+                        seedUnits += countPlantingItems(stored);
+                        int[] totals = addStack(stored, woodUnits, stoneUnits, oreUnits, foodPoints);
                         woodUnits = totals[0];
                         stoneUnits = totals[1];
                         oreUnits = totals[2];
@@ -98,13 +101,17 @@ public final class VillageResourcePlanner {
                 if (!villager.isBaby()) adults++;
                 Container inventory = villager.getInventory();
                 for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-                    int[] totals = addStack(inventory.getItem(slot), woodUnits, stoneUnits, oreUnits, foodPoints);
+                    ItemStack carried = inventory.getItem(slot);
+                    seedUnits += countPlantingItems(carried);
+                    int[] totals = addStack(carried, woodUnits, stoneUnits, oreUnits, foodPoints);
                     woodUnits = totals[0];
                     stoneUnits = totals[1];
                     oreUnits = totals[2];
                     foodPoints = totals[3];
                 }
-                int[] heldTotals = addStack(villager.getMainHandItem(), woodUnits, stoneUnits, oreUnits, foodPoints);
+                ItemStack held = villager.getMainHandItem();
+                seedUnits += countPlantingItems(held);
+                int[] heldTotals = addStack(held, woodUnits, stoneUnits, oreUnits, foodPoints);
                 woodUnits = heldTotals[0];
                 stoneUnits = heldTotals[1];
                 oreUnits = heldTotals[2];
@@ -113,10 +120,12 @@ public final class VillageResourcePlanner {
         }
 
         int matureCrops = countMatureCrops(level, center);
+        int plantableFarmland = countPlantableFarmland(level, center);
         boolean treesAvailable = hasHarvestableTree(level, center);
         int pickaxes = VillageIndustry.countAvailablePickaxes(level, center);
         return new VillageResourceDemandModel.Stock(
-            adults, woodUnits, stoneUnits, oreUnits, foodPoints, matureCrops, treesAvailable, pickaxes);
+            adults, woodUnits, stoneUnits, oreUnits, foodPoints, matureCrops,
+            plantableFarmland, seedUnits, treesAvailable, pickaxes);
     }
 
     private static int[] addStack(ItemStack stack, int wood, int stone, int ore, int food) {
@@ -183,6 +192,31 @@ public final class VillageResourcePlanner {
         return false;
     }
 
+    private static int countPlantableFarmland(ServerLevel level, BlockPos center) {
+        int count = 0;
+        int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -3; dy <= 3; dy++) {
+                    BlockPos cropPos = center.offset(dx, dy, dz);
+                    if (!level.hasChunkAt(cropPos) || !level.hasChunkAt(cropPos.below())) continue;
+                    if (!level.getBlockState(cropPos).isAir()
+                        || !level.getBlockState(cropPos.below()).is(Blocks.FARMLAND)
+                        || level.getMaxLocalRawBrightness(cropPos) < 8
+                        || !VillageArea.isBlockInResidentGroup(level, center, cropPos.below())) continue;
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    private static int countPlantingItems(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return 0;
+        return stack.is(Items.WHEAT_SEEDS) || stack.is(Items.BEETROOT_SEEDS)
+            || stack.is(Items.CARROT) || stack.is(Items.POTATO) ? stack.getCount() : 0;
+    }
+
     private static int countMatureCrops(ServerLevel level, BlockPos center) {
         int count = 0;
         int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
@@ -214,6 +248,9 @@ public final class VillageResourcePlanner {
             + ", камень=" + plan.needsStone()
             + ", руда=" + plan.needsOre()
             + ", еда=" + plan.needsFood()
+            + "; зрелые поля=" + stock.matureCrops()
+            + ", пустых грядок=" + stock.plantableFarmland()
+            + ", семян/посадочных клубней=" + stock.availableSeeds()
             + "; деревья рядом=" + plan.treesAvailable()
             + "; рабочие: лесорубы=" + plan.desiredLumberjacks()
             + ", шахтёры=" + plan.desiredMiners()
