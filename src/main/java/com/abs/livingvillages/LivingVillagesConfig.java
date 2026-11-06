@@ -24,6 +24,7 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGER_REPLANTING;
     public static final ModConfigSpec.IntValue TREE_SEARCH_RADIUS_BLOCKS;
     public static final ModConfigSpec.BooleanValue ENABLE_MINER_ROLE;
+    public static final ModConfigSpec.BooleanValue ENABLE_MINER_CAVE_EXPLORATION;
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_GUARDS;
     public static final ModConfigSpec.BooleanValue ENABLE_RESOURCE_LOGISTICS;
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_INDUSTRY;
@@ -131,6 +132,11 @@ public final class LivingVillagesConfig {
             .comment("Разрешить назначать шахтёров безработным взрослым жителям и добывать доступные руды.")
             .translation("livingvillages.config.enable_miner_role")
             .define("enable_miner_role", true);
+
+        ENABLE_MINER_CAVE_EXPLORATION = builder
+            .comment("Шахтёры запоминают пройденный путь в естественных пещерах, ставят настоящие факелы и возвращаются к дому по сохранённым точкам. Нужны реальные факелы.")
+            .translation("livingvillages.config.enable_miner_cave_exploration")
+            .define("enable_miner_cave_exploration", true);
 
         ENABLE_VILLAGE_GUARDS = builder
             .comment("Назначать защитников деревни: они экипируются из сундуков и атакуют ближайших враждебных существ.")
