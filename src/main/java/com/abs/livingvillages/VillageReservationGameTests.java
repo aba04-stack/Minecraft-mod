@@ -72,6 +72,20 @@ public final class VillageReservationGameTests {
         helper.assertTrue(VillageReservations.tryReserveStoragePositions(
             helper.getLevel(), challenger, List.of(chest), "house"),
             "The next active job must be able to claim the released chest.");
+
+        // The seed-fetch reservation must remain live for the full trip, then release on completion.
+        challenger.getPersistentData().putBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY, true);
+        VillageReservations.release(challenger.getPersistentData());
+        helper.assertTrue(VillageReservations.tryReserveStoragePositions(
+            helper.getLevel(), challenger, List.of(chest), "farmer_seed_fetch"),
+            "A farmer must reserve its actual seed storage before walking there.");
+        helper.assertTrue(!VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, owner),
+            "Another resident must not take the chest while the farmer is fetching seeds.");
+        challenger.getPersistentData().putBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY, false);
+        helper.assertTrue(VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, owner),
+            "The seed storage reservation must be released when seed fetching ends.");
         helper.succeed();
     }
 
