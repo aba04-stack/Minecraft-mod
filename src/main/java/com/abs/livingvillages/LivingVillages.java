@@ -63,7 +63,6 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onVillagerDamaged);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onMonsterKilledByPlayer);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onStorageTamperedByPlayer);
-        NeoForge.EVENT_BUS.addListener(VillageDailyLife::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerAutonomy::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerTreeWork::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerMining::onVillagerTick);
