@@ -12,6 +12,7 @@ public final class VillageResourceDemandModel {
         int oreUnits,
         int foodPoints,
         int matureCrops,
+        boolean treesAvailable,
         int availablePickaxes
     ) {}
 
@@ -25,6 +26,7 @@ public final class VillageResourceDemandModel {
         boolean needsOre,
         boolean needsFood,
         int matureCrops,
+        boolean treesAvailable,
         int desiredLumberjacks,
         int desiredMiners,
         int desiredFarmers
@@ -38,7 +40,7 @@ public final class VillageResourceDemandModel {
 
     public static Plan evaluate(Stock stock) {
         if (stock == null) {
-            return new Plan(96, 48, 4, 32, true, true, true, true, 0, 0, 0, 0);
+            return new Plan(96, 48, 4, 32, true, true, true, true, 0, false, 0, 0, 0);
         }
 
         int adults = Math.max(0, stock.adultPopulation());
@@ -47,6 +49,7 @@ public final class VillageResourceDemandModel {
         int ore = Math.max(0, stock.oreUnits());
         int food = Math.max(0, stock.foodPoints());
         int crops = Math.max(0, stock.matureCrops());
+        boolean treesAvailable = stock.treesAvailable();
         int pickaxes = Math.max(0, stock.availablePickaxes());
 
         // Wood units use plank-equivalents: one real log counts as four planks.
@@ -56,7 +59,7 @@ public final class VillageResourceDemandModel {
         int targetOre = clamp(adults * 2, 4, 32);
         int targetFood = clamp(adults * 8, 32, 256);
 
-        boolean needsWood = adults > 1 && wood < targetWood;
+        boolean needsWood = adults > 1 && treesAvailable && wood < targetWood;
         boolean needsStone = adults > 1 && stone < targetStone;
         boolean needsOre = adults > 1 && ore < targetOre;
         boolean needsFood = adults > 1 && food < targetFood;
@@ -71,7 +74,7 @@ public final class VillageResourceDemandModel {
         return new Plan(
             targetWood, targetStone, targetOre, targetFood,
             needsWood, needsStone, needsOre, needsFood,
-            crops, desiredLumberjacks, desiredMiners, desiredFarmers
+            crops, treesAvailable, desiredLumberjacks, desiredMiners, desiredFarmers
         );
     }
 
