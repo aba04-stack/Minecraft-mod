@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.memory.WalkTarget;
@@ -111,7 +112,7 @@ public final class VillagerCaveSupport {
         if (now < data.getLong(NEXT_TORCH_RESTOCK)) return;
         // The storage scan is deliberately much slower than the miner's work tick.
         data.putLong(NEXT_TORCH_RESTOCK, now + 400L);
-        Container inventory = villager.getInventory();
+        SimpleContainer inventory = villager.getInventory();
         if (countTorches(villager) >= 8) return;
 
         BlockPos center = VillagerRoles.getHome(villager);
