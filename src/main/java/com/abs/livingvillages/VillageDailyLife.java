@@ -84,6 +84,7 @@ public final class VillageDailyLife {
             || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)
             || VillagerRoles.isGuard(villager)
             || hasHigherPriorityTask(data)
+            || !data.getString(CLAIMED_BY).isBlank()
             || isVillageAlarmActive(villager, level, now)
             || !VillageTickBudget.tryConsumeAiCheck(level)) {
             return false;
@@ -94,7 +95,7 @@ public final class VillageDailyLife {
             villager.isAlive(),
             !villager.isBaby(),
             isVanillaIdle(villager),
-            hasHigherPriorityTask(data),
+            hasHigherPriorityTask(data) || !data.getString(CLAIMED_BY).isBlank(),
             villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET),
             isVillageAlarmActive(villager, level, now),
             peer != null,
