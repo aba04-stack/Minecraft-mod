@@ -279,7 +279,7 @@ public final class VillagerAutonomy {
         return !level.getBlockState(pos.below()).isAir();
     }
 
-    private static boolean tryHarvestMatureCropAndBakeBread(Villager villager, ServerLevel level, long nowTick) {
+    static boolean tryHarvestMatureCropAndBakeBread(Villager villager, ServerLevel level, long nowTick) {
         CompoundTag data = villager.getPersistentData();
         if (!level.getGameRules().getBoolean(net.minecraft.world.level.GameRules.RULE_MOBGRIEFING)) {
             clearHarvestRoute(villager, data);
