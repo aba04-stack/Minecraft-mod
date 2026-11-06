@@ -49,6 +49,7 @@ public final class VillagerAutonomy {
     private static final String HARVEST_Z = PREFIX + "harvest_z";
     private static final String HARVEST_STARTED = PREFIX + "harvest_started";
     private static final String HARVEST_LAST_ORDER = PREFIX + "harvest_last_order";
+    private static final String HARVEST_NEXT_PASS = PREFIX + "harvest_next_pass";
     private static final String HARVEST_FAILED_X = PREFIX + "harvest_failed_x";
     private static final String HARVEST_FAILED_Y = PREFIX + "harvest_failed_y";
     private static final String HARVEST_FAILED_Z = PREFIX + "harvest_failed_z";
@@ -126,6 +127,12 @@ public final class VillagerAutonomy {
                 cancelTrip(villager, data);
                 data.putLong(NEXT_SEARCH, now + RETRY_DELAY_TICKS);
             }
+            if (data.getBoolean(SEED_FETCH_ACTIVE_KEY)) {
+                cancelSeedFetch(villager, data);
+                data.putLong(NEXT_SEARCH, now + RETRY_DELAY_TICKS);
+            }
+            if (data.getBoolean(HARVEST_ACTIVE_KEY)) clearHarvestRoute(villager, data);
+            data.putLong(HARVEST_NEXT_PASS, now + RETRY_DELAY_TICKS);
             return;
         }
 
@@ -150,9 +157,14 @@ public final class VillagerAutonomy {
         BlockPos villageHome = VillagerRoles.getHome(villager);
         if (villageHome == null) villageHome = villager.blockPosition();
         boolean foodShortage = VillageResourcePlanner.getPlan(level, villageHome).needsFood();
-        if (farmerWorker && (data.getBoolean(HARVEST_CYCLE_KEY)
-            || data.getBoolean(HARVEST_ACTIVE_KEY)
-            || (foodShortage && now >= data.getLong(NEXT_SEARCH)))) {
+        boolean farmCycleActive = data.getBoolean(HARVEST_CYCLE_KEY) || data.getBoolean(HARVEST_ACTIVE_KEY);
+        if (farmerWorker && farmCycleActive && now < data.getLong(HARVEST_NEXT_PASS)) return;
+        if (farmerWorker && (farmCycleActive || (foodShortage && now >= data.getLong(NEXT_SEARCH)))) {
+            if (VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {
+                if (data.getBoolean(HARVEST_ACTIVE_KEY)) clearHarvestRoute(villager, data);
+                data.putLong(HARVEST_NEXT_PASS, now + RETRY_DELAY_TICKS);
+                return;
+            }
             if (tryHarvestMatureCropAndBakeBread(villager, level, now)) return;
         }
 
@@ -377,6 +389,7 @@ public final class VillagerAutonomy {
                     return false;
                 }
                 setHarvestRoute(villager, data, target, nowTick);
+                data.putLong(HARVEST_NEXT_PASS, nowTick + HARVEST_ROUTE_REISSUE_TICKS);
                 return true;
             }
 
@@ -460,6 +473,7 @@ public final class VillagerAutonomy {
                         return workDone > 0;
                     }
                     setHarvestRoute(villager, data, target, nowTick);
+                    data.putLong(HARVEST_NEXT_PASS, nowTick + HARVEST_ROUTE_REISSUE_TICKS);
                     return true;
                 }
 
@@ -506,7 +520,12 @@ public final class VillagerAutonomy {
         boolean cyclePending = workDone >= MAX_CROPS_PER_PASS
             || moreRipe || (morePlantable && firstPlantingItem(villager.getInventory()) != Items.AIR);
         data.putBoolean(HARVEST_CYCLE_KEY, cyclePending);
-        if (!cyclePending) data.putLong(NEXT_SEARCH, nowTick + SUCCESS_DELAY_TICKS);
+        if (!cyclePending) {
+            data.putLong(NEXT_SEARCH, nowTick + SUCCESS_DELAY_TICKS);
+            data.putLong(HARVEST_NEXT_PASS, nowTick + SUCCESS_DELAY_TICKS);
+        } else {
+            data.putLong(HARVEST_NEXT_PASS, nowTick + HARVEST_ROUTE_REISSUE_TICKS);
+        }
 
         // Convert carried wheat into bread after the bounded field work.
         var inv = villager.getInventory();
