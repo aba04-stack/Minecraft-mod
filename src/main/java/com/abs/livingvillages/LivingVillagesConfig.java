@@ -38,7 +38,6 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.IntValue MONSTER_TACTICAL_RADIUS_BLOCKS;
     public static final ModConfigSpec.IntValue MAX_AI_CHECKS_PER_TICK;
     public static final ModConfigSpec.BooleanValue ENABLE_ANIMAL_BEHAVIOR;
-    public static final ModConfigSpec.BooleanValue ENABLE_DAILY_LIFE;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -202,11 +201,6 @@ public final class LivingVillagesConfig {
             .comment("Улучшенное поведение животных: реакция стада на опасность, защита детёнышей, поиск корма/укрытия и разведение.")
             .translation("livingvillages.config.enable_animal_behavior")
             .define("enable_animal_behavior", true);
-
-        ENABLE_DAILY_LIFE = builder
-            .comment("Короткие социальные визиты взрослых жителей в свободное время. Не заменяет ванильное расписание и рабочие задачи.")
-            .translation("livingvillages.config.enable_daily_life")
-            .define("enable_daily_life", true);
 
         SPEC = builder.build();
     }
