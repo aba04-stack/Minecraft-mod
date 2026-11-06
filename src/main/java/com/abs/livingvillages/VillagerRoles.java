@@ -202,6 +202,7 @@ public final class VillagerRoles {
                 || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
                 || data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
                 || data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY)
+                || data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY)
                 || data.getBoolean("livingvillages_mining_active")
                 || data.getBoolean("livingvillages_defense_has_route")
                 || data.getBoolean("livingvillages_industry_route_active")) continue;
@@ -313,7 +314,8 @@ public final class VillagerRoles {
             case ROLE_BUILDER -> VillageBuilder.isProjectActive(villager);
             case ROLE_LUMBERJACK -> data.getBoolean(TREE_TASK_ACTIVE) || data.getBoolean(REPLANT_TASK_ACTIVE);
             case ROLE_FARMER -> data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
-                || data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY);
+                || data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY)
+                || data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY);
             default -> false;
         };
     }
