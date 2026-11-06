@@ -178,7 +178,8 @@ public final class VillagerTreeWork {
         BlockPos home = VillagerRoles.getHome(villager);
         if (home == null) home = villager.blockPosition();
         if (!VillageResourcePlanner.getPlan((ServerLevel) villager.level(), home).needsWood()) return false;
-        boolean roleAllowsForestWork = (VillagerRoles.isLumberjack(villager)
+        boolean roleAllowsForestWork = (role.isEmpty()
+                || VillagerRoles.isLumberjack(villager)
                 || (VillagerRoles.ROLE_BUILDER.equals(role) && !VillageBuilder.isProjectActive(villager))
                 || (VillagerRoles.ROLE_CRAFTSMAN.equals(role) && !VillageCraftingJobs.isBusy(villager)))
             && !data.getBoolean(VillagePopulation.ACTIVE_KEY)
