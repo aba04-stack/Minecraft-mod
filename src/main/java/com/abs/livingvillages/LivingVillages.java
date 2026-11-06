@@ -415,42 +415,66 @@ public final class LivingVillages {
     }
 
     private BuildResult tryBuildFarm(ServerLevel level, BlockPos center) {
+        long now = level.getGameTime();
         List<Container> containers = findResourceContainers(level, center);
-        if (containers.isEmpty()) {
-            String msg = "Нет хранилища для ресурсов фермы.";
+        VillageWorkOrderModel.Order pendingFarm = findPendingProjectOrder(level, center, "farm");
+
+        Item pinnedSeed = pendingRequirementItem(pendingFarm, this::isSupportedFarmSeed);
+        CropPlan cropPlan = pinnedSeed != Items.AIR
+            ? cropPlanForSeed(pinnedSeed, containers)
+            : chooseCropPlan(containers);
+        Item hoeItem = pendingRequirementItem(pendingFarm, VillageFarmBuilder::isHoeItem);
+        if (hoeItem == Items.AIR) hoeItem = selectAvailableHoeItem(containers);
+        if (hoeItem == Items.AIR) hoeItem = Items.WOODEN_HOE;
+
+        VillageWorkOrderModel.Order recorded = VillageWorkOrders.recordPendingProjectRequirements(
+            level, center, "farm", 60, now, List.of(
+                new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(cropPlan.seedItem()).toString(), FARM_CROP_COUNT),
+                new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(Items.WATER_BUCKET).toString(), 1),
+                new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(Items.COMPOSTER).toString(), 1),
+                new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(hoeItem).toString(), 1)
+            )
+        );
+        if (recorded == null) {
+            String msg = "Не удалось сохранить потребность материалов для фермы в очереди поселения.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
-            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
             return BuildResult.failure(msg);
         }
-        CropPlan cropPlan = chooseCropPlan(containers);
-        if (cropPlan == null) {
-            String msg = "Для фермы нужны 24 одинаковых семени пшеницы, морковки, картофелины или семени свёклы в настоящих хранилищах.";
+
+        if (containers.isEmpty()) {
+            String msg = "Нет доступного хранилища для ресурсов фермы. Заявка сохранена.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
-            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", now);
+            return BuildResult.failure(msg);
+        }
+        if (cropPlan.available() < FARM_CROP_COUNT) {
+            String msg = "Для фермы нужно 24 одинаковых семени. Заявка закрепила выбранную культуру; курьеры ищут недостающие предметы.";
+            VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", now);
             return BuildResult.failure(msg);
         }
         if (countItem(containers, Items.WATER_BUCKET) < 1) {
             String msg = "Для фермы нужно настоящее ведро воды в ближайшем хранилище.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
-            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", now);
             return BuildResult.failure(msg);
         }
         if (countItem(containers, Items.COMPOSTER) < 1) {
             String msg = "Для фермы нужен настоящий компостер в ближайшем хранилище.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
-            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", now);
             return BuildResult.failure(msg);
         }
-        if (!VillageFarmBuilder.hasHoe(containers)) {
-            String msg = "Для подготовки поля нужна настоящая мотыга в хранилище.";
+        if (countItem(containers, hoeItem) < 1) {
+            String msg = "Для фермы нужна закреплённая в заявке настоящая мотыга.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
-            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", now);
             return BuildResult.failure(msg);
         }
         if (!canReturnEmptyBucket(containers)) {
             String msg = "Нет свободного места в хранилищах, чтобы вернуть пустое ведро.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
-            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", level.getGameTime());
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", now);
             return BuildResult.failure(msg);
         }
 
@@ -458,18 +482,42 @@ public final class LivingVillages {
         if (site == null) {
             String msg = "Не найден ровный участок 5×5 в радиусе 28 блоков.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
-            VillageWorkOrders.markPendingProjectOpen(level, center, "farm", level.getGameTime());
+            VillageWorkOrders.markPendingProjectOpen(level, center, "farm", now);
             return BuildResult.failure(msg);
         }
         if (!VillageFarmBuilder.startFarmProject(level, center, site, cropPlan.seedItem(), cropPlan.cropBlock())) {
             String msg = "Не найден свободный работник с местом в инвентаре для материалов фермы.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
-            VillageWorkOrders.markPendingProjectOpen(level, center, "farm", level.getGameTime());
+            VillageWorkOrders.markPendingProjectOpen(level, center, "farm", now);
             return BuildResult.failure(msg);
         }
         String ok = "Рабочий начал собирать настоящие семена, воду, компостер и мотыгу. Ферма будет строиться поэтапно.";
         VillageRegistry.recordDiagnostic(level, center, "Ферма", ok);
         return BuildResult.projectStarted(site, ok);
+    }
+
+    private boolean isSupportedFarmSeed(Item item) {
+        return item == Items.WHEAT_SEEDS || item == Items.CARROT
+            || item == Items.POTATO || item == Items.BEETROOT_SEEDS;
+    }
+
+    private CropPlan cropPlanForSeed(Item seed, List<Container> containers) {
+        if (seed == Items.WHEAT_SEEDS) return new CropPlan(seed, Blocks.WHEAT, countItem(containers, seed));
+        if (seed == Items.CARROT) return new CropPlan(seed, Blocks.CARROTS, countItem(containers, seed));
+        if (seed == Items.POTATO) return new CropPlan(seed, Blocks.POTATOES, countItem(containers, seed));
+        if (seed == Items.BEETROOT_SEEDS) return new CropPlan(seed, Blocks.BEETROOTS, countItem(containers, seed));
+        return new CropPlan(Items.WHEAT_SEEDS, Blocks.WHEAT, 0);
+    }
+
+    private Item selectAvailableHoeItem(List<Container> containers) {
+        if (containers == null) return Items.AIR;
+        for (Container container : containers) {
+            for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                ItemStack stack = container.getItem(slot);
+                if (!stack.isEmpty() && VillageFarmBuilder.isHoeItem(stack.getItem())) return stack.getItem();
+            }
+        }
+        return Items.AIR;
     }
 
     private CropPlan chooseCropPlan(List<Container> containers) {
@@ -479,9 +527,8 @@ public final class LivingVillages {
                 new CropPlan(Items.POTATO, Blocks.POTATOES, countItem(containers, Items.POTATO)),
                 new CropPlan(Items.BEETROOT_SEEDS, Blocks.BEETROOTS, countItem(containers, Items.BEETROOT_SEEDS))
             ).stream()
-            .filter(plan -> plan.available() >= FARM_CROP_COUNT)
             .max((first, second) -> Integer.compare(first.available(), second.available()))
-            .orElse(null);
+            .orElse(new CropPlan(Items.WHEAT_SEEDS, Blocks.WHEAT, 0));
     }
 
     /**

@@ -2181,7 +2181,12 @@ public final class VillageReservationGameTests {
             60, 0L, 0L, 10000L,
             com.abs.livingvillages.domain.VillageWorkOrderModel.OPEN,
             null, 0L,
-            List.of(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:wheat_seeds", 24))
+            List.of(
+                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:wheat_seeds", 24),
+                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:water_bucket", 1),
+                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:composter", 1),
+                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:wooden_hoe", 1)
+            )
         );
         var alreadyStarted = new com.abs.livingvillages.domain.VillageWorkOrderModel.Order(
             java.util.UUID.randomUUID(), house.villageId(), "house", "other-house",
@@ -2197,11 +2202,14 @@ public final class VillageReservationGameTests {
             Map.of("minecraft:oak_planks", 12, "minecraft:wheat_seeds", 4)
         );
         helper.assertTrue(
-            missing.size() == 2
+            missing.size() == 5
                 && missing.getOrDefault("minecraft:oak_planks", 0) == 24
                 && missing.getOrDefault("minecraft:wheat_seeds", 0) == 12
+                && missing.getOrDefault("minecraft:water_bucket", 0) == 1
+                && missing.getOrDefault("minecraft:composter", 0) == 1
+                && missing.getOrDefault("minecraft:wooden_hoe", 0) == 1
                 && !missing.containsKey("minecraft:red_bed"),
-            "Courier demand must subtract accessible chest stock and in-transit cargo, ignoring started orders."
+            "Courier demand must subtract accessible chest stock and in-transit cargo, ignore started orders, and include farm inputs."
         );
 
         Map<String, Integer> fulfilled = com.abs.livingvillages.domain.VillageWorkOrderModel.unmetRequirements(

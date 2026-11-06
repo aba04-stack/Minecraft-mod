@@ -28,6 +28,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
+import com.abs.livingvillages.domain.VillageWorkOrderModel;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -142,7 +143,10 @@ public final class VillageFarmBuilder {
             BlockPos candidateOrigin = VillagerRoles.getHome(candidate);
             if (candidateOrigin == null) candidateOrigin = candidate.blockPosition();
             List<Container> candidateStorages = findStorages(level, candidateOrigin, null);
-            Item candidateHoe = firstHoeInStorage(candidateStorages);
+            Item requiredHoe = pendingHoeItem(level, center);
+            Item candidateHoe = requiredHoe == Items.AIR
+                ? firstHoeInStorage(candidateStorages)
+                : containsItem(candidateStorages, requiredHoe) ? requiredHoe : Items.AIR;
             if (candidateHoe == Items.AIR || !canFitRequiredItems(candidate.getInventory(), seedItem, candidateHoe)) continue;
 
             java.util.Map<Item, Integer> materialBill = java.util.Map.of(
@@ -834,6 +838,31 @@ public final class VillageFarmBuilder {
         return stands.isEmpty() ? null : new StorageTarget(storage.immutable(), stands.get(0));
     }
 
+    private static Item pendingHoeItem(ServerLevel level, BlockPos center) {
+        for (VillageWorkOrderModel.Order order : VillageWorkOrders.list(level, center, level.getGameTime())) {
+            if (!order.kind().equals("farm") || !order.dedupeKey().equals("farm")
+                || (order.state() != VillageWorkOrderModel.OPEN
+                    && order.state() != VillageWorkOrderModel.WAITING_FOR_RESOURCES)) continue;
+            for (VillageWorkOrderModel.Requirement requirement : order.requirements()) {
+                ResourceLocation id = ResourceLocation.tryParse(requirement.itemId());
+                if (id == null) continue;
+                Item item = BuiltInRegistries.ITEM.get(id);
+                if (isHoeItem(item)) return item;
+            }
+        }
+        return Items.AIR;
+    }
+
+    private static boolean containsItem(List<Container> containers, Item item) {
+        if (containers == null || item == null || item == Items.AIR) return false;
+        for (Container container : containers) {
+            for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                if (container.getItem(slot).is(item)) return true;
+            }
+        }
+        return false;
+    }
+
     private static Item firstHoeInStorage(List<Container> containers) {
         for (Container container : containers) {
             Item item = firstHoeInContainer(container);
@@ -854,7 +883,7 @@ public final class VillageFarmBuilder {
         return !stack.isEmpty() && isHoeItem(stack.getItem());
     }
 
-    private static boolean isHoeItem(Item item) {
+    public static boolean isHoeItem(Item item) {
         for (Item hoe : HOES) if (item == hoe) return true;
         return false;
     }

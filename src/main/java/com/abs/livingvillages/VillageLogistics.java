@@ -345,7 +345,9 @@ public final class VillageLogistics {
             || stack.is(Items.IRON_INGOT) || stack.is(Items.COPPER_INGOT) || stack.is(Items.GOLD_INGOT)
             || stack.is(Items.REDSTONE) || stack.is(Items.LAPIS_LAZULI) || stack.is(Items.DIAMOND)
             || stack.is(Items.EMERALD) || stack.is(Items.WHEAT) || stack.is(Items.WHEAT_SEEDS)
-            || stack.is(Items.BEETROOT_SEEDS);
+            || stack.is(Items.BEETROOT_SEEDS) || stack.is(Items.CARROT) || stack.is(Items.POTATO)
+            || stack.is(Items.WATER_BUCKET) || stack.is(Items.COMPOSTER)
+            || VillageFarmBuilder.isHoeItem(stack.getItem());
     }
 
     private static boolean isStorage(BlockState state) {
