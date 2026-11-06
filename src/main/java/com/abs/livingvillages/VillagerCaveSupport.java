@@ -216,11 +216,25 @@ public final class VillagerCaveSupport {
         return false;
     }
 
+    static int nearestTrailIndex(BlockPos current, long[] trail) {
+        if (current == null || trail == null || trail.length == 0) return -1;
+        int nearestIndex = -1;
+        double nearestDistance = Double.MAX_VALUE;
+        for (int i = 0; i < trail.length; i++) {
+            double distance = current.distSqr(BlockPos.of(trail[i]));
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestIndex = i;
+            }
+        }
+        return nearestIndex;
+    }
+
     private static void beginReturnHome(Villager villager, CompoundTag data, long now) {
         long[] trail = data.getLongArray(TRAIL);
         if (trail.length == 0) return;
         data.putBoolean(RETURNING, true);
-        data.putInt(RETURN_INDEX, trail.length - 1);
+        data.putInt(RETURN_INDEX, nearestTrailIndex(villager.blockPosition(), trail));
         data.putLong(RETURN_LAST_PROGRESS, now);
         data.putLong(RETURN_LAST_ORDER, 0L);
         data.putLong(RETURN_LAST_POS, villager.blockPosition().asLong());
