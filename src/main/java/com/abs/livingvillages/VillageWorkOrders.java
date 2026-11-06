@@ -343,15 +343,21 @@ public final class VillageWorkOrders extends SavedData {
         } catch (RuntimeException ignored) {
             return false;
         }
-        BlockPos center = VillagerRoles.getHome(worker);
-        if (center == null) center = worker.blockPosition();
-        VillageWorkOrderModel.Order current = find(level, center, orderId, level.getGameTime());
-        if (current == null || !worker.getUUID().equals(current.workerId())) return false;
-        VillageWorkOrderModel.Order updated = setState(
-            level, center, orderId, terminalState, level.getGameTime());
-        if (updated == null) return false;
-        data.remove(ORDER_ID_KEY);
-        return true;
+        VillageWorkOrders board = get(level);
+        for (List<VillageWorkOrderModel.Order> orders : board.ordersByVillage.values()) {
+            for (int i = 0; i < orders.size(); i++) {
+                VillageWorkOrderModel.Order current = orders.get(i);
+                if (!current.id().equals(orderId) || !worker.getUUID().equals(current.workerId())) continue;
+                VillageWorkOrderModel.Order updated =
+                    VillageWorkOrderModel.transition(current, terminalState, level.getGameTime());
+                if (updated == null) return false;
+                orders.set(i, updated);
+                board.setDirty();
+                data.remove(ORDER_ID_KEY);
+                return true;
+            }
+        }
+        return false;
     }
 
     private static VillageWorkOrderModel.Order replace(
