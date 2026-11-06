@@ -298,6 +298,7 @@ public final class VillageLogistics {
             || data.getBoolean("livingvillages_defense_has_route")
             || data.getBoolean("livingvillages_autonomy_target_active")
             || data.getBoolean(VillagePopulation.ACTIVE_KEY)
+            || data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY)
             || data.getBoolean("livingvillages_industry_route_active")
             || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
             || data.getBoolean(VillageBuilder.ACTIVE_KEY)
