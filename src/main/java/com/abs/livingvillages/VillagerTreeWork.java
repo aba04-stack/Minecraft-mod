@@ -187,6 +187,7 @@ public final class VillagerTreeWork {
             && !data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
             && !data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
             && !data.getBoolean("livingvillages_logistics_active")
+            && !data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY)
             && !data.getBoolean("livingvillages_mining_active")
             && !data.getBoolean("livingvillages_defense_has_route");
         return roleAllowsForestWork
