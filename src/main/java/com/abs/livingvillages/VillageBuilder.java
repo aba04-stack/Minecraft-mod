@@ -238,6 +238,10 @@ public final class VillageBuilder {
             plankItem, PLANKS_REQUIRED, resolvedBed, 1, doorItem, 1);
         if (!VillageReservations.reserveStoragesForItems(level, builder.blockPosition(), builder, "house",
             materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) return false;
+        if (!VillageWorkOrders.startProject(level, center, "house", site, builder, materialBill)) {
+            VillageReservations.release(builder.getPersistentData(), "house");
+            return false;
+        }
         CompoundTag data = builder.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
         data.putInt(PHASE, FETCH_PLANKS);
@@ -294,6 +298,9 @@ public final class VillageBuilder {
         )) {
             return false;
         }
+        BlockPos resumedSite = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        if (!VillageWorkOrders.rebindOrphanedProject(
+            level, center, "house", resumedSite, replacement, !ownerAliveInVillage)) return false;
 
         CompoundTag data = replacement.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
@@ -359,7 +366,7 @@ public final class VillageBuilder {
             case FETCH_BED -> fetchRequiredItem(villager, level, data, getBedItem(data), 1, FETCH_DOOR);
             case FETCH_DOOR -> fetchRequiredItem(villager, level, data, getDoorItem(data), 1, BUILDING);
             case BUILDING -> buildNextStep(villager, level, data, site);
-            default -> clearProject(villager, data);
+            default -> clearProject(villager, data, false);
         }
     }
 
@@ -392,7 +399,7 @@ public final class VillageBuilder {
     private static void fetchRequiredItem(Villager villager, ServerLevel level, CompoundTag data,
                                           Item item, int requiredTotal, int nextPhase) {
         if (item == Items.AIR) {
-            clearProject(villager, data);
+            clearProject(villager, data, false);
             return;
         }
         SimpleContainer inventory = villager.getInventory();
@@ -472,7 +479,7 @@ public final class VillageBuilder {
             );
             level.sendParticles(ParticleTypes.HAPPY_VILLAGER, villager.getX(), villager.getY() + 1.0D,
                 villager.getZ(), 4, 0.25D, 0.25D, 0.25D, 0.0D);
-            clearProject(villager, data);
+            clearProject(villager, data, true);
             return;
         }
         long now = level.getGameTime();
@@ -740,7 +747,11 @@ public final class VillageBuilder {
         data.remove(ROUTE_STAND_X); data.remove(ROUTE_STAND_Y); data.remove(ROUTE_STAND_Z); data.remove(LAST_ROUTE);
     }
 
-    private static void clearProject(Villager villager, CompoundTag data) {
+    private static void clearProject(Villager villager, CompoundTag data, boolean completed) {
+        if (villager.level() instanceof ServerLevel level) {
+            if (completed) VillageWorkOrders.completeProject(level, villager);
+            else VillageWorkOrders.cancelProject(level, villager);
+        }
         clearOwnedRoute(villager, data);
         VillageReservations.release(data, "house");
         data.putBoolean(ACTIVE_KEY, false);
