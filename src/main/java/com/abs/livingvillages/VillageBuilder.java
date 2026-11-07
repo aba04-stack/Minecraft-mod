@@ -992,18 +992,25 @@ public final class VillageBuilder {
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
+        BlockPos villageCenter = projectVillageCenter(villager);
         for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-radius, -6, -radius), origin.offset(radius, 6, radius))) {
             if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                || !VillageRegistry.isStorageForVillage(level, villageCenter, pos)
                 || !VillageReservations.isStorageAvailable(level, pos, villager)) continue;
             if (!(level.getBlockEntity(pos) instanceof Container container) || countItem(container, item) <= 0) continue;
             candidates.add(pos.immutable());
         }
         candidates.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
+        String projectKind = "animal_pen".equals(villager.getPersistentData().getString(PROJECT_KIND))
+            ? "animal_pen" : "house";
         for (BlockPos storage : candidates) {
             for (Direction direction : HORIZONTAL) {
                 BlockPos stand = storage.relative(direction);
                 if (!isSafeStand(level, stand)) continue;
-                if (!VillageReservations.tryAddStorageReservation(level, villager, storage, "house")) break;
+                boolean reserved = "animal_pen".equals(projectKind)
+                    ? VillageReservations.tryAddStorageReservation(level, villager, storage, "animal_pen")
+                    : VillageReservations.tryAddStorageReservation(level, villager, storage, "house");
+                if (!reserved) break;
                 return new StorageTarget(storage, stand.immutable());
             }
         }
