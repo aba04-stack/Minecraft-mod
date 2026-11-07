@@ -2182,15 +2182,20 @@ public final class VillageReservationGameTests {
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
                 8, 0, 0, 0, 0, 0, 0, 0, false, 2));
         helper.assertTrue(
-            !treeless.needsWood() && treeless.desiredLumberjacks() == 0,
-            "A treeless settlement must not assign lumberjacks to a resource source that is not present.");
+            treeless.needsWood() && treeless.desiredLumberjacks() == 0,
+            "A treeless settlement must remember its unmet wood demand but must not assign a worker until a mature tree exists.");
+        var regrownForest = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 32, 0, 0, 0, 0, 0, 0, true, 2));
+        helper.assertTrue(regrownForest.needsWood() && regrownForest.desiredLumberjacks() == 2,
+            "When a real mature tree appears, the saved wood deficit must immediately request lumberjacks.");
 
         var desert = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
                 2, 32, 0, 0, 16, 0, 0, 24, false, 1));
         helper.assertTrue(desert.targetStoneUnits() == 96 && desert.needsStone()
-                && desert.desiredMiners() == 1 && !desert.needsWood(),
-            "A treeless desert village with a real pickaxe must keep one miner until it can quarry the full 96 sandstone blocks needed for one house.");
+                && desert.desiredMiners() == 1 && desert.needsWood() && desert.desiredLumberjacks() == 0,
+            "A treeless desert village must remember its wood deficit without assigning a lumberjack, while keeping one miner until it can quarry the 96 sandstone blocks needed for one house.");
         var desertHouseReady = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
                 2, 32, 96, 0, 16, 0, 0, 24, false, 1));
@@ -2598,6 +2603,10 @@ public final class VillageReservationGameTests {
             com.abs.livingvillages.domain.DailyLifeActivityModel.canAcceptSocialVisitor(0)
                 && !com.abs.livingvillages.domain.DailyLifeActivityModel.canAcceptSocialVisitor(1),
             "A resident may have at most one active social visitor to prevent crowding.");
+        helper.assertTrue(
+            com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisitInVillage(0)
+                && !com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisitInVillage(1),
+            "Only one social pair may be active in a village at a time.");
 
         boolean mustCancel = com.abs.livingvillages.domain.DailyLifeActivityModel.shouldCancelSocialVisit(
             true, true, false, false, false, false);
