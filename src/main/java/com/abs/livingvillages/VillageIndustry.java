@@ -1,5 +1,6 @@
 package com.abs.livingvillages;
 
+import com.abs.livingvillages.domain.VillageResourceDemandModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -684,7 +685,7 @@ public final class VillageIndustry {
             ServerLevel level, BlockPos center, List<Villager> villagers, List<StorageRef> storages) {
         if (!LivingVillagesConfig.ENABLE_DESERT_STARTER_KIT.get()
             || level == null || center == null || villagers == null
-            || !level.getBiome(center).is(BiomeTags.IS_DESERT)
+            || !level.getBiome(center).is(BiomeTags.HAS_VILLAGE_DESERT)
             || villagers.stream().filter(v -> v != null && v.isAlive() && !v.isBaby()).count()
                 < LivingVillagesConfig.MINIMUM_VILLAGERS.get()
             || VillageRegistry.hasDesertStarterKit(level, center)) return false;
@@ -833,7 +834,7 @@ public final class VillageIndustry {
                 + LivingVillagesConfig.MINIMUM_VILLAGERS.get() + ".";
         }
         if (LivingVillagesConfig.ENABLE_DESERT_STARTER_KIT.get()
-            && level.getBiome(center).is(BiomeTags.IS_DESERT)
+            && level.getBiome(center).is(BiomeTags.HAS_VILLAGE_DESERT)
             && !VillageResourcePlanner.getPlan(level, center, residents).treesAvailable()
             && !VillageRegistry.hasDesertStarterKit(level, center)) {
             return "Пустынный старт: готовится одноразовый склад с ресурсами, киркой и комплектом первой фермы.";
