@@ -259,6 +259,15 @@ public final class VillageLivestock {
                     || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.IN_PROGRESS));
     }
 
+    /** Crafting must stop once the builder has claimed the fully supplied pen order. */
+    public static boolean hasCraftablePenOrder(ServerLevel level, BlockPos center) {
+        return VillageWorkOrders.list(level, center, level.getGameTime()).stream().anyMatch(order ->
+            "animal_pen".equals(order.kind())
+                && (order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.OPEN
+                    || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.WAITING_FOR_RESOURCES
+                    || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.READY));
+    }
+
     public static Item pendingPenFenceItem(ServerLevel level, BlockPos center) {
         return pendingPenRequirement(level, center, true);
     }
