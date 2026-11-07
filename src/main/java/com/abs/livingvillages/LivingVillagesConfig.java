@@ -41,6 +41,7 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.IntValue MAX_AI_CHECKS_PER_TICK;
     public static final ModConfigSpec.BooleanValue ENABLE_ANIMAL_BEHAVIOR;
     public static final ModConfigSpec.BooleanValue ENABLE_DAILY_LIFE;
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_LIVESTOCK;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -219,6 +220,11 @@ public final class LivingVillagesConfig {
             .comment("Короткие социальные визиты взрослых жителей в свободное время. Не заменяет ванильное расписание и рабочие задачи.")
             .translation("livingvillages.config.enable_daily_life")
             .define("enable_daily_life", true);
+
+        ENABLE_VILLAGE_LIVESTOCK = builder
+            .comment("Разрешить животноводу собирать настоящую шерсть с явно закреплённых за деревней овец в закрытых загонах для строительства кроватей. Требуются реальные ножницы.")
+            .translation("livingvillages.config.enable_village_livestock")
+            .define("enable_village_livestock", true);
 
         SPEC = builder.build();
     }
