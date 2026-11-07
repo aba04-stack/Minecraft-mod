@@ -73,6 +73,8 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillagerTreeWork::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerMining::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageDefense::onVillagerTick);
+        // Patrol lighting must observe the guard's current-tick combat/retreat decision.
+        NeoForge.EVENT_BUS.addListener(VillagerCaveSupport::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageIndustry::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageCraftingJobs::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageLogistics::onVillagerTick);
