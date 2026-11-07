@@ -74,7 +74,7 @@ public final class LivingVillagesConfig {
             .define("enable_farm_projects", true);
 
         ENABLE_DESERT_STARTER_KIT = builder
-            .comment("Один раз выдаёт ограниченный стартовый запас деревне в пустыне без деревьев. Набор не пополняется после выдачи.")
+            .comment("Один раз выдаёт ограниченный стартовый запас пустынной деревне при нехватке ресурсов. Набор не пополняется после выдачи.")
             .translation("livingvillages.config.enable_desert_starter_kit")
             .define("enable_desert_starter_kit", true);
 
