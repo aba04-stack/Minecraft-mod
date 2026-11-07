@@ -8,6 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.Container;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.memory.WalkTarget;
 import net.minecraft.world.entity.LivingEntity;
@@ -969,7 +970,7 @@ public final class VillageLivestock {
 
     private static boolean equipWheatFromInventory(Villager villager) {
         if (hasWheatInHand(villager)) return true;
-        Container inventory = villager.getInventory();
+        SimpleContainer inventory = villager.getInventory();
         if (countItem(inventory, Items.WHEAT) <= 0) return false;
 
         // A carried item may already occupy the hand. Move that exact stack into the
