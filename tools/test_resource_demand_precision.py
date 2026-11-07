@@ -7,6 +7,7 @@ paged elder summary that exposes those deficits to the player.
 """
 from pathlib import Path
 import json
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 JAVA = ROOT / "src/main/java/com/abs/livingvillages"
@@ -144,5 +145,36 @@ for name, key_set in keys.items():
     assert "livingvillages.elder.notice_page" in key_set, f"{name} must translate the summary page indicator"
 assert len({frozenset(value) for value in keys.values()}) == 1, "translation key sets must stay identical"
 
+# 9. In-world coverage: a real chest, a real furnace, a real tree and a real order on the board.
+assert "plannerMeasuresRealFuelSaplingsAndSubtractsReservedOrderMaterials" in GAME_TESTS
+assert 'timeoutTicks = 40, batch = "resource_demand_precision"' in GAME_TESTS
+for marker in (
+    "stocked.freeWoodUnits() == 256 && !stocked.needsWood()",
+    "stocked.needsFuel() && !stocked.needsSaplings()",
+    "!fueled.needsFuel() && !fueled.needsIron() && fueled.freeWoodUnits() == 256",
+    "bareForest.treesAvailable() && bareForest.needsSaplings()",
+    "regenerating.treesAvailable() && !regenerating.needsSaplings()",
+    "committed.freeWoodUnits() == 56 && committed.needsWood()",
+    'VillageWorkOrders.enqueue(helper.getLevel(), center, "house", "house", 55, now, 10000L,',
+    "VillageWorkOrderModel.Requirement(\"minecraft:oak_planks\", 200)",
+    "VillageResourcePlanner.invalidate(helper.getLevel(), center);",
+    "VillageRegistry.isStorageForVillage(helper.getLevel(), center, storage)",
+):
+    assert marker in GAME_TESTS, f"in-world planner test must pin the measured behaviour: {marker}"
+assert GAME_TESTS.count("VillageResourcePlanner.invalidate(helper.getLevel(), center);") >= 4, (
+    "every fixture change must refresh the cached plan through the new invalidation hook"
+)
+
+# 10. Gameplay code still never fabricates saplings; only the in-world fixture may place them.
+gameplay_sources = "\n".join(
+    path.read_text(encoding="utf-8") for path in JAVA.rglob("*.java")
+    if path.name != "VillageReservationGameTests.java"
+)
+assert not re.search(r"new ItemStack\(Items\.[A-Z_]*SAPLING", gameplay_sources), (
+    "gameplay sources must never instantiate saplings without a real input"
+)
+assert "REPLANT_VIRTUAL_SEED" not in gameplay_sources, "virtual sapling fallback must stay removed"
+
 print("RESOURCE DEMAND PRECISION PASSED: reservation-aware stock, fuel/iron/sapling deficits, "
-      "deficit-led miner steering, single-pass field scan, delivery-triggered refresh, paged elder summary")
+      "deficit-led miner steering, single-pass field scan, delivery-triggered refresh, paged elder summary, "
+      "in-world planner measurement")

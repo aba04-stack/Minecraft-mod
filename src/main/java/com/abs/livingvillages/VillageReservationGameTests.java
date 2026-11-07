@@ -2288,6 +2288,84 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 40, batch = "resource_demand_precision")
+    public static void plannerMeasuresRealFuelSaplingsAndSubtractsReservedOrderMaterials(GameTestHelper helper) {
+        for (int x = 0; x <= 12; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(6, 1, 1), Blocks.FURNACE);
+        BlockPos storage = helper.absolutePos(new BlockPos(5, 1, 1));
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        for (Villager villager : List.of(residentA, residentB)) villager.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        List<Villager> residents = List.of(residentA, residentB);
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), center, storage),
+            "The planner may only measure the settlement's own physical storage.");
+        helper.assertTrue(helper.getLevel().getBlockEntity(storage) instanceof Container,
+            "The fixture chest must be a real container before the planner can read it.");
+
+        Container chest = (Container) helper.getLevel().getBlockEntity(storage);
+        for (int slot = 0; slot < 4; slot++) chest.setItem(slot, new ItemStack(Items.OAK_PLANKS, 64));
+        chest.setChanged();
+
+        var stocked = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(stocked.freeWoodUnits() == 256 && !stocked.needsWood()
+                && stocked.needsFuel() && !stocked.needsSaplings(),
+            "A real chest of 256 planks must count as free wood, while a real furnace without coal stays a fuel deficit.");
+
+        chest.setItem(4, new ItemStack(Items.COAL, 8));
+        chest.setItem(5, new ItemStack(Items.RAW_IRON, 4));
+        chest.setChanged();
+        VillageResourcePlanner.invalidate(helper.getLevel(), center);
+        var fueled = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(!fueled.needsFuel() && !fueled.needsIron() && fueled.freeWoodUnits() == 256,
+            "Real coal and iron in the settlement chest must clear the concrete fuel and metal deficits.");
+
+        // A real tree makes the regeneration target measurable: no saplings means the forest dies out.
+        helper.setBlock(new BlockPos(9, 1, 1), Blocks.OAK_LOG);
+        helper.setBlock(new BlockPos(9, 2, 1), Blocks.OAK_LOG);
+        helper.setBlock(new BlockPos(9, 3, 1), Blocks.OAK_LOG);
+        helper.setBlock(new BlockPos(9, 4, 1), Blocks.OAK_LEAVES);
+        helper.setBlock(new BlockPos(10, 3, 1), Blocks.OAK_LEAVES);
+        helper.setBlock(new BlockPos(8, 3, 1), Blocks.OAK_LEAVES);
+        VillageResourcePlanner.invalidate(helper.getLevel(), center);
+        var bareForest = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(bareForest.treesAvailable() && bareForest.needsSaplings(),
+            "A standing real tree without stored saplings must expose the regeneration deficit.");
+
+        chest.setItem(6, new ItemStack(Items.OAK_SAPLING, bareForest.targetSaplings()));
+        chest.setChanged();
+        VillageResourcePlanner.invalidate(helper.getLevel(), center);
+        var regenerating = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(regenerating.treesAvailable() && !regenerating.needsSaplings(),
+            "Real saplings in the settlement chest must satisfy the regeneration target.");
+
+        // Committing the same planks to a real house order must reopen the wood deficit immediately.
+        long now = helper.getLevel().getGameTime();
+        var order = VillageWorkOrders.enqueue(helper.getLevel(), center, "house", "house", 55, now, 10000L,
+            List.of(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:oak_planks", 200)));
+        helper.assertTrue(order != null, "The persistent board must accept the real house order.");
+        helper.assertTrue(VillageWorkOrders.setState(helper.getLevel(), center, order.id(),
+                com.abs.livingvillages.domain.VillageWorkOrderModel.READY, now) != null,
+            "The house order must reach the reserved state before its materials count as committed.");
+        VillageResourcePlanner.invalidate(helper.getLevel(), center);
+        var committed = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(committed.freeWoodUnits() == 56 && committed.needsWood()
+                && !committed.needsFuel() && !committed.needsSaplings(),
+            "Materials committed to a real order must stop counting as free stock and reopen the wood deficit.");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "farm_expansion")
     public static void farmExpansionStopsWhenFoodOrAcreageTargetIsSatisfied(GameTestHelper helper) {
         helper.assertTrue(LivingVillages.shouldExpandFarm(true, 19, 8)

@@ -129,10 +129,17 @@ def main() -> int:
             errors.append(f"Java delimiter/literal check failed for {path.relative_to(ROOT)}: {exc}")
 
     java_sources = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "src/main/java").rglob("*.java"))
-    if "REPLANT_VIRTUAL_SEED" in java_sources or "REPLANT_SEED_RESERVE_DELAY" in java_sources:
-        errors.append("virtual sapling fallback still exists in Java sources")
-    if re.search(r"new ItemStack\(Items\.[A-Z_]*SAPLING", java_sources):
-        errors.append("source appears to instantiate saplings without a real input")
+    # Gameplay code must never fabricate saplings. The in-world GameTest file is excluded on purpose:
+    # it is a test fixture that has to place real item stacks into a world to exercise the rules.
+    gameplay_sources = "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in (ROOT / "src/main/java").rglob("*.java")
+        if p.name != "VillageReservationGameTests.java"
+    )
+    if "REPLANT_VIRTUAL_SEED" in gameplay_sources or "REPLANT_SEED_RESERVE_DELAY" in gameplay_sources:
+        errors.append("virtual sapling fallback still exists in gameplay sources")
+    if re.search(r"new ItemStack\(Items\.[A-Z_]*SAPLING", gameplay_sources):
+        errors.append("gameplay source appears to instantiate saplings without a real input")
     required_markers = {
         "real-item logistics": "class VillageLogistics",
         "resource-gated production": "class VillageIndustry",
@@ -306,7 +313,7 @@ def main() -> int:
     print("- translation JSON files valid")
     print("- Java comments/literals/delimiters balanced")
     print("- JDK compiler syntax parse passed (Minecraft/NeoForge symbols not resolved)")
-    print("- no virtual sapling generator found")
+    print("- no virtual sapling generator found in gameplay sources (in-world GameTest fixtures excluded)")
     print("- builder fixed-template material bill checked (96 planks + matching door + real bed)")
     print("- farm fixed-template material bill checked (24 crops + real water bucket, hoe and composter)")
     print("- farm crop/seed compatibility checked against explicit vanilla pairs")
