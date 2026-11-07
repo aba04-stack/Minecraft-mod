@@ -768,7 +768,8 @@ public final class VillageBuilder {
             || data.getBoolean(VillagePopulation.ACTIVE_KEY)
             || data.getBoolean("livingvillages_logistics_active")
             || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
-            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY);
+            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
+            || data.getBoolean(VillageLivestock.ACTIVE_KEY);
     }
 
     private static Item getPlankItem(CompoundTag data) {
