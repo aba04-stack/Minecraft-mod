@@ -138,7 +138,9 @@ public final class VillagerRoles {
                 case ROLE_BUILDER -> !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get() && !activeBuilderProject;
                 case ROLE_LUMBERJACK -> !LivingVillagesConfig.ENABLE_VILLAGER_TREE_WORK.get();
                 case ROLE_FARMER -> !LivingVillagesConfig.ENABLE_FARMER_STOCKPILING.get();
-                case ROLE_HERDER -> !LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get();
+                case ROLE_HERDER -> !LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+                    && !data.getBoolean(VillageLivestock.ACTIVE_KEY)
+                    && !data.getBoolean(VillageLivestock.PENDING_GATE_CLOSE_KEY);
                 default -> true;
             };
 
@@ -339,7 +341,8 @@ public final class VillagerRoles {
             case ROLE_FARMER -> data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
                 || data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY)
                 || data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY);
-            case ROLE_HERDER -> data.getBoolean(VillageLivestock.ACTIVE_KEY);
+            case ROLE_HERDER -> data.getBoolean(VillageLivestock.ACTIVE_KEY)
+                || data.getBoolean(VillageLivestock.PENDING_GATE_CLOSE_KEY);
             default -> false;
         };
     }
