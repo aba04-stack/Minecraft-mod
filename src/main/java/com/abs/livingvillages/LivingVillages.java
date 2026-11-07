@@ -425,7 +425,10 @@ public final class LivingVillages {
             : chooseCropPlan(containers);
         Item hoeItem = pendingRequirementItem(pendingFarm, VillageFarmBuilder::isHoeItem);
         if (hoeItem == Items.AIR) hoeItem = selectAvailableHoeItem(containers);
-        Item waterItem = VillageFarmBuilder.selectWaterSupplyItem(containers);
+        Item pinnedWaterItem = pendingRequirementItem(pendingFarm,
+            item -> item == Items.BUCKET || item == Items.WATER_BUCKET);
+        Item waterItem = pinnedWaterItem == Items.AIR
+            ? VillageFarmBuilder.selectWaterSupplyItem(containers) : pinnedWaterItem;
         if (hoeItem == Items.AIR) hoeItem = Items.WOODEN_HOE;
 
         VillageWorkOrderModel.Order recorded = VillageWorkOrders.recordPendingProjectRequirements(
