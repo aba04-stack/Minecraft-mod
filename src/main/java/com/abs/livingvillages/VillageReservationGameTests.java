@@ -2800,6 +2800,46 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "settlement_bootstrap")
+    public static void builderWaitsUntilAnActualHouseOrPenBillIsAvailable(GameTestHelper helper) {
+        helper.assertTrue(!VillagerRoles.shouldAssignBuilder(true, false, false, false)
+                && !VillagerRoles.shouldAssignBuilder(true, false, true, false)
+                && VillagerRoles.shouldAssignBuilder(true, true, false, false)
+                && VillagerRoles.shouldAssignBuilder(false, false, true, true),
+            "A builder role must not consume the only free worker before a real house or pen material bill is ready.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "settlement_bootstrap")
+    public static void villagerProfessionNameplatePreservesPlayerNameAndAddsSpecialistRole(GameTestHelper helper) {
+        Villager villager = helper.spawn(EntityType.VILLAGER, 2, 1, 2);
+        villager.setVillagerData(villager.getVillagerData()
+            .setProfession(net.minecraft.world.entity.npc.VillagerProfession.FARMER));
+        villager.setCustomName(net.minecraft.network.chat.Component.literal("Player's villager"));
+        villager.setCustomNameVisible(false);
+        villager.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_LUMBERJACK);
+
+        VillagerNameplates.refreshNameplate(villager);
+        String display = villager.getCustomName() == null ? "" : villager.getCustomName().getString();
+        helper.assertTrue(villager.isCustomNameVisible()
+                && display.contains("Player's villager")
+                && display.contains("Farmer")
+                && display.contains("Lumberjack"),
+            "The visible label must retain a custom name and add both the vanilla profession and specialist role. Actual: " + display);
+
+        villager.setCustomName(net.minecraft.network.chat.Component.literal("Renamed by player"));
+        villager.setCustomNameVisible(true);
+        VillagerNameplates.refreshNameplate(villager);
+        helper.assertTrue(villager.getCustomName().getString().contains("Renamed by player"),
+            "A later player rename must be adopted as the new base name instead of being overwritten.");
+
+        VillagerNameplates.restoreNameplate(villager);
+        helper.assertTrue(villager.getCustomName().getString().equals("Renamed by player")
+                && villager.isCustomNameVisible() && !VillagerNameplates.isManaged(villager),
+            "Disabling nameplates must restore the newest player name and visibility state.");
+        helper.succeed();
+    }
+
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;
