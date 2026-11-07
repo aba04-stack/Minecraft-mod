@@ -114,9 +114,9 @@ public final class VillagerRoles {
         boolean pendingQuarryDemand = VillageWorkOrders.pendingQuarryOutputItem(level, center) != Items.AIR;
         // A pending house bill must not send a lumberjack to an empty forest.
         // Keep the order pending, but assign extraction work only when a real mature tree exists.
-        int desiredLumberjacksForQueue = LivingVillagesConfig.ENABLE_VILLAGER_TREE_WORK.get()
-            && resourcePlan.treesAvailable()
-                ? Math.max(resourcePlan.desiredLumberjacks(), pendingWoodDemand ? 1 : 0) : 0;
+        int desiredLumberjacksForQueue = desiredLumberjackSlots(
+            LivingVillagesConfig.ENABLE_VILLAGER_TREE_WORK.get(),
+            resourcePlan.treesAvailable(), resourcePlan.desiredLumberjacks(), pendingWoodDemand);
         int desiredMinersForQueue = LivingVillagesConfig.ENABLE_MINER_ROLE.get() && availablePickaxes > 0
             ? Math.max(resourcePlan.desiredMiners(), pendingQuarryDemand ? 1 : 0) : 0;
         int desiredHerders = LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
@@ -295,6 +295,13 @@ public final class VillagerRoles {
         data.putInt(HOME_Y, home.getY());
         data.putInt(HOME_Z, home.getZ());
         VillageRegistry.recordDiagnostic(level, center, "Роли", "Назначена роль: " + role);
+    }
+
+    /** Pending log orders never create an assignment when the physical wood source is absent. */
+    static int desiredLumberjackSlots(boolean enabled, boolean treesAvailable,
+                                      int plannedWorkers, boolean pendingWoodDemand) {
+        if (!enabled || !treesAvailable) return 0;
+        return Math.max(Math.max(0, plannedWorkers), pendingWoodDemand ? 1 : 0);
     }
 
     /** A worker is not reserved as builder until a real house or pen bill is ready to be spent. */
