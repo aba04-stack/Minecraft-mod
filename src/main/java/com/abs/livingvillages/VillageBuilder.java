@@ -1090,8 +1090,11 @@ public final class VillageBuilder {
         }
         clearOwnedRoute(villager, data);
         String projectKind = data.getString(PROJECT_KIND);
-        if (projectKind.isBlank()) projectKind = "house";
-        VillageReservations.release(data, projectKind);
+        if ("animal_pen".equals(projectKind)) {
+            VillageReservations.release(data, "animal_pen");
+        } else {
+            VillageReservations.release(data, "house");
+        }
         data.putBoolean(ACTIVE_KEY, false);
         data.remove(PHASE); data.remove(PROJECT_KIND); data.remove(PLANK_ITEM); data.remove(DOOR_ITEM); data.remove(BED_ITEM);
         data.remove(FENCE_ITEM); data.remove(GATE_ITEM); data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);
