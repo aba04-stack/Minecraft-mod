@@ -20,7 +20,7 @@ WORKERS = {
 for filename, expected in WORKERS.items():
     path = ROOT / "src/main/java/com/abs/livingvillages" / filename
     source = path.read_text(encoding="utf-8")
-    match = re.search(r"private\\s+static\\s+final\\s+float\\s+WALK_SPEED\\s*=\\s*([0-9.]+)F;", source)
+    match = re.search(r"private\s+static\s+final\s+float\s+WALK_SPEED\s*=\s*([0-9.]+)F;", source)
     assert match, f"{filename} must declare a WALK_SPEED constant"
     actual = float(match.group(1))
     assert abs(actual - expected) < 1e-6, (
