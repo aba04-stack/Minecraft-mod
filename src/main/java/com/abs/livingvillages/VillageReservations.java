@@ -231,7 +231,8 @@ public final class VillageReservations {
         }
 
         boolean taskActive = switch (data.getString(KIND)) {
-            case "house" -> data.getBoolean(VillageBuilder.ACTIVE_KEY);
+            case "house", "animal_pen" -> data.getBoolean(VillageBuilder.ACTIVE_KEY);
+            case "livestock" -> data.getBoolean(VillageLivestock.RESERVATION_ACTIVE_KEY);
             case "farm" -> data.getBoolean(VillageFarmBuilder.ACTIVE_KEY);
             case "crafting" -> data.getBoolean(VillageCraftingJobs.ACTIVE_KEY);
             case "food_delivery" -> data.getBoolean(VillagePopulation.ACTIVE_KEY);
