@@ -2163,6 +2163,52 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 40, batch = "farm_expansion")
+    public static void farmExpansionRequiresRealFoodShortageAndScalesToAdultPopulation(GameTestHelper helper) {
+        BlockPos stockedCenter = new BlockPos(2, 1, 2);
+        BlockPos hungryCenter = new BlockPos(28, 1, 2);
+        List<Villager> stockedResidents = new ArrayList<>();
+        List<Villager> hungryResidents = new ArrayList<>();
+        for (int index = 0; index < 8; index++) {
+            int x = index % 4;
+            int z = index / 4;
+            Villager stocked = helper.spawn(EntityType.VILLAGER, 1 + x, 1, 1 + z);
+            Villager hungry = helper.spawn(EntityType.VILLAGER, 27 + x, 1, 1 + z);
+            stockedResidents.add(stocked);
+            hungryResidents.add(hungry);
+        }
+        // Eight adults have a 64-point food target. Sixteen bread supply exactly that reserve.
+        stockedResidents.get(0).getInventory().addItem(new ItemStack(Items.BREAD, 16));
+
+        helper.assertTrue(!LivingVillages.shouldExpandFarm(
+                helper.getLevel(), stockedCenter, stockedResidents),
+            "A settlement at its real food reserve target must not build another field merely because farmland is below the acreage target.");
+        helper.assertTrue(LivingVillages.shouldExpandFarm(
+                helper.getLevel(), hungryCenter, hungryResidents),
+            "A settlement with eight adults, no food reserve, and insufficient farmland must request field expansion.");
+
+        for (Villager villager : stockedResidents) villager.discard();
+        for (Villager villager : hungryResidents) villager.discard();
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40, batch = "farm_expansion")
+    public static void farmlandFromNeighborSettlementDoesNotSatisfyThisVillagesFieldTarget(GameTestHelper helper) {
+        Villager resident = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        helper.spawn(EntityType.VILLAGER, 25, 1, 1);
+        BlockPos ownField = new BlockPos(3, 1, 1);
+        BlockPos neighborField = new BlockPos(26, 1, 1);
+        helper.setBlock(ownField.below(), Blocks.DIRT);
+        helper.setBlock(ownField, Blocks.FARMLAND);
+        helper.setBlock(neighborField.below(), Blocks.DIRT);
+        helper.setBlock(neighborField, Blocks.FARMLAND);
+
+        int counted = LivingVillages.countFarmland(helper.getLevel(), resident.blockPosition());
+        helper.assertTrue(counted == 1,
+            "Only farmland belonging to the resident group nearest to this settlement center may satisfy its field target; neighbor farmland must not be counted.");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "farmer_field_cycle")
     public static void farmerPlantsEmptyOwnedFarmlandFromRealSeedsInBoundedBatches(GameTestHelper helper) {
         BlockPos[] fields = {

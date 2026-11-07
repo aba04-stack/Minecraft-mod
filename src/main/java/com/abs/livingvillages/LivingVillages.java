@@ -194,7 +194,7 @@ public final class LivingVillages {
             int priority = VillageElder.priorityForVillagers(villagers);
             int beds = countBeds(level, villageCenter);
             boolean housingNeeded = villagers.size() >= beds;
-            boolean foodProductionNeeded = !hasEnoughFarmland(level, villageCenter, villagers.size());
+            boolean foodProductionNeeded = shouldExpandFarm(level, villageCenter, villagers);
 
             if (priority == VillageElder.PRIORITY_FOOD && foodProductionNeeded
                 && LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
@@ -586,26 +586,39 @@ public final class LivingVillages {
     }
 
     /**
-     * A fixed-size farm is enough for a tiny village, but growing settlements need
-     * additional fields. Four tilled blocks per villager is a conservative target;
-     * the planner adds a field only when total farmland drops below that target.
+     * Grow fields only when the settlement's measured food reserve is below its population-scaled
+     * target and the existing farmland capacity is too small. This prevents surplus villages from
+     * building fields forever just because their acreage is below the nominal target.
      */
-    private boolean hasEnoughFarmland(ServerLevel level, BlockPos center, int population) {
-        int requiredFarmland = Math.max(FARM_PRESENT_THRESHOLD, population * 4);
+    static boolean shouldExpandFarm(ServerLevel level, BlockPos center, List<Villager> residents) {
+        if (level == null || center == null || residents == null) return false;
+        int adults = (int) residents.stream().filter(v -> v != null && v.isAlive() && !v.isBaby()).count();
+        if (adults <= 1) return false;
+        return VillageResourcePlanner.getPlan(level, center, residents).needsFood()
+            && !hasEnoughFarmland(level, center, adults);
+    }
+
+    /**
+     * Keep the conservative acreage target at four farm blocks per adult, with a small-village
+     * floor. Only count loaded farmland that resolves to this settlement's nearest resident group;
+     * another nearby village's fields must not suppress this village's food-development plan.
+     */
+    static boolean hasEnoughFarmland(ServerLevel level, BlockPos center, int adultPopulation) {
+        int requiredFarmland = Math.max(FARM_PRESENT_THRESHOLD, adultPopulation * 4);
         return countFarmland(level, center) >= requiredFarmland;
     }
 
-    private int countFarmland(ServerLevel level, BlockPos center) {
+    static int countFarmland(ServerLevel level, BlockPos center) {
         int count = 0;
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
+        // Farm projects search no farther than 28 blocks from the village center. Include that
+        // complete reach even when the configured resident radius is smaller.
+        int radius = Math.max(28, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
         BlockPos min = center.offset(-radius, -8, -radius);
         BlockPos max = center.offset(radius, 8, radius);
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
-            // Never force-load distant chunks just to count farmland for an active village.
-            if (!level.hasChunkAt(pos)) continue;
-            if (level.getBlockState(pos).is(Blocks.FARMLAND)) {
-                count++;
-            }
+            // Never force-load terrain, and do not count a neighbor settlement's farmland.
+            if (!level.hasChunkAt(pos) || !level.getBlockState(pos).is(Blocks.FARMLAND)) continue;
+            if (VillageArea.isBlockInResidentGroup(level, center, pos)) count++;
         }
         return count;
     }
