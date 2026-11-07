@@ -318,7 +318,9 @@ public final class VillageLogistics {
         if (block != Blocks.AIR) {
             BlockState state = block.defaultBlockState();
             if (state.is(BlockTags.LOGS) || state.is(BlockTags.PLANKS) || state.is(BlockTags.SAPLINGS)
-                || state.is(BlockTags.WOOL) || VillageBuilder.isSupportedStructuralBlock(block)) return true;
+                || state.is(BlockTags.WOOL) || VillageBuilder.isSupportedStructuralBlock(block)
+                || block instanceof net.minecraft.world.level.block.FenceBlock
+                || block instanceof net.minecraft.world.level.block.FenceGateBlock) return true;
         }
         return (VillageBuilder.isSupportedBedItem(stack.getItem())
                 || Block.byItem(stack.getItem()) instanceof DoorBlock)
@@ -355,8 +357,8 @@ public final class VillageLogistics {
             || data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY)
             || data.getBoolean("livingvillages_industry_route_active")
             || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
-            || data.getBoolean(VillageBuilder.ACTIVE_KEY)
-            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY);
+            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
+            || data.getBoolean(VillageLivestock.ACTIVE_KEY);
     }
 
     private static boolean isNight(ServerLevel level) {

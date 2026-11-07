@@ -253,6 +253,32 @@ public final class VillageReservationGameTests {
         helper.assertTrue(VillageReservations.isStorageAvailable(
             helper.getLevel(), chest, owner),
             "The seed storage reservation must be released when seed fetching ends.");
+
+        // Builder-built animal pens use their own reservation kind and must keep it alive.
+        owner.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, true);
+        helper.assertTrue(VillageReservations.tryReserveStoragePositions(
+            helper.getLevel(), owner, List.of(chest), "animal_pen"),
+            "A builder must be able to reserve materials for a livestock pen.");
+        helper.assertTrue(!VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "A pen-material claim must remain exclusive while the builder project is active.");
+        owner.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, false);
+        helper.assertTrue(VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "A pen-material claim must be released when the builder project ends.");
+
+        // The herder retains its chest during the real fetch/delivery route.
+        owner.getPersistentData().putBoolean(VillageLivestock.RESERVATION_ACTIVE_KEY, true);
+        helper.assertTrue(VillageReservations.tryReserveStoragePositions(
+            helper.getLevel(), owner, List.of(chest), "livestock"),
+            "A herder must be able to reserve the chest it is visiting.");
+        helper.assertTrue(!VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "A livestock route must keep its storage claim until the route ends.");
+        owner.getPersistentData().putBoolean(VillageLivestock.RESERVATION_ACTIVE_KEY, false);
+        helper.assertTrue(VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "The herder's claim must be released when its storage route ends.");
         helper.succeed();
     }
 
@@ -624,6 +650,24 @@ public final class VillageReservationGameTests {
 
         BlockPos centerOne = helper.absolutePos(new BlockPos(2, 1, 1));
         BlockPos centerTwo = helper.absolutePos(new BlockPos(26, 1, 1));
+        List<Villager> firstResidentGroup = VillageArea.findVillagers(helper.getLevel(), centerOne, 32, 32);
+        List<Villager> secondResidentGroup = VillageArea.findVillagers(helper.getLevel(), centerTwo, 32, 32);
+        helper.assertTrue(firstResidentGroup.size() == 2 && secondResidentGroup.size() == 2,
+            "The two test HOME clusters must each resolve to exactly their own residents (first="
+                + firstResidentGroup.size() + ", second=" + secondResidentGroup.size() + ").");
+
+        java.util.UUID villageOneId = VillageRegistry.villageId(helper.getLevel(), centerOne);
+        java.util.UUID villageTwoId = VillageRegistry.villageId(helper.getLevel(), centerTwo);
+        helper.assertTrue(villageOneId != null && villageTwoId != null && !villageOneId.equals(villageTwoId),
+            "The two disjoint HOME clusters must resolve to distinct identities (first=" + villageOneId
+                + ", second=" + villageTwoId + ", firstGroup="
+                + firstResidentGroup.stream().map(v -> v.getUUID().toString()).toList()
+                + ", secondGroup=" + secondResidentGroup.stream().map(v -> v.getUUID().toString()).toList() + ").");
+        helper.assertTrue(VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerOne, storageOne)
+                && VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerTwo, storageTwo)
+                && !VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerOne, storageTwo)
+                && !VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerTwo, storageOne),
+            "A worker must resolve only the physical storage nearest to its own resident cluster.");
         helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerOne, storageOne),
             "The first chest must be owned by village one.");
         helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerTwo, storageTwo),
@@ -2507,6 +2551,154 @@ public final class VillageReservationGameTests {
             com.abs.livingvillages.domain.DailyLifeActivityModel.nextAttemptTick(1000L, true) == 3400L
                 && com.abs.livingvillages.domain.DailyLifeActivityModel.nextAttemptTick(1000L, false) == 1400L,
             "Successful visits and failed routes must use separate bounded cooldowns.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void livestockPenBlueprintAndCraftingRecipesUseVanillaMaterials(GameTestHelper helper) {
+        helper.assertTrue(VillageBuilder.hasValidLivestockPenBlueprint(),
+            "The builder blueprint must contain exactly 15 matching fences and one closed gate placed last.");
+        helper.assertTrue(VillageCraftingJobs.hasValidLivestockPenRecipes(),
+            "Fence, gate and shears recipes must use the exact vanilla material costs and outputs.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void villageHerdingPenOwnsItsInteriorAndShearsRealWool(GameTestHelper helper) {
+        BlockPos site = helper.absolutePos(new BlockPos(3, 1, 3));
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                helper.getLevel().setBlock(site.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), 3);
+                if (dx == 0 || dx == 4 || dz == 0 || dz == 4) {
+                    BlockPos boundary = site.offset(dx, 0, dz);
+                    if (dx == 2 && dz == 0) {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE_GATE.defaultBlockState()
+                            .setValue(net.minecraft.world.level.block.FenceGateBlock.OPEN, false), 3);
+                    } else {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE.defaultBlockState(), 3);
+                    }
+                } else {
+                    helper.getLevel().setBlock(site.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), 3);
+                }
+                helper.getLevel().setBlock(site.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), 3);
+            }
+        }
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        residentA.setNoAi(true);
+        residentB.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(1, 1, 1))));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(2, 1, 1))));
+
+        BlockPos villageCenter = helper.absolutePos(new BlockPos(2, 1, 1));
+        java.util.UUID villageId = VillageRegistry.villageId(helper.getLevel(), villageCenter);
+        helper.assertTrue(villageId != null, "A village identity must exist before the pen can own livestock.");
+        VillageRegistry.recordLivestockPenCheckpoint(helper.getLevel(), villageCenter,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "animal_pen", site.getX(), site.getY(), site.getZ(),
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(Items.OAK_FENCE).toString(),
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(Items.OAK_FENCE_GATE).toString(),
+                16, 16, "livestock-test-builder", helper.getLevel().getGameTime()));
+
+        net.minecraft.world.entity.animal.Sheep inside = helper.spawn(EntityType.SHEEP, 5, 1, 5);
+        net.minecraft.world.entity.animal.Sheep outside = helper.spawn(EntityType.SHEEP, 10, 1, 5);
+        inside.setNoAi(true);
+        outside.setNoAi(true);
+        inside.getPersistentData().putString(VillageLivestock.SHEEP_OWNER_KEY, villageId.toString());
+        outside.getPersistentData().putString(VillageLivestock.SHEEP_OWNER_KEY, villageId.toString());
+
+        helper.assertTrue(VillageLivestock.hasCompletePen(helper.getLevel(), villageCenter)
+                && VillageLivestock.isInsideVillagePen(helper.getLevel(), villageCenter, inside)
+                && !VillageLivestock.isInsideVillagePen(helper.getLevel(), villageCenter, outside),
+            "Only animals physically within the complete settlement pen count as village livestock.");
+
+        net.minecraft.world.entity.animal.Sheep unherded = helper.spawn(EntityType.SHEEP, 6, 1, 6);
+        unherded.setNoAi(true);
+        helper.assertTrue(!VillageLivestock.claimSheepAfterHerding(helper.getLevel(), villageCenter, unherded)
+                && unherded.getPersistentData().getString(VillageLivestock.SHEEP_OWNER_KEY).isBlank(),
+            "A sheep that merely appears inside the village pen must not be adopted without a recent wheat-lure record.");
+
+        unherded.getPersistentData().putString(VillageLivestock.SHEEP_LURE_OWNER, villageId.toString());
+        unherded.getPersistentData().putLong(VillageLivestock.SHEEP_LAST_LURE_TICK, helper.getLevel().getGameTime());
+        helper.assertTrue(VillageLivestock.claimSheepAfterHerding(helper.getLevel(), villageCenter, unherded)
+                && villageId.toString().equals(unherded.getPersistentData().getString(VillageLivestock.SHEEP_OWNER_KEY)),
+            "An unowned sheep may become village livestock after its own herder recently lured it into the pen.");
+
+        net.minecraft.world.entity.animal.Sheep named = helper.spawn(EntityType.SHEEP, 4, 1, 6);
+        named.setNoAi(true);
+        named.setCustomName(net.minecraft.network.chat.Component.literal("Player sheep"));
+        named.getPersistentData().putString(VillageLivestock.SHEEP_LURE_OWNER, villageId.toString());
+        named.getPersistentData().putLong(VillageLivestock.SHEEP_LAST_LURE_TICK, helper.getLevel().getGameTime());
+        helper.assertTrue(!VillageLivestock.claimSheepAfterHerding(helper.getLevel(), villageCenter, named)
+                && named.getPersistentData().getString(VillageLivestock.SHEEP_OWNER_KEY).isBlank(),
+            "A player-named sheep must never be adopted automatically, even inside the village pen.");
+
+        ItemStack shears = new ItemStack(Items.SHEARS);
+        helper.assertTrue(VillageLivestock.shearManagedSheep(helper.getLevel(), inside, shears, villageCenter)
+                && inside.isSheared() && shears.getDamageValue() > 0,
+            "Shearing must call Minecraft's real sheep interaction and damage the real shears.");
+        helper.assertTrue(!VillageLivestock.shearManagedSheep(helper.getLevel(), outside, shears, villageCenter)
+                && !outside.isSheared(),
+            "A village must never shear an owned animal outside its own pen.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void herderDoesNotLureSheepOutOfAnExistingPlayerPen(GameTestHelper helper) {
+        BlockPos site = helper.absolutePos(new BlockPos(3, 1, 3));
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                BlockPos floor = site.offset(dx, -1, dz);
+                helper.getLevel().setBlock(floor, Blocks.STONE.defaultBlockState(), 3);
+                if (dx == 0 || dx == 4 || dz == 0 || dz == 4) {
+                    BlockPos boundary = site.offset(dx, 0, dz);
+                    if (dx == 2 && dz == 0) {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE_GATE.defaultBlockState()
+                            .setValue(net.minecraft.world.level.block.FenceGateBlock.OPEN, true), 3);
+                    } else {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE.defaultBlockState(), 3);
+                    }
+                } else {
+                    helper.getLevel().setBlock(site.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), 3);
+                }
+                helper.getLevel().setBlock(site.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), 3);
+            }
+        }
+
+        net.minecraft.world.entity.animal.Sheep penned = helper.spawn(EntityType.SHEEP, 5, 1, 5);
+        net.minecraft.world.entity.animal.Sheep wild = helper.spawn(EntityType.SHEEP, 10, 1, 5);
+        penned.setNoAi(true);
+        wild.setNoAi(true);
+        helper.assertTrue(VillageLivestock.isInsideExistingFencePen(helper.getLevel(), penned),
+            "An animal already inside a fenced pen must not be lured away even if its gate is open.");
+        helper.assertTrue(!VillageLivestock.isInsideExistingFencePen(helper.getLevel(), wild),
+            "An unpenned sheep outside the enclosure must remain eligible for herding.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void herderUsesWheatOnlyForItsSelectedSheep(GameTestHelper helper) {
+        Villager herder = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        net.minecraft.world.entity.animal.Sheep target = helper.spawn(EntityType.SHEEP, 3, 1, 1);
+        net.minecraft.world.entity.animal.Sheep bystander = helper.spawn(EntityType.SHEEP, 4, 1, 1);
+        herder.setNoAi(true);
+        herder.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_HERDER);
+        herder.getPersistentData().putBoolean(VillageLivestock.ACTIVE_KEY, true);
+        herder.getPersistentData().putInt(VillageLivestock.STATE, VillageLivestock.STATE_HERD_APPROACH);
+        herder.getPersistentData().putString(VillageLivestock.TARGET_SHEEP, target.getUUID().toString());
+        herder.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, new ItemStack(Items.WHEAT));
+
+        helper.assertTrue(VillageLivestock.isCurrentHerdTarget(herder, target),
+            "The selected sheep must follow the active herder carrying real wheat.");
+        helper.assertTrue(!VillageLivestock.isCurrentHerdTarget(herder, bystander),
+            "Nearby sheep must not be attracted unless they are the selected herd target.");
+
+        herder.getPersistentData().putInt(VillageLivestock.STATE, 0);
+        helper.assertTrue(!VillageLivestock.isCurrentHerdTarget(herder, target),
+            "A herder outside an active herding phase must not attract sheep.");
         helper.succeed();
     }
 

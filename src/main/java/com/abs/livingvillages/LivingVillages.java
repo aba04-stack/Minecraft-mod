@@ -81,8 +81,11 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillageBuilder::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageFarmBuilder::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagePopulation::onVillagerTick);
+        NeoForge.EVENT_BUS.addListener(VillageLivestock::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageMonsterAI::onEntityTick);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalTick);
+        // Sheep attraction runs after vanilla/mod behavior so the herder's wheat route wins this tick.
+        NeoForge.EVENT_BUS.addListener(VillageLivestock::onAnimalTick);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalDamaged);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onBabySpawn);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalInteract);
@@ -132,11 +135,15 @@ public final class LivingVillages {
             }
 
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
+            VillageLivestock.maintainPenGate(level, villageCenter);
             long tickStartNanos = System.nanoTime();
             VillageRegistry.recordVisitAndRunCatchUp(level, villageCenter, level.getGameTime());
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) {
                 VillageBuilder.tryResumeOrphanedHouseProject(level, villageCenter);
+                if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()) {
+                    VillageBuilder.tryResumeOrphanedLivestockPenProject(level, villageCenter);
+                }
             }
             if (LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
                 VillageFarmBuilder.tryResumeOrphanedFarmProject(level, villageCenter);
@@ -152,6 +159,16 @@ public final class LivingVillages {
             }
 
             int request = VillageElder.pendingRequest(villagers);
+            if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+                && (request == VillageElder.REQUEST_HOUSE || VillageElder.isAutomationEnabled(villagers))) {
+                VillageLivestock.ensurePenWorkOrder(level, villageCenter);
+                if (VillageLivestock.needsPen(level, villageCenter)
+                    && VillageLivestock.tryStartPenProject(level, villageCenter)) {
+                    VillageRegistry.recordDiagnostic(level, villageCenter, "Планировщик",
+                        "Сначала строится загон: после этого животновод приведёт овец на пшеницу.");
+                    continue;
+                }
+            }
             if (request == VillageElder.REQUEST_HOUSE && LivingVillagesConfig.ENABLE_HOUSING_PROJECTS.get()) {
                 BuildResult result = tryBuild(level, villageCenter, true);
                 if (result.success()) {
@@ -189,6 +206,11 @@ public final class LivingVillages {
             }
 
             if (housingNeeded && LivingVillagesConfig.ENABLE_HOUSING_PROJECTS.get()) {
+                if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()) {
+                    VillageLivestock.ensurePenWorkOrder(level, villageCenter);
+                    if (VillageLivestock.needsPen(level, villageCenter)
+                        && VillageLivestock.tryStartPenProject(level, villageCenter)) continue;
+                }
                 BuildResult result = tryBuild(level, villageCenter);
                 if (result.success()) {
                     LOGGER.info("Living Villages assigned a builder to construct a house at {}.", result.position());
@@ -216,9 +238,13 @@ public final class LivingVillages {
             if (villagers.isEmpty() || isDuplicateArea(alreadyChecked, level, villagers)) continue;
             rememberActiveArea(alreadyChecked, level, villagers);
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
+            VillageLivestock.maintainPenGate(level, villageCenter);
             VillageRegistry.cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers)) {
+                if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()) {
+                    VillageLivestock.ensurePenWorkOrder(level, villageCenter);
+                }
                 VillagerRoles.assignRoles(level, villageCenter);
             } else {
                 // Paused villages keep existing assignments but do not create new jobs.
@@ -288,10 +314,20 @@ public final class LivingVillages {
         BlockPos villageCenter = averageVillagerPosition(villagers, center);
         VillageRegistry.cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         VillageElder.ensureElder(level, villageCenter, villagers);
+        if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+            && LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) {
+            VillageBuilder.tryResumeOrphanedLivestockPenProject(level, villageCenter);
+        }
         if (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers)) {
             VillagerRoles.assignRoles(level, villageCenter);
             VillagePopulation.tickArea(level, villageCenter, villagers);
             VillageIndustry.tickArea(level, villageCenter);
+        }
+        if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+            && (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers))) {
+            VillageLivestock.ensurePenWorkOrder(level, villageCenter);
+            if (VillageLivestock.needsPen(level, villageCenter)
+                && VillageLivestock.tryStartPenProject(level, villageCenter)) return;
         }
         if (villagers.size() < LivingVillagesConfig.MINIMUM_VILLAGERS.get()) return;
         if (villagers.stream().anyMatch(v -> v.getPersistentData().getBoolean(VillageCraftingJobs.ACTIVE_KEY)

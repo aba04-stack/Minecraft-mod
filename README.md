@@ -1,6 +1,6 @@
-# Living Civilization (`Living Villages 0.15.0`)
+# Living Civilization (`Living Villages 0.16.0`)
 
-**Current version:** `0.15.0`  
+**Current feature-branch version:** `0.16.0` (draft PR #7; `main` remains on `0.15.0` until merge)  
 **Target game:** Minecraft Java Edition `1.21.1`  
 **Mod loader:** NeoForge `21.1.264` (`net.neoforged.moddev 2.0.148`, Parchment `2024.11.17`)  
 **Java:** `21` · **Gradle:** `9.2.1` (checksum-verified bootstrap)
@@ -13,6 +13,7 @@
 
 ## Статус сборки и проверок
 
+- **Feature branch 0.16.0 — PR #7 (draft):** added material-backed sheep pens built by builders, wheat-led sheep herding, real shearing and wool delivery. The verified code snapshot `dad65da70d78f36bab0a2756eb9e1a35142a05da` passed [CI #416](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42363241908): 43/43 GameTests, Gradle build, dedicated-server and client software-OpenGL smoke tests. The CI artifact is not a published GitHub Release; ordinary-survival herding still requires field validation. [Open PR #7](https://github.com/aba04-stack/Minecraft-mod/pull/7).
 - **Конфигурация `Minecraft 1.21.1 + NeoForge 21.1.264 + Java 21`:**
   - В GitHub Actions подтверждены: статическая валидация (`python3 tools/validate_project.py`), синтаксический разбор (`JavaSyntaxCheck`), полная сборка `./gradlew build`, внутриигровые тесты `./gradlew runGameTestServer`, smoke-test выделенного сервера (`runServer`) и headless smoke-test экрана старосты (`ElderScreen` в окне `427×240` под Xvfb/Mesa).
   - Интеграция PR #6 уже объединена в `main` (merge commit `c742873e8b0e74223fefbe01f69783ab86052c44`). Проверенный исходный commit прошёл [CI #402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349): 40/40 GameTests, dedicated server и client software-OpenGL smoke-tests. JAR доступен как [CI-артефакт](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349/artifacts/13567479833); GitHub Release не публиковался.
@@ -37,6 +38,7 @@
 - **Поддержка естественного размножения (`VillagePopulation` — `IMPLEMENTED`):** физический курьер доставляет еду сверх резерва наиболее голодным взрослым при наличии свободной кровати; рождение остаётся ванильным.
 - **Староста деревни и панель управления (`VillageElder`, `LivingVillagesClient` — `IMPLEMENTED`, верстка проверена в headless smoke-test):** выбор старосты с сохранением ванильной профессии, открытие GUI по ПКМ пустой рукой, серверная валидация сетевых пакетов `ElderAction`, переключение приоритетов и заказы дома/фермы.
 - **Базовая стража и личность жителей (`VillageDefense`, `VillagerSoul`, `VillagerRoles` — `IMPLEMENTED`):** экипировка реальным оружием/бронёй со склада, ближний бой и отступление при ранении; имена, 6 характеров, настроение, память подарков и обид.
+- **Овцеводство и снабжение шерстью (`VillageLivestock`, `VillageBuilder`, `VillageCraftingJobs` — `TESTED` в CI/GameTest):** строитель возводит отдельный загон из 15 реальных оград и калитки, животновод приводит овец на настоящую пшеницу, стрижёт принадлежащих деревне овец настоящими ножницами и относит шерсть на склад. Защита не выманивает животных из уже огороженных загонов; обычный survival-маршрут остаётся полевым тестом.
 
 ### Новые архитектурные и геймплейные подсистемы Living Civilization (реализованы и проверены в CI / GameTest)
 

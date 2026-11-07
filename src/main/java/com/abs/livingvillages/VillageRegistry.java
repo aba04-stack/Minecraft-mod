@@ -61,6 +61,7 @@ public final class VillageRegistry extends SavedData {
     private final Map<Long, UUID> bedOwners = new HashMap<>();
     private final Map<Long, UUID> workBlockOwners = new HashMap<>();
     private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> houseCheckpoints = new HashMap<>();
+    private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> livestockPenCheckpoints = new HashMap<>();
     private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> farmCheckpoints = new HashMap<>();
     private final Map<UUID, Long> villageAlarms = new HashMap<>();
     private final Map<String, Integer> diplomaticStandings = new HashMap<>();
@@ -121,12 +122,13 @@ public final class VillageRegistry extends SavedData {
 
         List<Villager> residents = VillageArea.findVillagers(level, center,
             LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get(), 32);
-        UUID result = residents.isEmpty() ? null : resolveOrCreateId(level, center, residents);
+        UUID result = residents.isEmpty() ? null : resolveOrCreateId(level, center, residents, cache);
         cache.ids.put(centerKey, new CachedId(result));
         return result;
     }
 
-    private static UUID resolveOrCreateId(ServerLevel level, BlockPos center, List<Villager> residents) {
+    private static UUID resolveOrCreateId(ServerLevel level, BlockPos center, List<Villager> residents,
+                                          IdentityCache cache) {
         List<BlockPos> homes = new ArrayList<>();
         Set<UUID> currentResidentIds = new HashSet<>();
         for (Villager villager : residents) {
@@ -210,6 +212,16 @@ public final class VillageRegistry extends SavedData {
             }
         }
 
+        // A single old SavedData identity can contain aliases from two settlements that were
+        // merged by an earlier proximity match. During the same server tick, do not reuse that
+        // identity for a second, disjoint HOME cluster. Split the current cluster away and detach
+        // its resident/history entries from the ambiguous old identity before persisting it.
+        if (bestId != null && cache.conflictsWithDifferentGroup(bestId, currentResidentIds, homes)) {
+            detachDisjointGroup(registry, bestId, currentResidentIds, homes);
+            bestId = null;
+            bestDistance = Long.MAX_VALUE;
+        }
+
         boolean changed = false;
         if (bestId == null) {
             bestId = UUID.randomUUID();
@@ -229,7 +241,33 @@ public final class VillageRegistry extends SavedData {
             if (savedResidents.add(residentId)) changed = true;
         }
         if (changed) registry.setDirty();
+        cache.remember(bestId, currentResidentIds, homes);
         return bestId;
+    }
+
+    private static void detachDisjointGroup(VillageRegistry registry, UUID oldId,
+                                            Set<UUID> currentResidents, List<BlockPos> currentHomes) {
+        Set<Long> aliases = registry.knownHomes.get(oldId);
+        boolean anchorRemoved = false;
+        if (aliases != null) {
+            for (BlockPos home : currentHomes) {
+                anchorRemoved |= registry.villageAnchors.get(oldId) != null
+                    && registry.villageAnchors.get(oldId).equals(home);
+                aliases.remove(home.asLong());
+            }
+        }
+        Set<UUID> members = registry.knownResidents.get(oldId);
+        if (members != null) members.removeAll(currentResidents);
+
+        if (anchorRemoved && aliases != null && !aliases.isEmpty()) {
+            BlockPos replacement = aliases.stream().map(BlockPos::of)
+                .min(Comparator.<BlockPos>comparingInt(BlockPos::getX)
+                    .thenComparingInt(BlockPos::getZ)
+                    .thenComparingInt(BlockPos::getY))
+                .orElse(null);
+            if (replacement != null) registry.villageAnchors.put(oldId, replacement);
+        }
+        registry.setDirty();
     }
 
     /** Claim a physical storage block for the persistent village selected around groupCenter. */
@@ -400,6 +438,18 @@ public final class VillageRegistry extends SavedData {
                 entry.getLong("updatedTick")
             ));
         }
+        ListTag livestockPenTags = tag.getList("livestockPenCheckpoints", Tag.TAG_COMPOUND);
+        for (int i = 0; i < livestockPenTags.size(); i++) {
+            CompoundTag entry = livestockPenTags.getCompound(i);
+            UUID id = parseUuid(entry.getString("village"));
+            if (id == null) continue;
+            data.livestockPenCheckpoints.put(id, new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "animal_pen", entry.getInt("siteX"), entry.getInt("siteY"), entry.getInt("siteZ"),
+                entry.getString("primaryMaterial"), entry.getString("secondaryMaterial"),
+                entry.getInt("stepIndex"), entry.getInt("totalSteps"),
+                entry.getString("ownerWorker"), entry.getLong("updatedTick")
+            ));
+        }
         ListTag farmCheckpointTags = tag.getList("farmCheckpoints", Tag.TAG_COMPOUND);
         for (int i = 0; i < farmCheckpointTags.size(); i++) {
             CompoundTag entry = farmCheckpointTags.getCompound(i);
@@ -510,6 +560,24 @@ public final class VillageRegistry extends SavedData {
             farmCheckpointTags.add(value);
         }
         tag.put("farmCheckpoints", farmCheckpointTags);
+        ListTag livestockPenTags = new ListTag();
+        for (Map.Entry<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> entry : livestockPenCheckpoints.entrySet()) {
+            var cp = entry.getValue();
+            if (cp == null) continue;
+            CompoundTag value = new CompoundTag();
+            value.putString("village", entry.getKey().toString());
+            value.putInt("siteX", cp.siteX());
+            value.putInt("siteY", cp.siteY());
+            value.putInt("siteZ", cp.siteZ());
+            value.putString("primaryMaterial", cp.primaryMaterialId());
+            value.putString("secondaryMaterial", cp.secondaryMaterialId());
+            value.putInt("stepIndex", cp.stepIndex());
+            value.putInt("totalSteps", cp.totalSteps());
+            value.putString("ownerWorker", cp.ownerWorkerId());
+            value.putLong("updatedTick", cp.updatedTick());
+            livestockPenTags.add(value);
+        }
+        tag.put("livestockPenCheckpoints", livestockPenTags);
         ListTag standingTags = new ListTag();
         for (Map.Entry<String, Integer> entry : diplomaticStandings.entrySet()) {
             CompoundTag value = new CompoundTag();
@@ -560,6 +628,38 @@ public final class VillageRegistry extends SavedData {
         UUID id = villageId(level, center);
         if (id == null) return null;
         return get(level).houseCheckpoints.get(id);
+    }
+
+    public static void recordLivestockPenCheckpoint(
+        ServerLevel level,
+        BlockPos center,
+        com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint checkpoint
+    ) {
+        if (level == null || center == null || checkpoint == null
+            || !"animal_pen".equals(checkpoint.projectKind())) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        VillageRegistry registry = get(level);
+        registry.livestockPenCheckpoints.put(id, checkpoint);
+        registry.setDirty();
+    }
+
+    public static void clearLivestockPenCheckpoint(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        VillageRegistry registry = get(level);
+        if (registry.livestockPenCheckpoints.remove(id) != null) registry.setDirty();
+    }
+
+    public static com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint getLivestockPenCheckpoint(
+        ServerLevel level,
+        BlockPos center
+    ) {
+        if (level == null || center == null) return null;
+        UUID id = villageId(level, center);
+        if (id == null) return null;
+        return get(level).livestockPenCheckpoints.get(id);
     }
 
     public static void recordFarmCheckpoint(
@@ -1204,8 +1304,54 @@ public final class VillageRegistry extends SavedData {
     private static final class IdentityCache {
         private final long gameTime;
         private final Map<Long, CachedId> ids = new HashMap<>();
+        private final Map<UUID, List<IdentitySignature>> groupsByVillage = new HashMap<>();
+
         private IdentityCache(long gameTime) { this.gameTime = gameTime; }
+
+        private boolean conflictsWithDifferentGroup(UUID villageId, Set<UUID> residentIds, List<BlockPos> homes) {
+            List<IdentitySignature> existingGroups = groupsByVillage.get(villageId);
+            if (existingGroups == null || existingGroups.isEmpty()) return false;
+            for (IdentitySignature existing : existingGroups) {
+                if (existing.overlapsResidents(residentIds) || existing.hasNearbyHome(homes, ID_MATCH_RADIUS_SQUARED)) {
+                    return false;
+                }
+            }
+            return !homes.isEmpty() && existingGroups.stream().anyMatch(group -> !group.homes().isEmpty());
+        }
+
+        private void remember(UUID villageId, Set<UUID> residentIds, List<BlockPos> homes) {
+            if (villageId == null) return;
+            List<IdentitySignature> groups = groupsByVillage.computeIfAbsent(villageId, ignored -> new ArrayList<>());
+            IdentitySignature signature = new IdentitySignature(Set.copyOf(residentIds), List.copyOf(homes));
+            boolean alreadyKnown = groups.stream().anyMatch(existing ->
+                existing.sameResidents(signature.residents()) || existing.sameHomes(signature.homes()));
+            if (!alreadyKnown) groups.add(signature);
+        }
     }
 
     private record CachedId(UUID id) {}
+    private record IdentitySignature(Set<UUID> residents, List<BlockPos> homes) {
+        private boolean overlapsResidents(Set<UUID> other) {
+            for (UUID resident : residents) if (other.contains(resident)) return true;
+            return false;
+        }
+
+        private boolean sameResidents(Set<UUID> other) {
+            return !residents.isEmpty() && residents.equals(other);
+        }
+
+        private boolean sameHomes(List<BlockPos> other) {
+            if (homes.isEmpty() || other.isEmpty()) return false;
+            return homes.containsAll(other) && other.containsAll(homes);
+        }
+
+        private boolean hasNearbyHome(List<BlockPos> other, int maxDistanceSquared) {
+            for (BlockPos first : homes) {
+                for (BlockPos second : other) {
+                    if (horizontalDistanceSquared(first, second) <= maxDistanceSquared) return true;
+                }
+            }
+            return false;
+        }
+    }
 }
