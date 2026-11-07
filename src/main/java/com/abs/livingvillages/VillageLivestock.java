@@ -942,13 +942,8 @@ public final class VillageLivestock {
         }
 
         ItemStack wheat = removeOne(inventory, Items.WHEAT);
-        if (wheat.isEmpty()) {
-            if (!held.isEmpty()) {
-                ItemStack restore = inventory.removeItem(inventory.getContainerSize() - 1, 0);
-                villager.setItemInHand(InteractionHand.MAIN_HAND, held);
-            }
-            return false;
-        }
+        // The previously held stack is already safely in inventory even if wheat vanished.
+        if (wheat.isEmpty()) return false;
         villager.setItemInHand(InteractionHand.MAIN_HAND, wheat);
         inventory.setChanged();
         return true;
