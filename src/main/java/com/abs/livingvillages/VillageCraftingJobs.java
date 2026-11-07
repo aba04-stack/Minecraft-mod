@@ -308,6 +308,14 @@ public final class VillageCraftingJobs {
             }
         }
 
+        // A queued farm may request a real empty bucket so a worker can refill it at a safe
+        // renewable water source. Never spend iron on buckets without an actual pending farm need.
+        if (hasPendingFarmBucketOrder(level, center)
+            && availableCount(storages, crafter, Items.BUCKET) == 0 && iron >= 3) {
+            return fixed("bucket", Items.BUCKET, 1,
+                List.of(new Ingredient(Items.IRON_INGOT, 3)));
+        }
+
         // Prepare a door in advance once the settlement has surplus planks or structural stone/sandstone.
         if (countAllDoors(storages, crafter) == 0) {
             Item doorPlanks = bestPlanks(storages, crafter, 6);
@@ -621,6 +629,23 @@ public final class VillageCraftingJobs {
             || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY);
     }
 
+    private static boolean hasPendingFarmBucketOrder(ServerLevel level, BlockPos center) {
+        return VillageWorkOrders.list(level, center, level.getGameTime()).stream().anyMatch(order ->
+            "farm".equals(order.kind())
+                && (order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.OPEN
+                    || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.WAITING_FOR_RESOURCES)
+                && order.requirements().stream().anyMatch(requirement -> requirement != null
+                    && "minecraft:bucket".equals(requirement.itemId())));
+    }
+
+    static boolean hasValidEmptyBucketRecipe() {
+        Recipe recipe = recipeFromId("bucket");
+        return recipe != null && recipe.output() == Items.BUCKET && recipe.outputCount() == 1
+            && recipe.inputs().size() == 1
+            && recipe.inputs().get(0).item() == Items.IRON_INGOT
+            && recipe.inputs().get(0).count() == 3;
+    }
+
     private static Recipe recipeFromId(String id) {
         if (id == null || id.isBlank()) return null;
         int separator = id.indexOf('|');
@@ -660,6 +685,7 @@ public final class VillageCraftingJobs {
             case "stone_hoe" -> fixed(id, Items.STONE_HOE, 1, List.of(new Ingredient(Items.COBBLESTONE, 2), new Ingredient(Items.STICK, 2)));
             case "stone_sword" -> fixed(id, Items.STONE_SWORD, 1, List.of(new Ingredient(Items.COBBLESTONE, 2), new Ingredient(Items.STICK, 1)));
             case "iron_sword" -> fixed(id, Items.IRON_SWORD, 1, List.of(new Ingredient(Items.IRON_INGOT, 2), new Ingredient(Items.STICK, 1)));
+            case "bucket" -> fixed(id, Items.BUCKET, 1, List.of(new Ingredient(Items.IRON_INGOT, 3)));
             default -> null;
         };
     }
