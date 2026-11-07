@@ -219,18 +219,21 @@ public final class VillageCraftingJobs {
             Item fence = VillageLivestock.pendingPenFenceItem(level, center);
             Item gate = VillageLivestock.pendingPenGateItem(level, center);
             Item penPlanks = VillageLivestock.pendingPenPlankItem(level, center);
-            if (fence != Items.AIR && gate != Items.AIR && penPlanks != Items.AIR) {
-                int fencesAvailable = availableCount(storages, crafter, fence);
-                int gatesAvailable = availableCount(storages, crafter, gate);
+            int fencesRequired = VillageLivestock.pendingPenFenceCount(level, center);
+            int gatesRequired = VillageLivestock.pendingPenGateCount(level, center);
+            if ((fencesRequired == 0 || fence != Items.AIR)
+                && (gatesRequired == 0 || gate != Items.AIR) && penPlanks != Items.AIR) {
+                int fencesAvailable = fence == Items.AIR ? 0 : availableCount(storages, crafter, fence);
+                int gatesAvailable = gate == Items.AIR ? 0 : availableCount(storages, crafter, gate);
                 int sticksAvailable = availableCount(storages, crafter, Items.STICK);
                 int planksAvailable = availableCount(storages, crafter, penPlanks);
-                if (fencesAvailable < 15) {
+                if (fencesAvailable < fencesRequired) {
                     if (sticksAvailable < 2) {
                         return planksAvailable >= 2 ? sticksRecipe(penPlanks) : null;
                     }
                     return planksAvailable >= 4 ? fenceRecipe(penPlanks) : null;
                 }
-                if (gatesAvailable < 1) {
+                if (gatesAvailable < gatesRequired) {
                     if (sticksAvailable < 4) {
                         return planksAvailable >= 2 ? sticksRecipe(penPlanks) : null;
                     }

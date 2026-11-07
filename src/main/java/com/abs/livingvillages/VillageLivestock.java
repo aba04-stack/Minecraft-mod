@@ -113,6 +113,65 @@ public final class VillageLivestock {
 
     public record PenMaterials(Item fenceItem, Item gateItem, Item plankItem) {}
 
+    public record PenRepairPlan(BlockPos site, Item fenceItem, Item gateItem,
+                                int missingFenceCount, int missingGateCount) {}
+
+    /** Returns a repair plan only for a previously completed and registered village pen. */
+    public static PenRepairPlan getPenRepairPlan(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return null;
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        if (checkpoint == null || !"animal_pen".equals(checkpoint.projectKind())
+            || checkpoint.totalSteps() != 16 || checkpoint.stepIndex() < checkpoint.totalSteps()
+            || hasCompletePen(level, center)) return null;
+        ResourceLocation fenceKey = ResourceLocation.tryParse(checkpoint.primaryMaterialId());
+        ResourceLocation gateKey = ResourceLocation.tryParse(checkpoint.secondaryMaterialId());
+        if (fenceKey == null || gateKey == null) return null;
+        Item fenceItem = BuiltInRegistries.ITEM.get(fenceKey);
+        Item gateItem = BuiltInRegistries.ITEM.get(gateKey);
+        Block fenceBlock = Block.byItem(fenceItem);
+        Block gateBlock = Block.byItem(gateItem);
+        if (!(fenceBlock instanceof FenceBlock) || !(gateBlock instanceof FenceGateBlock)) return null;
+
+        BlockPos site = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        BlockPos gatePos = site.offset(2, 0, 0);
+        int missingFences = 0;
+        int missingGate = 0;
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                if (dx != 0 && dx != 4 && dz != 0 && dz != 4) continue;
+                BlockPos pos = site.offset(dx, 0, dz);
+                if (!level.hasChunkAt(pos) || !level.hasChunkAt(pos.below())
+                    || !level.getBlockState(pos.below()).blocksMotion()) return null;
+                Block expected = pos.equals(gatePos) ? gateBlock : fenceBlock;
+                BlockState current = level.getBlockState(pos);
+                if (current.is(expected)) continue;
+                if (!VillageBuilder.isAirOrReplaceableVegetation(current)) return null;
+                if (pos.equals(gatePos)) missingGate++;
+                else missingFences++;
+            }
+        }
+        if (missingFences + missingGate == 0) return null;
+        return new PenRepairPlan(site, fenceItem, gateItem, missingFences, missingGate);
+    }
+
+    private static boolean hasRegisteredPenCheckpoint(ServerLevel level, BlockPos center) {
+        var checkpoint = level == null || center == null ? null
+            : VillageRegistry.getLivestockPenCheckpoint(level, center);
+        return checkpoint != null && "animal_pen".equals(checkpoint.projectKind());
+    }
+
+    private static int countOwnedSheepInRegisteredPen(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return 0;
+        UUID villageId = VillageRegistry.villageId(level, center);
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        if (villageId == null || checkpoint == null || !"animal_pen".equals(checkpoint.projectKind())) return 0;
+        BlockPos site = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
+        AABB search = new AABB(site).inflate(radius, 12.0D, radius);
+        return level.getEntitiesOfClass(Sheep.class, search, sheep -> sheep.isAlive()
+            && villageId.toString().equals(sheep.getPersistentData().getString(SHEEP_OWNER_KEY))).size();
+    }
+
     /** A completed pen is recognized only from the persisted project marker and its real blocks. */
     public static boolean hasCompletePen(ServerLevel level, BlockPos center) {
         var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
@@ -134,7 +193,8 @@ public final class VillageLivestock {
             for (int dz = 0; dz < 5; dz++) {
                 if (dx != 0 && dx != 4 && dz != 0 && dz != 4) continue;
                 BlockPos pos = site.offset(dx, 0, dz);
-                if (!level.hasChunkAt(pos)) return false;
+                if (!level.hasChunkAt(pos) || !level.hasChunkAt(pos.below())
+                    || !level.getBlockState(pos.below()).blocksMotion()) return false;
                 Block placed = level.getBlockState(pos).getBlock();
                 if (pos.equals(gatePos)) {
                     if (placed != gate) return false;
@@ -222,27 +282,65 @@ public final class VillageLivestock {
     /** True when housing needs a bed and there are wild adult sheep close enough to lead into a new pen. */
     public static boolean needsPen(ServerLevel level, BlockPos center) {
         if (level == null || center == null || hasCompletePen(level, center)) return false;
+        if (hasRegisteredPenCheckpoint(level, center)) {
+            var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+            // Do not create another pen while the original construction checkpoint is unfinished.
+            if (checkpoint.stepIndex() < checkpoint.totalSteps()) return false;
+            PenRepairPlan repair = getPenRepairPlan(level, center);
+            if (repair == null) return false;
+            List<Villager> residents = VillageArea.findVillagers(level, center);
+            return hasHousingWoolDemand(level, center, residents)
+                || countOwnedSheepInRegisteredPen(level, center) > 0;
+        }
         List<Villager> residents = VillageArea.findVillagers(level, center);
         return hasHousingWoolDemand(level, center, residents) && !findHerdableSheep(level, center).isEmpty();
     }
 
     /** Ensures one idempotent material order exists before the builder/crafter tries to work. */
     public static boolean ensurePenWorkOrder(ServerLevel level, BlockPos center) {
-        if (!needsPen(level, center)) return false;
-        PenMaterials materials = selectPenMaterials(level, center);
-        if (materials == null) {
-            VillageRegistry.recordDiagnostic(level, center, "Загон",
-                "Нужны брёвна или доски одного вида дерева, чтобы изготовить ограду и калитку.");
+        if (level == null || center == null) return false;
+        PenRepairPlan repair = getPenRepairPlan(level, center);
+        if (!needsPen(level, center)) {
+            var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+            if (checkpoint != null && "animal_pen".equals(checkpoint.projectKind())
+                && checkpoint.stepIndex() >= checkpoint.totalSteps()
+                && !hasCompletePen(level, center) && repair == null) {
+                VillageRegistry.recordDiagnostic(level, center, "Загон",
+                    "В зарегистрированном загоне есть посторонний блок или незагруженный участок. Перезапись запрещена.");
+            }
             return false;
         }
+
+        Item fenceItem;
+        Item gateItem;
+        int fencesNeeded;
+        int gateNeeded;
+        if (repair != null) {
+            fenceItem = repair.fenceItem();
+            gateItem = repair.gateItem();
+            fencesNeeded = repair.missingFenceCount();
+            gateNeeded = repair.missingGateCount();
+        } else {
+            PenMaterials materials = selectPenMaterials(level, center);
+            if (materials == null) {
+                VillageRegistry.recordDiagnostic(level, center, "Загон",
+                    "Нужны брёвна или доски одного вида дерева, чтобы изготовить ограду и калитку.");
+                return false;
+            }
+            fenceItem = materials.fenceItem();
+            gateItem = materials.gateItem();
+            fencesNeeded = 15;
+            gateNeeded = 1;
+        }
+
+        List<com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement> requirements = new ArrayList<>();
+        if (fencesNeeded > 0) requirements.add(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement(
+            BuiltInRegistries.ITEM.getKey(fenceItem).toString(), fencesNeeded));
+        if (gateNeeded > 0) requirements.add(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement(
+            BuiltInRegistries.ITEM.getKey(gateItem).toString(), gateNeeded));
+        if (requirements.isEmpty()) return false;
         long now = level.getGameTime();
-        String fenceId = BuiltInRegistries.ITEM.getKey(materials.fenceItem()).toString();
-        String gateId = BuiltInRegistries.ITEM.getKey(materials.gateItem()).toString();
-        VillageWorkOrders.enqueue(level, center, "animal_pen", "animal_pen", 80, now, 30L * 24000L,
-            List.of(
-                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement(fenceId, 15),
-                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement(gateId, 1)
-            ));
+        VillageWorkOrders.enqueue(level, center, "animal_pen", "animal_pen", 80, now, 30L * 24000L, requirements);
         return true;
     }
 
@@ -273,18 +371,44 @@ public final class VillageLivestock {
         return pendingPenRequirement(level, center, false);
     }
 
-    /** Resolves the matching plank type from the material-pinned fence requirement. */
+    /** Resolves the pinned plank type even when a repair only needs the matching gate. */
     public static Item pendingPenPlankItem(ServerLevel level, BlockPos center) {
-        Item fence = pendingPenFenceItem(level, center);
-        if (fence == Items.AIR) return Items.AIR;
-        ResourceLocation fenceKey = BuiltInRegistries.ITEM.getKey(fence);
-        String path = fenceKey.getPath();
-        if (!path.endsWith("_fence")) return Items.AIR;
+        Item source = pendingPenFenceItem(level, center);
+        String suffix = "_fence";
+        if (source == Items.AIR) {
+            source = pendingPenGateItem(level, center);
+            suffix = "_fence_gate";
+        }
+        if (source == Items.AIR) return Items.AIR;
+        ResourceLocation key = BuiltInRegistries.ITEM.getKey(source);
+        String path = key.getPath();
+        if (!path.endsWith(suffix)) return Items.AIR;
         ResourceLocation plankKey = ResourceLocation.tryParse(
-            fenceKey.getNamespace() + ":" + path.substring(0, path.length() - "_fence".length()) + "_planks");
+            key.getNamespace() + ":" + path.substring(0, path.length() - suffix.length()) + "_planks");
         if (plankKey == null) return Items.AIR;
         Item planks = BuiltInRegistries.ITEM.get(plankKey);
         return Block.byItem(planks).defaultBlockState().is(net.minecraft.tags.BlockTags.PLANKS) ? planks : Items.AIR;
+    }
+
+    public static int pendingPenFenceCount(ServerLevel level, BlockPos center) {
+        return pendingPenRequirementCount(level, center, true);
+    }
+
+    public static int pendingPenGateCount(ServerLevel level, BlockPos center) {
+        return pendingPenRequirementCount(level, center, false);
+    }
+
+    private static int pendingPenRequirementCount(ServerLevel level, BlockPos center, boolean fence) {
+        for (var order : VillageWorkOrders.list(level, center, level.getGameTime())) {
+            if (!"animal_pen".equals(order.kind()) || order.isTerminal()) continue;
+            return order.requirements().stream()
+                .filter(req -> req != null && (fence
+                    ? req.itemId().endsWith("_fence") && !req.itemId().endsWith("_fence_gate")
+                    : req.itemId().endsWith("_fence_gate")))
+                .mapToInt(com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement::count)
+                .sum();
+        }
+        return 0;
     }
 
     private static Item pendingPenRequirement(ServerLevel level, BlockPos center, boolean fence) {
@@ -306,17 +430,33 @@ public final class VillageLivestock {
 
     /** Starts construction only after all 15 fence pieces and the matching gate physically exist in owned storage. */
     public static boolean tryStartPenProject(ServerLevel level, BlockPos center) {
-        if (!ensurePenWorkOrder(level, center) || hasCompletePen(level, center)) return false;
-        if (VillageBuilder.hasActiveProjectNear(level, center)) return false;
-        Item fence = pendingPenFenceItem(level, center);
-        Item gate = pendingPenGateItem(level, center);
-        if (fence == Items.AIR || gate == Items.AIR) return false;
-        Set<String> required = Set.of(
-            BuiltInRegistries.ITEM.getKey(fence).toString(),
-            BuiltInRegistries.ITEM.getKey(gate).toString());
+        if (!ensurePenWorkOrder(level, center) || hasCompletePen(level, center)
+            || VillageBuilder.hasActiveProjectNear(level, center)) return false;
+        PenRepairPlan repair = getPenRepairPlan(level, center);
+        if (hasRegisteredPenCheckpoint(level, center) && repair == null) return false;
+
+        Item fence = repair != null ? repair.fenceItem() : pendingPenFenceItem(level, center);
+        Item gate = repair != null ? repair.gateItem() : pendingPenGateItem(level, center);
+        int requiredFences = pendingPenFenceCount(level, center);
+        int requiredGate = pendingPenGateCount(level, center);
+        if ((requiredFences > 0 && fence == Items.AIR)
+            || (requiredGate > 0 && gate == Items.AIR)
+            || requiredFences + requiredGate <= 0) return false;
+        if (repair != null && (requiredFences != repair.missingFenceCount()
+            || requiredGate != repair.missingGateCount())) return false;
+
+        Set<String> required = new java.util.HashSet<>();
+        if (requiredFences > 0) required.add(BuiltInRegistries.ITEM.getKey(fence).toString());
+        if (requiredGate > 0) required.add(BuiltInRegistries.ITEM.getKey(gate).toString());
         Map<String, Integer> stock = VillageRegistry.countAvailableOwnedStorageItems(level, center, required);
-        if (stock.getOrDefault(BuiltInRegistries.ITEM.getKey(fence).toString(), 0) < 15
-            || stock.getOrDefault(BuiltInRegistries.ITEM.getKey(gate).toString(), 0) < 1) return false;
+        if ((requiredFences > 0 && stock.getOrDefault(BuiltInRegistries.ITEM.getKey(fence).toString(), 0) < requiredFences)
+            || (requiredGate > 0 && stock.getOrDefault(BuiltInRegistries.ITEM.getKey(gate).toString(), 0) < requiredGate)) return false;
+
+        if (repair != null) {
+            return VillageBuilder.startLivestockPenRepairProject(level, center, repair.site(),
+                fence, gate, requiredFences, requiredGate);
+        }
+        if (requiredFences != 15 || requiredGate != 1) return false;
         BlockPos site = VillageBuilder.findLivestockPenSite(level, center);
         if (site == null) {
             VillageRegistry.recordDiagnostic(level, center, "Загон", "Нет ровной свободной площадки 5×5 для загона.");

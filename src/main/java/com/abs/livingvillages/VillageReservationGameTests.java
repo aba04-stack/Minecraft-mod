@@ -2702,6 +2702,67 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void damagedRegisteredPenProducesSafeInPlaceRepairPlan(GameTestHelper helper) {
+        BlockPos site = helper.absolutePos(new BlockPos(3, 1, 3));
+        BlockPos missingFence = site.offset(0, 0, 2);
+        BlockPos gatePos = site.offset(2, 0, 0);
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                helper.getLevel().setBlock(site.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), 3);
+                if (dx == 0 || dx == 4 || dz == 0 || dz == 4) {
+                    BlockPos boundary = site.offset(dx, 0, dz);
+                    if (boundary.equals(gatePos)) {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE_GATE.defaultBlockState(), 3);
+                    } else if (!boundary.equals(missingFence)) {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE.defaultBlockState(), 3);
+                    }
+                } else {
+                    helper.getLevel().setBlock(site.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), 3);
+                }
+                helper.getLevel().setBlock(site.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), 3);
+            }
+        }
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        residentA.setNoAi(true);
+        residentB.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(1, 1, 1))));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(2, 1, 1))));
+        BlockPos villageCenter = helper.absolutePos(new BlockPos(2, 1, 1));
+        java.util.UUID villageId = VillageRegistry.villageId(helper.getLevel(), villageCenter);
+        helper.assertTrue(villageId != null, "The village must have an identity before registering its pen.");
+
+        VillageRegistry.recordLivestockPenCheckpoint(helper.getLevel(), villageCenter,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "animal_pen", site.getX(), site.getY(), site.getZ(),
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(Items.OAK_FENCE).toString(),
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(Items.OAK_FENCE_GATE).toString(),
+                16, 16, "completed-test-builder", helper.getLevel().getGameTime()));
+
+        VillageLivestock.PenRepairPlan repair = VillageLivestock.getPenRepairPlan(helper.getLevel(), villageCenter);
+        helper.assertTrue(repair != null && repair.site().equals(site)
+                && repair.fenceItem() == Items.OAK_FENCE
+                && repair.gateItem() == Items.OAK_FENCE_GATE
+                && repair.missingFenceCount() == 1 && repair.missingGateCount() == 0,
+            "A missing fence must produce a one-item repair plan at the registered pen's original site.");
+
+        helper.getLevel().setBlock(missingFence, Blocks.OAK_FENCE.defaultBlockState(), 3);
+        helper.getLevel().setBlock(gatePos, Blocks.AIR.defaultBlockState(), 3);
+        VillageLivestock.PenRepairPlan gateRepair = VillageLivestock.getPenRepairPlan(helper.getLevel(), villageCenter);
+        helper.assertTrue(gateRepair != null && gateRepair.site().equals(site)
+                && gateRepair.missingFenceCount() == 0 && gateRepair.missingGateCount() == 1,
+            "A gate-only repair must not request or craft fifteen unnecessary fences.");
+
+        helper.getLevel().setBlock(gatePos, Blocks.STONE.defaultBlockState(), 3);
+        helper.assertTrue(VillageLivestock.getPenRepairPlan(helper.getLevel(), villageCenter) == null,
+            "A repair plan must refuse to overwrite a solid player/foreign block at the registered gate.");
+        helper.succeed();
+    }
+
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;
