@@ -50,6 +50,12 @@ public final class VillageWorkOrders extends SavedData {
     private static final long MATERIAL_DEMAND_CACHE_TICKS = 20L;
     private static final Map<ServerLevel, Map<UUID, CachedMaterialDemand>> MATERIAL_DEMAND_CACHE = new WeakHashMap<>();
 
+    private static void invalidateMaterialDemandCache(ServerLevel level, UUID villageId) {
+        if (level == null || villageId == null) return;
+        Map<UUID, CachedMaterialDemand> cache = MATERIAL_DEMAND_CACHE.get(level);
+        if (cache != null) cache.remove(villageId);
+    }
+
     private VillageWorkOrders() {}
 
     public static VillageWorkOrders get(ServerLevel level) {
@@ -91,6 +97,7 @@ public final class VillageWorkOrders extends SavedData {
                     if (enriched != null) {
                         orders.set(i, enriched);
                         board.setDirty();
+                        invalidateMaterialDemandCache(level, villageId);
                         return enriched;
                     }
                 }
@@ -120,6 +127,7 @@ public final class VillageWorkOrders extends SavedData {
         );
         orders.add(created);
         board.setDirty();
+        invalidateMaterialDemandCache(level, villageId);
         return created;
     }
 
@@ -178,6 +186,7 @@ public final class VillageWorkOrders extends SavedData {
             if (waiting == null) return false;
             orders.set(i, waiting);
             board.setDirty();
+            invalidateMaterialDemandCache(level, villageId);
             return true;
         }
         return false;
@@ -206,6 +215,7 @@ public final class VillageWorkOrders extends SavedData {
             if (open == null) return false;
             orders.set(i, open);
             board.setDirty();
+            invalidateMaterialDemandCache(level, villageId);
             return true;
         }
         return false;
@@ -266,6 +276,7 @@ public final class VillageWorkOrders extends SavedData {
             if (updated == null) return null;
             orders.set(i, updated);
             board.setDirty();
+            invalidateMaterialDemandCache(level, villageId);
             return updated;
         }
         return null;
@@ -421,7 +432,7 @@ public final class VillageWorkOrders extends SavedData {
             if (missingLogs > 0) deficits.merge(logId, missingLogs, Integer::sum);
         }
 
-        Map<String, Integer> result = deficits.isEmpty() ? null : Map.copyOf(deficits);
+        Map<String, Integer> result = Map.copyOf(deficits);
         byVillage.put(villageId, new CachedMaterialDemand(result, now + MATERIAL_DEMAND_CACHE_TICKS));
         if (byVillage.size() > 64) {
             byVillage.entrySet().removeIf(entry -> now >= entry.getValue().expiresAtTick());
@@ -634,6 +645,7 @@ public final class VillageWorkOrders extends SavedData {
             if (orders.get(i).id().equals(updated.id())) {
                 orders.set(i, updated);
                 board.setDirty();
+                invalidateMaterialDemandCache(level, villageId);
                 return updated;
             }
         }
