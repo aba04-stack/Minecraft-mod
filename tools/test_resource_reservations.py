@@ -29,6 +29,7 @@ for marker in (
     "center.offset(-radius, -6, -radius)",
     "tryAddStorageReservation",
     "isStorageAvailable",
+    "if (!VillageArea.isStorageInResidentGroup(level, owner, storage)) return false;",
     "hasReservationInArea",
     "private static boolean hasLiveReservation(ServerLevel level, Villager owner, CompoundTag data)",
     'case "house", "animal_pen" -> data.getBoolean(VillageBuilder.ACTIVE_KEY);',
