@@ -32,8 +32,11 @@ import com.abs.livingvillages.domain.VillageWorkOrderModel;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.WeakHashMap;
 
 /**
  * A farm is a real worker project, not a one-tick block generator. The worker carries actual seeds,
@@ -82,6 +85,9 @@ public final class VillageFarmBuilder {
     private static final long WATER_ROUTE_TIMEOUT_TICKS = 1200L;
     private static final long WATER_SOURCE_RETRY_TICKS = 1200L;
     private static final int MAX_WATER_ROUTE_FAILURES = 3;
+    private static final long WATER_SOURCE_CACHE_TICKS = 200L;
+    private static final int MAX_CACHED_WATER_REGIONS = 128;
+    private static final Map<ServerLevel, Map<Long, WaterSourceCache>> WATER_SOURCE_CACHE = new WeakHashMap<>();
     private static final double INTERACTION_REACH = 4.5D;
     private static final float WALK_SPEED = 0.58F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
@@ -159,19 +165,39 @@ public final class VillageFarmBuilder {
         return supportedNeighbors >= 2;
     }
 
-    /** Bounded search over already-loaded village chunks; never loads terrain to find water. */
+    /** Bounded and briefly cached search over already-loaded village chunks; never loads terrain. */
     public static boolean hasRenewableWaterSource(ServerLevel level, BlockPos center) {
         if (level == null || center == null) return false;
+        long now = level.getGameTime();
+        long regionKey = ((long) (center.getX() >> 4) << 32) | ((center.getZ() >> 4) & 0xffffffffL);
+        Map<Long, WaterSourceCache> cache = WATER_SOURCE_CACHE.computeIfAbsent(level, ignored -> new HashMap<>());
+        WaterSourceCache cached = cache.get(regionKey);
+        if (cached != null && now < cached.expiresAtTick()) return cached.available();
+
         int radius = Math.max(4, Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()));
+        boolean found = false;
+        search:
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos candidate = center.offset(dx, dy, dz);
-                    if (isRenewableWaterSource(level, candidate)) return true;
+                    if (isRenewableWaterSource(level, candidate)) {
+                        found = true;
+                        break search;
+                    }
                 }
             }
         }
-        return false;
+        cache.put(regionKey, new WaterSourceCache(now + WATER_SOURCE_CACHE_TICKS, found));
+        if (cache.size() > MAX_CACHED_WATER_REGIONS) {
+            cache.entrySet().removeIf(entry -> now >= entry.getValue().expiresAtTick());
+            while (cache.size() > MAX_CACHED_WATER_REGIONS) {
+                Long oldestKey = cache.keySet().stream().filter(key -> key != regionKey).findFirst().orElse(null);
+                if (oldestKey == null) break;
+                cache.remove(oldestKey);
+            }
+        }
+        return found;
     }
 
     private static BlockPos findNearestRenewableWaterSource(ServerLevel level, Villager worker, int radius) {
@@ -1264,4 +1290,5 @@ public final class VillageFarmBuilder {
     private enum FarmStepKind { WATER, TILL, PLANT, COMPOSTER }
     private record StorageRef(BlockPos pos, Container container) {}
     private record StorageTarget(BlockPos storage, BlockPos stand) {}
+    private record WaterSourceCache(long expiresAtTick, boolean available) {}
 }
