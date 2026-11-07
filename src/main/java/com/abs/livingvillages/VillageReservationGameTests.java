@@ -2194,7 +2194,8 @@ public final class VillageReservationGameTests {
         var desertHouseReady = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
                 2, 32, 96, 0, 16, 0, 0, 24, false, 1));
-        helper.assertTrue(!desertHouseReady.needsStone() && desertHouseReady.desiredMiners() == 0,
+        helper.assertTrue(desertHouseReady.targetStoneUnits() == 96
+                && !desertHouseReady.needsStone() && desertHouseReady.desiredMiners() == 0,
             "The desert miner must be released after the full starter house bill is physically secured.");
 
         List<ItemStack> desertKit = VillageIndustry.createDesertStarterKit();
