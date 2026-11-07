@@ -927,6 +927,41 @@ public final class VillageLivestock {
         return villager.getMainHandItem().is(Items.WHEAT);
     }
 
+    private static boolean canFitStack(Container inventory, ItemStack offered) {
+        if (inventory == null || offered == null || offered.isEmpty()) return true;
+        List<ItemStack> simulated = new ArrayList<>();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            simulated.add(inventory.getItem(slot).copy());
+        }
+        int remaining = offered.getCount();
+        for (ItemStack slot : simulated) {
+            if (remaining <= 0) break;
+            if (slot.isEmpty() || !ItemStack.isSameItemSameComponents(slot, offered)) continue;
+            int room = Math.min(slot.getMaxStackSize(), inventory.getMaxStackSize()) - slot.getCount();
+            int moved = Math.min(Math.max(0, room), remaining);
+            slot.grow(moved);
+            remaining -= moved;
+        }
+        for (int slot = 0; slot < simulated.size() && remaining > 0; slot++) {
+            if (!simulated.get(slot).isEmpty()) continue;
+            int moved = Math.min(remaining, Math.min(offered.getMaxStackSize(), inventory.getMaxStackSize()));
+            simulated.set(slot, offered.copyWithCount(moved));
+            remaining -= moved;
+        }
+        return remaining == 0;
+    }
+
+    private static int insertStackIntoHandOrInventory(Villager villager, ItemStack offered) {
+        if (offered.isEmpty()) return 0;
+        ItemStack currentHand = villager.getMainHandItem();
+        if (currentHand.isEmpty()) {
+            villager.setItemInHand(InteractionHand.MAIN_HAND, offered.copy());
+            return offered.getCount();
+        }
+        ItemStack remainder = villager.getInventory().addItem(offered.copy());
+        return offered.getCount() - remainder.getCount();
+    }
+
     private static boolean equipWheatFromInventory(Villager villager) {
         if (hasWheatInHand(villager)) return true;
         Container inventory = villager.getInventory();
@@ -936,8 +971,18 @@ public final class VillageLivestock {
         // inventory only if the whole stack fits; never overwrite or drop it to equip bait.
         ItemStack held = villager.getMainHandItem();
         if (!held.isEmpty()) {
+            if (!canFitStack(inventory, held)) return false;
             ItemStack remainder = inventory.addItem(held.copy());
-            if (!remainder.isEmpty()) return false;
+            if (!remainder.isEmpty()) {
+                // Defensive rollback: capacity was checked before transfer, so this should
+                // only occur if a custom inventory rejects the offered stack.
+                ItemStack returned = remainder.copy();
+                int returnedToHand = insertStackIntoHandOrInventory(villager, returned);
+                if (returnedToHand < remainder.getCount()) {
+                    villager.spawnAtLocation(new ItemStack(remainder.getItem(), remainder.getCount() - returnedToHand));
+                }
+                return false;
+            }
             villager.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
         }
 
