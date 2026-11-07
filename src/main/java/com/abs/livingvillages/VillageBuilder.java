@@ -344,29 +344,34 @@ public final class VillageBuilder {
 
     /** Finds a flat, loaded, unobstructed 5x5 site without deleting existing solid blocks. */
     public static BlockPos findLivestockPenSite(ServerLevel level, BlockPos center) {
-        if (level == null || center == null) return null;
-        List<BlockPos> candidates = new ArrayList<>();
+        if (level == null || center == null || !level.hasChunkAt(center)) return null;
         int radius = Math.min(12, Math.max(6, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get() / 3));
-        for (int dy = -3; dy <= 3; dy++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    BlockPos site = center.offset(dx, dy, dz);
-                    if (isPenBuildSite(level, site)
-                        && VillageReservations.isProjectSiteAvailable(level, site, 4, null)) {
-                        candidates.add(site.immutable());
+        int checked = 0;
+        // Search outward in deterministic rings and stop at a strict budget. This avoids
+        // allocating and sorting thousands of candidates during each settlement scan.
+        for (int ring = 0; ring <= radius && checked < 256; ring++) {
+            for (int dy : new int[]{0, -1, 1, -2, 2}) {
+                for (int dx = -ring; dx <= ring && checked < 256; dx++) {
+                    for (int dz = -ring; dz <= ring && checked < 256; dz++) {
+                        if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
+                        checked++;
+                        BlockPos site = center.offset(dx, dy, dz);
+                        if (isPenBuildSite(level, site)
+                            && VillageReservations.isProjectSiteAvailable(level, site, 4, null)) {
+                            return site.immutable();
+                        }
                     }
                 }
             }
         }
-        candidates.sort(Comparator.comparingLong(pos -> pos.distSqr(center))
-            .thenComparingInt(BlockPos::getX)
-            .thenComparingInt(BlockPos::getZ)
-            .thenComparingInt(BlockPos::getY));
-        return candidates.isEmpty() ? null : candidates.get(0);
+        return null;
     }
 
     private static boolean isPenBuildSite(ServerLevel level, BlockPos site) {
         if (level == null || site == null) return false;
+        AABB footprint = new AABB(site, site.offset(5, 2, 5));
+        if (!level.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, footprint,
+            entity -> entity.isAlive()).isEmpty()) return false;
         for (int dx = 0; dx < 5; dx++) {
             for (int dz = 0; dz < 5; dz++) {
                 BlockPos floor = site.offset(dx, -1, dz);
