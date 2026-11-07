@@ -329,7 +329,7 @@ public final class VillageBuilder {
         data.putLong(LAST_PROGRESS_TICK, level.getGameTime());
         data.putLong(NEXT_ACTION, 0L);
         clearOwnedRoute(builder, data);
-        VillageRegistry.recordHouseCheckpoint(
+        VillageRegistry.recordLivestockPenCheckpoint(
             level, center,
             new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
                 "animal_pen", site.getX(), site.getY(), site.getZ(),
@@ -420,7 +420,7 @@ public final class VillageBuilder {
         }
         BlockPos resumedSite = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
         String projectKind = checkpoint.projectKind();
-        if (!("house".equals(projectKind) || "animal_pen".equals(projectKind))) return false;
+        if (!"house".equals(projectKind)) return false;
         if (!VillageWorkOrders.rebindOrphanedProject(
             level, center, projectKind, resumedSite, replacement, !ownerAliveInVillage)) return false;
 
@@ -460,6 +460,44 @@ public final class VillageBuilder {
                 level.getGameTime()
             )
         );
+        return true;
+    }
+
+    /** Resumes an orphaned livestock-pen project independently from house checkpoints. */
+    public static boolean tryResumeOrphanedLivestockPenProject(ServerLevel level, BlockPos center) {
+        if (level == null || center == null
+            || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
+            || !LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+            || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        if (checkpoint == null || !"animal_pen".equals(checkpoint.projectKind())) return false;
+        List<Villager> residents = VillageArea.findVillagers(level, center);
+        boolean ownerAliveInVillage = residents.stream().anyMatch(
+            v -> v.isAlive() && v.getUUID().toString().equals(checkpoint.ownerWorkerId()) && isProjectActive(v));
+        Villager replacement = findAvailableBuilder(level, center);
+        if (!com.abs.livingvillages.domain.SettlementSimulationModel.canResumeOrphanedProject(
+            checkpoint, ownerAliveInVillage, replacement != null)) return false;
+
+        BlockPos site = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        if (!VillageWorkOrders.rebindOrphanedProject(level, center, "animal_pen", site,
+            replacement, !ownerAliveInVillage)) return false;
+        CompoundTag data = replacement.getPersistentData();
+        data.putBoolean(ACTIVE_KEY, true);
+        data.putString(PROJECT_KIND, "animal_pen");
+        data.putString(FENCE_ITEM, checkpoint.primaryMaterialId());
+        data.putString(GATE_ITEM, checkpoint.secondaryMaterialId());
+        data.putInt(SITE_X, checkpoint.siteX()); data.putInt(SITE_Y, checkpoint.siteY()); data.putInt(SITE_Z, checkpoint.siteZ());
+        data.putInt(STEP_INDEX, checkpoint.stepIndex());
+        data.putInt(PHASE, checkpoint.stepIndex() < PEN_FENCES_REQUIRED ? FETCH_PEN_FENCES : FETCH_PEN_GATE);
+        data.putLong(STARTED, level.getGameTime());
+        data.putLong(LAST_PROGRESS_TICK, level.getGameTime());
+        data.putLong(NEXT_ACTION, 0L);
+        clearOwnedRoute(replacement, data);
+        VillageRegistry.recordLivestockPenCheckpoint(level, center,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "animal_pen", checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ(),
+                checkpoint.primaryMaterialId(), checkpoint.secondaryMaterialId(),
+                checkpoint.stepIndex(), checkpoint.totalSteps(), replacement.getUUID().toString(), level.getGameTime()));
         return true;
     }
 
@@ -605,7 +643,7 @@ public final class VillageBuilder {
         int index = data.getInt(STEP_INDEX);
         if (index >= steps.size()) {
             BlockPos center = projectVillageCenter(villager);
-            VillageRegistry.recordHouseCheckpoint(level, center,
+            VillageRegistry.recordLivestockPenCheckpoint(level, center,
                 new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
                     "animal_pen", site.getX(), site.getY(), site.getZ(),
                     BuiltInRegistries.ITEM.getKey(fenceItem).toString(),
@@ -703,7 +741,7 @@ public final class VillageBuilder {
 
     private static void savePenCheckpoint(Villager villager, ServerLevel level, BlockPos site,
                                           CompoundTag data, int stepIndex, int totalSteps) {
-        VillageRegistry.recordHouseCheckpoint(level, projectVillageCenter(villager),
+        VillageRegistry.recordLivestockPenCheckpoint(level, projectVillageCenter(villager),
             new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
                 "animal_pen", site.getX(), site.getY(), site.getZ(),
                 data.getString(FENCE_ITEM), data.getString(GATE_ITEM),
