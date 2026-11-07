@@ -311,6 +311,7 @@ public final class VillageCraftingJobs {
         // A queued farm may request a real empty bucket so a worker can refill it at a safe
         // renewable water source. Never spend iron on buckets without an actual pending farm need.
         if (hasPendingFarmBucketOrder(level, center)
+            && VillageFarmBuilder.hasRenewableWaterSource(level, center)
             && availableCount(storages, crafter, Items.BUCKET) == 0 && iron >= 3) {
             return fixed("bucket", Items.BUCKET, 1,
                 List.of(new Ingredient(Items.IRON_INGOT, 3)));
