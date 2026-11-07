@@ -684,20 +684,20 @@ public final class VillageBuilder {
         Item fenceItem = fenceBlock.asItem();
         Item gateItem = gateBlock.asItem();
         BlockPos gatePos = base.offset(2, 0, 0);
+        // Place all 15 fence pieces first and the gate last. Checkpoint recovery can then
+        // calculate the exact remaining fence count directly from STEP_INDEX.
         for (int dx = 0; dx < 5; dx++) {
             for (int dz = 0; dz < 5; dz++) {
                 if (dx != 0 && dx != 4 && dz != 0 && dz != 4) continue;
                 BlockPos pos = base.offset(dx, 0, dz);
-                if (pos.equals(gatePos)) {
-                    BlockState gate = gateBlock.defaultBlockState()
-                        .setValue(FenceGateBlock.FACING, Direction.SOUTH)
-                        .setValue(FenceGateBlock.OPEN, false);
-                    steps.add(new BuildStep(pos, gate, gateItem, null, null));
-                } else {
-                    steps.add(new BuildStep(pos, fenceBlock.defaultBlockState(), fenceItem, null, null));
-                }
+                if (pos.equals(gatePos)) continue;
+                steps.add(new BuildStep(pos, fenceBlock.defaultBlockState(), fenceItem, null, null));
             }
         }
+        BlockState gate = gateBlock.defaultBlockState()
+            .setValue(FenceGateBlock.FACING, Direction.SOUTH)
+            .setValue(FenceGateBlock.OPEN, false);
+        steps.add(new BuildStep(gatePos, gate, gateItem, null, null));
         return steps;
     }
 
