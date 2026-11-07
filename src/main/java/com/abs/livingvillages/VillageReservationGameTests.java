@@ -2540,7 +2540,16 @@ public final class VillageReservationGameTests {
             }
         }
 
-        BlockPos villageCenter = helper.absolutePos(new BlockPos(5, 1, 5));
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        residentA.setNoAi(true);
+        residentB.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(1, 1, 1))));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(2, 1, 1))));
+
+        BlockPos villageCenter = helper.absolutePos(new BlockPos(2, 1, 1));
         java.util.UUID villageId = VillageRegistry.villageId(helper.getLevel(), villageCenter);
         helper.assertTrue(villageId != null, "A village identity must exist before the pen can own livestock.");
         VillageRegistry.recordLivestockPenCheckpoint(helper.getLevel(), villageCenter,
