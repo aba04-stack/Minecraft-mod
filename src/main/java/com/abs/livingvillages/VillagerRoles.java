@@ -112,7 +112,7 @@ public final class VillagerRoles {
         int desiredMinersForQueue = LivingVillagesConfig.ENABLE_MINER_ROLE.get() && availablePickaxes > 0
             ? Math.max(resourcePlan.desiredMiners(), pendingQuarryDemand ? 1 : 0) : 0;
         int desiredHerders = LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
-            && VillageLivestock.needsWoolForHousing(level, center) ? 1 : 0;
+            && VillageLivestock.hasHerderWorkAvailable(level, center) ? 1 : 0;
         int excessLumberjacks = Math.max(0, (int) all.stream().filter(VillagerRoles::isLumberjack).count()
             - desiredLumberjacksForQueue);
         int excessFarmers = Math.max(0, (int) all.stream().filter(VillagerRoles::isFarmer).count()
