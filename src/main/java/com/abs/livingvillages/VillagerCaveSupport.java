@@ -322,7 +322,7 @@ public final class VillagerCaveSupport {
         return isSafeCaveNode(level, feet, surfaceY);
     }
 
-    private static boolean isSafeCaveNode(ServerLevel level, BlockPos feet, int surfaceY) {
+    static boolean isSafeCaveNode(ServerLevel level, BlockPos feet, int surfaceY) {
         return feet.getY() <= surfaceY - 5
             && isSafeWalkNode(level, feet)
             && !level.canSeeSky(feet);

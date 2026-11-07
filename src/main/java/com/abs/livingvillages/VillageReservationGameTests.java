@@ -45,8 +45,18 @@ public final class VillageReservationGameTests {
         BlockPos roof = feet.above(5);
         helper.getLevel().setBlock(feet.below(), Blocks.STONE.defaultBlockState(), 3);
         helper.getLevel().setBlock(roof, Blocks.STONE.defaultBlockState(), 3);
-        helper.assertTrue(VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
-            "A dry, supported, enclosed underground air space should be a valid cave scout node.");
+        int measuredSurfaceY = helper.getLevel().getHeight(
+            net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+            feet.getX(), feet.getZ());
+        boolean seesSky = helper.getLevel().canSeeSky(feet);
+        boolean walkNode = VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet, measuredSurfaceY);
+        helper.assertTrue(walkNode,
+            "Expected safe cave node. surfaceY=" + measuredSurfaceY + ", feetY=" + feet.getY()
+                + ", canSeeSky=" + seesSky + ", floor=" + helper.getLevel().getBlockState(feet.below())
+                + ", feet=" + helper.getLevel().getBlockState(feet)
+                + ", head=" + helper.getLevel().getBlockState(feet.above())
+                + ", roof=" + helper.getLevel().getBlockState(roof)
+                + ", loaded=" + helper.getLevel().hasChunkAt(feet));
 
         helper.getLevel().setBlock(feet, Blocks.WATER.defaultBlockState(), 3);
         helper.assertTrue(!VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
@@ -1056,7 +1066,11 @@ public final class VillageReservationGameTests {
 
         var snapshotOne = VillageElder.createPanelSnapshot(helper.getLevel(), elderOne, null);
         helper.assertTrue(snapshotOne.population() == 4 && snapshotOne.foodPoints() == 64,
-            "Elder panel snapshot must report the owning village's population and stored food points.");
+            "Elder panel snapshot expected population=4/food=64 but got population=" + snapshotOne.population()
+                + ", adults=" + snapshotOne.adults() + ", food=" + snapshotOne.foodPoints()
+                + ", elderPos=" + elderOne.blockPosition() + ", groupOne=" + groupOne.size()
+                + ", chestOwned=" + VillageRegistry.isStorageForVillage(helper.getLevel(), elderOne.blockPosition(), storageOne)
+                + ", chestHasEntity=" + (helper.getLevel().getBlockEntity(storageOne) instanceof Container));
 
         helper.assertTrue(
             VillageRegistry.executeNeighborTradeIfEligible(helper.getLevel(), centerOne, centerTwo, 4, 8),
