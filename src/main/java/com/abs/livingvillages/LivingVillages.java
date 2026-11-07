@@ -65,6 +65,7 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(VillageElder::onVillagerInteract);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onVillagerTick);
+        NeoForge.EVENT_BUS.addListener(VillagerNameplates::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onVillagerInteract);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onVillagerDamaged);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onMonsterKilledByPlayer);

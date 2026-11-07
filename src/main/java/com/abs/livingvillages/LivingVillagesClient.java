@@ -182,7 +182,11 @@ public final class LivingVillagesClient {
             graphics.drawString(font, Component.translatable("livingvillages.elder.food", data.foodPoints()),
                 panelLeft + 20, panelTop + 58, 0xFFFFFFFF);
             Component notice = Component.literal(data.notice() == null ? "" : data.notice());
-            graphics.drawWordWrap(font, notice, panelLeft + 20, panelTop + 74, PANEL_WIDTH - 40, 0xFFB8D7C8);
+            var noticeLines = font.split(notice, PANEL_WIDTH - 40);
+            for (int line = 0; line < Math.min(2, noticeLines.size()); line++) {
+                graphics.drawString(font, noticeLines.get(line), panelLeft + 20,
+                    panelTop + 74 + line * 10, 0xFFB8D7C8);
+            }
             super.render(graphics, mouseX, mouseY, partialTick);
         }
 

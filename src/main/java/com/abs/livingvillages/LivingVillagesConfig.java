@@ -19,6 +19,7 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.BooleanValue ENABLE_RELATIONSHIP_MEMORY;
     public static final ModConfigSpec.BooleanValue ENABLE_SNEAK_TO_TALK;
     public static final ModConfigSpec.BooleanValue SHOW_PERSONALITY_NAMES;
+    public static final ModConfigSpec.BooleanValue SHOW_VILLAGER_PROFESSION_NAMES;
     public static final ModConfigSpec.BooleanValue ENABLE_FARMER_STOCKPILING;
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGER_TREE_WORK;
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGER_REPLANTING;
@@ -110,6 +111,11 @@ public final class LivingVillagesConfig {
             .comment("Показывать личное имя над головой жителя. В больших деревнях может загромождать экран.")
             .translation("livingvillages.config.show_personality_names")
             .define("show_personality_names", false);
+
+        SHOW_VILLAGER_PROFESSION_NAMES = builder
+            .comment("Показывать над головой ванильную профессию и назначенную специальную роль жителя.")
+            .translation("livingvillages.config.show_villager_profession_names")
+            .define("show_villager_profession_names", true);
 
         ENABLE_FARMER_STOCKPILING = builder
             .comment("Фермеры сами относят излишки еды в ближайшие сундуки, сохраняя запас для размножения.")
