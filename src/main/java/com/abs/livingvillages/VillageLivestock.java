@@ -706,6 +706,18 @@ public final class VillageLivestock {
         return sheep.isSheared();
     }
 
+    /** Called by the area planner to close a leftover gate after an interrupted/unloaded herding trip. */
+    public static void maintainPenGate(ServerLevel level, BlockPos center) {
+        if (level == null || center == null || !hasCompletePen(level, center)) return;
+        boolean activeAtGate = VillageArea.findVillagers(level, center).stream().anyMatch(resident -> {
+            CompoundTag data = resident.getPersistentData();
+            int state = data.getInt(STATE);
+            return VillagerRoles.isHerder(resident) && data.getBoolean(ACTIVE_KEY)
+                && (state == STATE_HERD_TO_GATE || state == STATE_HERD_ENTER_PEN);
+        });
+        if (!activeAtGate) closePenGateIfClear(level, center);
+    }
+
     private static List<Sheep> findHerdableSheep(ServerLevel level, BlockPos center) {
         if (level == null || center == null) return List.of();
         UUID villageId = VillageRegistry.villageId(level, center);
@@ -714,9 +726,16 @@ public final class VillageLivestock {
         List<Sheep> candidates = level.getEntitiesOfClass(Sheep.class, area,
             sheep -> sheep.isAlive() && !sheep.isBaby()
                 && sheep.distanceToSqr(Vec3.atCenterOf(center)) <= (double) radius * radius);
+        long now = level.getGameTime();
         candidates.removeIf(sheep -> {
-            String owner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
-            return villageId == null || (!owner.isBlank() && !owner.equals(villageId.toString()));
+            CompoundTag sheepData = sheep.getPersistentData();
+            String owner = sheepData.getString(SHEEP_OWNER_KEY);
+            String lureOwner = sheepData.getString(SHEEP_LURE_OWNER);
+            long lastLure = sheepData.getLong(SHEEP_LAST_LURE_TICK);
+            boolean heldByOtherVillage = !lureOwner.isBlank() && villageId != null
+                && !lureOwner.equals(villageId.toString()) && now - lastLure < HERD_TIMEOUT_TICKS;
+            return villageId == null || (!owner.isBlank() && !owner.equals(villageId.toString()))
+                || heldByOtherVillage;
         });
         candidates.sort(Comparator.comparingDouble(sheep -> sheep.distanceToSqr(Vec3.atCenterOf(center))));
         return candidates.size() > MAX_SHEEP_SCAN ? List.copyOf(candidates.subList(0, MAX_SHEEP_SCAN)) : List.copyOf(candidates);
