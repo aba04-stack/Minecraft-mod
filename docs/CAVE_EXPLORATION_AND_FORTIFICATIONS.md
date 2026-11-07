@@ -1,6 +1,6 @@
 # Пещерная разведка, освещение и укрепление поселения
 
-Статус документа: кодовая версия `feebaee55408cb1f0af6eaa1edfed9faf2e14ea9` прошла CI run [#374](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42353796484): статические проверки, Gradle-сборка, 34/34 GameTests, запуск dedicated server, headless client с программным OpenGL и загрузка JAR `livingvillages-0.15.0` (431 488 байт). Проверка поведения в обычном игровом мире остаётся открытой. Интегрированная ревизия в draft PR #6 прошла CI run [#399](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42356912395): 40/40 GameTests, Gradle build, dedicated server и client smoke-test; это подтверждает объединённую сборку, но не заменяет полевой тест шахтёра в обычной пещере.
+Статус документа: кодовая версия `feebaee55408cb1f0af6eaa1edfed9faf2e14ea9` прошла CI run [#374](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42353796484): статические проверки, Gradle-сборка, 34/34 GameTests, запуск dedicated server, headless client с программным OpenGL и загрузка JAR `livingvillages-0.15.0` (431 488 байт). Проверка поведения в обычном игровом мире остаётся открытой. Объединённая ревизия вошла в `main` через PR #6 (merge commit `c742873e8b0e74223fefbe01f69783ab86052c44`) и прошла CI run [#402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349): 40/40 GameTests, Gradle build, dedicated server и client smoke-test. Это подтверждает интегрированную сборку, но не заменяет полевой тест шахтёра в обычной пещере.
 
 ## Что взято из похожих модов
 
