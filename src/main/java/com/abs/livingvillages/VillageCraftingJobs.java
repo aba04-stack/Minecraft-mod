@@ -212,6 +212,33 @@ public final class VillageCraftingJobs {
     private static Recipe chooseRecipe(ServerLevel level, BlockPos center, Villager crafter,
                                        List<StorageRef> storages, List<Villager> villagers) {
         boolean housingNeeded = VillageBuilder.housingNeeded(level, center, villagers.size());
+
+        // A village-built sheep pen is a prerequisite for wool production when housing is blocked.
+        // Craft only the missing real fence/gate items, using the exact wood species pinned to its order.
+        if (VillageLivestock.hasPendingPenOrder(level, center)) {
+            Item fence = VillageLivestock.pendingPenFenceItem(level, center);
+            Item gate = VillageLivestock.pendingPenGateItem(level, center);
+            Item penPlanks = VillageLivestock.pendingPenPlankItem(level, center);
+            if (fence != Items.AIR && gate != Items.AIR && penPlanks != Items.AIR) {
+                int fencesAvailable = availableCount(storages, crafter, fence);
+                int gatesAvailable = availableCount(storages, crafter, gate);
+                int sticksAvailable = availableCount(storages, crafter, Items.STICK);
+                int planksAvailable = availableCount(storages, crafter, penPlanks);
+                if (fencesAvailable < 15) {
+                    if (sticksAvailable < 2) {
+                        return planksAvailable >= 2 ? sticksRecipe(penPlanks) : null;
+                    }
+                    return planksAvailable >= 4 ? fenceRecipe(penPlanks) : null;
+                }
+                if (gatesAvailable < 1) {
+                    if (sticksAvailable < 4) {
+                        return planksAvailable >= 2 ? sticksRecipe(penPlanks) : null;
+                    }
+                    return planksAvailable >= 2 ? fenceGateRecipe(penPlanks) : null;
+                }
+            }
+        }
+
         if (housingNeeded) {
             Item housePlanks = bestStoredHousePlanks(storages, VillageBuilder.housePlanksRequired() + 6);
             if (housePlanks == null && totalStructuralBlocks(storages) >= VillageBuilder.housePlanksRequired()) {
@@ -299,6 +326,11 @@ public final class VillageCraftingJobs {
                 }
                 return hoe;
             }
+        }
+
+        if (VillageLivestock.hasShearsRecipe(level, center) && availableCount(storages, crafter, Items.SHEARS) == 0
+            && iron >= 2) {
+            return fixed("shears", Items.SHEARS, 1, List.of(new Ingredient(Items.IRON_INGOT, 2)));
         }
 
         if (availableCount(storages, crafter, Items.COMPOSTER) == 0 && pickaxes > 0) {
@@ -648,6 +680,29 @@ public final class VillageCraftingJobs {
             && recipe.inputs().get(0).count() == 3;
     }
 
+    static boolean hasValidLivestockPenRecipes() {
+        Recipe fence = fenceRecipe(Items.OAK_PLANKS);
+        Recipe gate = fenceGateRecipe(Items.OAK_PLANKS);
+        Recipe shears = recipeFromId("shears");
+        return fence != null && fence.output() == Items.OAK_FENCE && fence.outputCount() == 3
+            && hasInputs(fence, Items.OAK_PLANKS, 4, Items.STICK, 2)
+            && gate != null && gate.output() == Items.OAK_FENCE_GATE && gate.outputCount() == 1
+            && hasInputs(gate, Items.OAK_PLANKS, 2, Items.STICK, 4)
+            && shears != null && shears.output() == Items.SHEARS && shears.outputCount() == 1
+            && hasInputs(shears, Items.IRON_INGOT, 2);
+    }
+
+    private static boolean hasInputs(Recipe recipe, Item first, int firstCount, Item second, int secondCount) {
+        return recipe.inputs().size() == 2
+            && recipe.inputs().stream().anyMatch(input -> input.item() == first && input.count() == firstCount)
+            && recipe.inputs().stream().anyMatch(input -> input.item() == second && input.count() == secondCount);
+    }
+
+    private static boolean hasInputs(Recipe recipe, Item first, int firstCount) {
+        return recipe.inputs().size() == 1
+            && recipe.inputs().get(0).item() == first && recipe.inputs().get(0).count() == firstCount;
+    }
+
     private static Recipe recipeFromId(String id) {
         if (id == null || id.isBlank()) return null;
         int separator = id.indexOf('|');
@@ -671,6 +726,8 @@ public final class VillageCraftingJobs {
             return switch (kind) {
                 case "sticks" -> sticksRecipe(material);
                 case "door" -> doorRecipe(material);
+                case "fence" -> fenceRecipe(material);
+                case "fence_gate" -> fenceGateRecipe(material);
                 case "composter" -> composterRecipe(material);
                 case "wooden_pickaxe" -> plankTool(kind, Items.WOODEN_PICKAXE, material, 3, 2);
                 case "wooden_axe" -> plankTool(kind, Items.WOODEN_AXE, material, 3, 2);
@@ -688,8 +745,37 @@ public final class VillageCraftingJobs {
             case "stone_sword" -> fixed(id, Items.STONE_SWORD, 1, List.of(new Ingredient(Items.COBBLESTONE, 2), new Ingredient(Items.STICK, 1)));
             case "iron_sword" -> fixed(id, Items.IRON_SWORD, 1, List.of(new Ingredient(Items.IRON_INGOT, 2), new Ingredient(Items.STICK, 1)));
             case "bucket" -> fixed(id, Items.BUCKET, 1, List.of(new Ingredient(Items.IRON_INGOT, 3)));
+            case "shears" -> fixed(id, Items.SHEARS, 1, List.of(new Ingredient(Items.IRON_INGOT, 2)));
             default -> null;
         };
+    }
+
+    private static Recipe fenceRecipe(Item planks) {
+        if (planks == null || planks == Items.AIR) return null;
+        ResourceLocation plankKey = BuiltInRegistries.ITEM.getKey(planks);
+        String path = plankKey.getPath();
+        if (!path.endsWith("_planks")) return null;
+        ResourceLocation fenceKey = ResourceLocation.tryParse(
+            plankKey.getNamespace() + ":" + path.substring(0, path.length() - "_planks".length()) + "_fence");
+        if (fenceKey == null) return null;
+        Item fence = BuiltInRegistries.ITEM.get(fenceKey);
+        if (!(Block.byItem(fence) instanceof net.minecraft.world.level.block.FenceBlock)) return null;
+        return new Recipe("fence|" + plankKey, fence, 3,
+            List.of(new Ingredient(planks, 4), new Ingredient(Items.STICK, 2)));
+    }
+
+    private static Recipe fenceGateRecipe(Item planks) {
+        if (planks == null || planks == Items.AIR) return null;
+        ResourceLocation plankKey = BuiltInRegistries.ITEM.getKey(planks);
+        String path = plankKey.getPath();
+        if (!path.endsWith("_planks")) return null;
+        ResourceLocation gateKey = ResourceLocation.tryParse(
+            plankKey.getNamespace() + ":" + path.substring(0, path.length() - "_planks".length()) + "_fence_gate");
+        if (gateKey == null) return null;
+        Item gate = BuiltInRegistries.ITEM.get(gateKey);
+        if (!(Block.byItem(gate) instanceof net.minecraft.world.level.block.FenceGateBlock)) return null;
+        return new Recipe("fence_gate|" + plankKey, gate, 1,
+            List.of(new Ingredient(planks, 2), new Ingredient(Items.STICK, 4)));
     }
 
     private static Recipe doorRecipe(Item planks) {
