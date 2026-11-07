@@ -627,7 +627,8 @@ public final class VillageCraftingJobs {
             || data.getBoolean(VillagePopulation.ACTIVE_KEY)
             || data.getBoolean("livingvillages_logistics_active")
             || data.getBoolean(VillageBuilder.ACTIVE_KEY)
-            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY);
+            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
+            || data.getBoolean(VillageLivestock.ACTIVE_KEY);
     }
 
     private static boolean hasPendingFarmBucketOrder(ServerLevel level, BlockPos center) {
