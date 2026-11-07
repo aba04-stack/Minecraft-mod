@@ -2198,7 +2198,7 @@ public final class VillageReservationGameTests {
             "A treeless desert village must remember its wood deficit without assigning a lumberjack, while keeping one miner until it can quarry the 96 sandstone blocks needed for one house.");
         var desertHouseReady = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
-                2, 32, 96, 0, 16, 0, 0, 24, false, 1));
+                2, 32, 96, 4, 16, 0, 0, 24, false, 1));
         helper.assertTrue(desertHouseReady.targetStoneUnits() == 96
                 && !desertHouseReady.needsStone() && desertHouseReady.desiredMiners() == 0,
             "The desert miner must be released after the full starter house bill is physically secured.");
