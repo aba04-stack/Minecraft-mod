@@ -239,6 +239,11 @@ public final class VillageLogistics {
         if (villager == null || destination == null) return 0;
         int moved = depositMaterials(villager, destination);
         if (moved > 0) {
+            if (villager.level() instanceof ServerLevel level) {
+                BlockPos center = VillagerRoles.getHome(villager);
+                if (center == null) center = villager.blockPosition();
+                VillageWorkOrders.invalidateMaterialDemandCache(level, center);
+            }
             VillagerProgression.recordCompletedWork(
                 villager,
                 com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_COURIER,

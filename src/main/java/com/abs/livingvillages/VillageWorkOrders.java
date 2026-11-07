@@ -340,44 +340,50 @@ public final class VillageWorkOrders extends SavedData {
         Map<UUID, CachedMaterialDemand> byVillage =
             MATERIAL_DEMAND_CACHE.computeIfAbsent(level, ignored -> new HashMap<>());
         CachedMaterialDemand cached = byVillage.get(villageId);
-        if (cached != null && now < cached.expiresAtTick()) return cached.deficits();
+        if (cached == null || now >= cached.expiresAtTick()) {
+            List<VillageWorkOrderModel.Order> pending = list(level, center, now);
+            Map<String, Integer> directDemand = new HashMap<>();
+            Map<String, Integer> plankDemand = new HashMap<>();
+            Set<String> wantedIds = new HashSet<>();
 
-        List<VillageWorkOrderModel.Order> pending = list(level, center, now);
-        Map<String, Integer> directDemand = new HashMap<>();
-        Map<String, Integer> plankDemand = new HashMap<>();
-        Set<String> wantedIds = new HashSet<>();
-
-        for (VillageWorkOrderModel.Order order : pending) {
-            if (order.state() != VillageWorkOrderModel.OPEN
-                && order.state() != VillageWorkOrderModel.WAITING_FOR_RESOURCES) continue;
-            for (VillageWorkOrderModel.Requirement requirement : order.requirements()) {
-                if (requirement == null || !requirement.isValid()) continue;
-                ResourceLocation id = ResourceLocation.tryParse(requirement.itemId());
-                if (id == null) continue;
-                Item item = BuiltInRegistries.ITEM.get(id);
-                Item logItem = VillageIndustry.logItemForPlanks(item);
-                if (logItem != Items.AIR) {
-                    plankDemand.merge(requirement.itemId(), requirement.count(), Integer::sum);
-                    wantedIds.add(requirement.itemId());
-                    wantedIds.add(BuiltInRegistries.ITEM.getKey(logItem).toString());
-                } else {
-                    directDemand.merge(requirement.itemId(), requirement.count(), Integer::sum);
-                    wantedIds.add(requirement.itemId());
+            for (VillageWorkOrderModel.Order order : pending) {
+                if (order.state() != VillageWorkOrderModel.OPEN
+                    && order.state() != VillageWorkOrderModel.WAITING_FOR_RESOURCES) continue;
+                for (VillageWorkOrderModel.Requirement requirement : order.requirements()) {
+                    if (requirement == null || !requirement.isValid()) continue;
+                    ResourceLocation id = ResourceLocation.tryParse(requirement.itemId());
+                    if (id == null) continue;
+                    Item item = BuiltInRegistries.ITEM.get(id);
+                    Item logItem = VillageIndustry.logItemForPlanks(item);
+                    if (logItem != Items.AIR) {
+                        plankDemand.merge(requirement.itemId(), requirement.count(), Integer::sum);
+                        wantedIds.add(requirement.itemId());
+                        wantedIds.add(BuiltInRegistries.ITEM.getKey(logItem).toString());
+                    } else {
+                        directDemand.merge(requirement.itemId(), requirement.count(), Integer::sum);
+                        wantedIds.add(requirement.itemId());
+                    }
                 }
+            }
+
+            Map<String, Integer> accessibleStock = wantedIds.isEmpty()
+                ? Map.of()
+                : VillageRegistry.countAvailableOwnedStorageItems(level, center, wantedIds);
+            cached = new CachedMaterialDemand(
+                Map.copyOf(directDemand), Map.copyOf(plankDemand),
+                Set.copyOf(wantedIds), Map.copyOf(accessibleStock), now + MATERIAL_DEMAND_CACHE_TICKS
+            );
+            byVillage.put(villageId, cached);
+            if (byVillage.size() > 64) {
+                byVillage.entrySet().removeIf(entry -> now >= entry.getValue().expiresAtTick());
             }
         }
 
-        if (wantedIds.isEmpty()) {
-            byVillage.put(villageId, new CachedMaterialDemand(null, now + MATERIAL_DEMAND_CACHE_TICKS));
-            return null;
-        }
+        if (cached.wantedIds().isEmpty()) return null;
 
-        Map<String, Integer> accessibleStock =
-            VillageRegistry.countAvailableOwnedStorageItems(level, center, wantedIds);
+        // Recount carried items and loose drops every query. This changes immediately as one
+        // courier picks up a drop or another courier takes over a delivery route.
         Map<String, Integer> carriedOrDropped = new HashMap<>();
-
-        // Resident inventories are real stock in transit; active builders/farmers are not
-        // part of pending demand because their own work orders are already IN_PROGRESS.
         for (Villager resident : VillageArea.findVillagers(level, center)) {
             CompoundTag data = resident.getPersistentData();
             if (data.getBoolean(VillageBuilder.ACTIVE_KEY)
@@ -387,17 +393,15 @@ public final class VillageWorkOrders extends SavedData {
                 ItemStack stack = resident.getInventory().getItem(slot);
                 if (stack.isEmpty()) continue;
                 String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-                if (wantedIds.contains(itemId)) carriedOrDropped.merge(itemId, stack.getCount(), Integer::sum);
+                if (cached.wantedIds().contains(itemId)) carriedOrDropped.merge(itemId, stack.getCount(), Integer::sum);
             }
             ItemStack hand = resident.getMainHandItem();
             if (!hand.isEmpty()) {
                 String itemId = BuiltInRegistries.ITEM.getKey(hand.getItem()).toString();
-                if (wantedIds.contains(itemId)) carriedOrDropped.merge(itemId, hand.getCount(), Integer::sum);
+                if (cached.wantedIds().contains(itemId)) carriedOrDropped.merge(itemId, hand.getCount(), Integer::sum);
             }
         }
 
-        // Count real item entities only inside the owning settlement, so a nearby second
-        // village cannot satisfy this village's order by dropping items across its boundary.
         int radius = Math.max(8, Math.min(32, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get()));
         AABB itemArea = new AABB(center).inflate(radius, 16.0D, radius);
         for (ItemEntity entity : level.getEntitiesOfClass(ItemEntity.class, itemArea, ItemEntity::isAlive)) {
@@ -405,18 +409,18 @@ public final class VillageWorkOrders extends SavedData {
             ItemStack stack = entity.getItem();
             if (stack.isEmpty()) continue;
             String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-            if (wantedIds.contains(itemId)) carriedOrDropped.merge(itemId, stack.getCount(), Integer::sum);
+            if (cached.wantedIds().contains(itemId)) carriedOrDropped.merge(itemId, stack.getCount(), Integer::sum);
         }
 
         Map<String, Integer> deficits = new HashMap<>();
-        for (Map.Entry<String, Integer> entry : directDemand.entrySet()) {
-            long available = (long) accessibleStock.getOrDefault(entry.getKey(), 0)
+        for (Map.Entry<String, Integer> entry : cached.directDemand().entrySet()) {
+            long available = (long) cached.accessibleStock().getOrDefault(entry.getKey(), 0)
                 + carriedOrDropped.getOrDefault(entry.getKey(), 0);
             long missing = Math.max(0L, (long) entry.getValue() - available);
             if (missing > 0L) deficits.put(entry.getKey(), (int) Math.min(Integer.MAX_VALUE, missing));
         }
 
-        for (Map.Entry<String, Integer> entry : plankDemand.entrySet()) {
+        for (Map.Entry<String, Integer> entry : cached.plankDemand().entrySet()) {
             ResourceLocation plankId = ResourceLocation.tryParse(entry.getKey());
             if (plankId == null) continue;
             Item plankItem = BuiltInRegistries.ITEM.get(plankId);
@@ -425,19 +429,22 @@ public final class VillageWorkOrders extends SavedData {
             String logId = BuiltInRegistries.ITEM.getKey(logItem).toString();
             int missingLogs = VillageWorkOrderModel.missingInputCount(
                 entry.getValue(),
-                accessibleStock.getOrDefault(entry.getKey(), 0) + carriedOrDropped.getOrDefault(entry.getKey(), 0),
-                accessibleStock.getOrDefault(logId, 0) + carriedOrDropped.getOrDefault(logId, 0),
+                cached.accessibleStock().getOrDefault(entry.getKey(), 0)
+                    + carriedOrDropped.getOrDefault(entry.getKey(), 0),
+                cached.accessibleStock().getOrDefault(logId, 0)
+                    + carriedOrDropped.getOrDefault(logId, 0),
                 4
             );
             if (missingLogs > 0) deficits.merge(logId, missingLogs, Integer::sum);
         }
 
-        Map<String, Integer> result = Map.copyOf(deficits);
-        byVillage.put(villageId, new CachedMaterialDemand(result, now + MATERIAL_DEMAND_CACHE_TICKS));
-        if (byVillage.size() > 64) {
-            byVillage.entrySet().removeIf(entry -> now >= entry.getValue().expiresAtTick());
-        }
-        return result;
+        return Map.copyOf(deficits);
+    }
+
+    /** Explicitly refresh demand after a real storage transfer or an external order mutation. */
+    public static void invalidateMaterialDemandCache(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return;
+        invalidateMaterialDemandCache(level, VillageRegistry.villageId(level, center));
     }
 
     /** Returns the matching log type required by the highest-priority pending plank order. */
@@ -478,7 +485,13 @@ public final class VillageWorkOrders extends SavedData {
         return Items.AIR;
     }
 
-    private record CachedMaterialDemand(Map<String, Integer> deficits, long expiresAtTick) {}
+    private record CachedMaterialDemand(
+        Map<String, Integer> directDemand,
+        Map<String, Integer> plankDemand,
+        Set<String> wantedIds,
+        Map<String, Integer> accessibleStock,
+        long expiresAtTick
+    ) {}
 
     /** Count quantities reserved by all active orders except the provided order. */
     public static Map<String, Integer> reservedItemCounts(
