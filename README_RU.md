@@ -1,6 +1,8 @@
-# Living Villages 0.15.0 (Living Civilization) — логичная автономная деревня
+# Living Villages 0.16.0 (Living Civilization) — логичная автономная деревня
 
 **Целевая версия в конфигурации (`gradle.properties`):** Minecraft Java Edition 1.21.1 · NeoForge 21.1.264 · Java 21 · Gradle 9.2.1.  
+**Текущая версия этой ветки:** `0.16.0` — черновик [PR #7](https://github.com/aba04-stack/Minecraft-mod/pull/7). Ветка `main` пока остаётся на `0.15.0`; новый GitHub Release не публиковался.  
+**Проверка новой механики:** [CI #416](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42363241908), commit `dad65da70d78f36bab0a2756eb9e1a35142a05da`: сборка, 43/43 GameTests, запуск dedicated server и клиента с software OpenGL.
 **Статус интеграции 0.15.0:** PR #6 объединён в `main` 7 ноября 2026 года (merge commit `c742873e8b0e74223fefbe01f69783ab86052c44`). Проверенный исходный commit `eb8540f2ffadc8ac4fc05fdeeda2c882fda8167f` прошёл [CI #402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349): сборка, 40/40 обязательных GameTests, запуск dedicated server и клиента с software OpenGL. Длительное тестирование полного развития поселения в обычном мире остаётся отдельной задачей. См. [`docs/TESTING.md`](docs/TESTING.md) и [план автономного развития](docs/SETTLEMENT_AUTONOMY_PLAN.md).
 
 > **Полная техническая документация проекта Living Civilization:**
@@ -8,7 +10,15 @@
 > - [Целевая архитектура (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md) · [Прокачка профессий (`docs/PROGRESSION.md`)](docs/PROGRESSION.md) · [Опасный мир и ИИ монстров (`docs/MONSTERS.md`)](docs/MONSTERS.md)
 > - [Производительность (`docs/PERFORMANCE.md`)](docs/PERFORMANCE.md) · [Сохранения (`docs/SAVE_DATA.md`)](docs/SAVE_DATA.md) · [Тестирование (`docs/TESTING.md`)](docs/TESTING.md) · [Качество релизов (`docs/RELEASE_QUALITY.md`)](docs/RELEASE_QUALITY.md)
 
-**Последняя интеграционная проверка:** 7 ноября 2026, исходный commit `eb8540f2ffadc8ac4fc05fdeeda2c882fda8167f`, [GitHub Actions run #402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349). Успешно завершились статические проверки, Gradle build, 40/40 GameTests, dedicated-server smoke-test и client smoke-test с software OpenGL. [Проверенный CI JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349/artifacts/13567479833) — артефакт проверки, не опубликованный релиз.
+**Последняя интеграционная проверка `main` (версия 0.15.0):** 7 ноября 2026, исходный commit `eb8540f2ffadc8ac4fc05fdeeda2c882fda8167f`, [GitHub Actions run #402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349). Успешно завершились статические проверки, Gradle build, 40/40 GameTests, dedicated-server smoke-test и client smoke-test с software OpenGL. [Проверенный CI JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349/artifacts/13567479833) — артефакт проверки, не опубликованный релиз.
+
+## Животноводство, овцы и шерсть (версия ветки 0.16.0)
+
+- Строитель сначала возводит отдельный загон 5×5 из 15 настоящих оград и одной калитки, используя физические материалы поселения.
+- Животновод берёт настоящую пшеницу со склада или у свободного жителя, подходит к доступной овце и ведёт её к калитке обычной навигацией.
+- Овца становится собственностью поселения только после попадания в его загон. Потомство наследует принадлежность только от двух овец одного поселения и при рождении внутри этого загона.
+- Если есть потребность в кровати и настоящие ножницы, животновод стрижёт овцу штатной механикой Minecraft, собирает реальный дроп и относит шерсть в принадлежащий поселению склад.
+- Система не создаёт предметы, не телепортирует животных, не загружает чанки принудительно и не выманивает овец из распознанных огороженных загонов. Поведение в обычном survival-мире всё ещё требует длительной полевой проверки.
 
 ## Выбор группы жителей и границы деревень
 
@@ -95,13 +105,13 @@
 
 Эти скрипты используют установленный Gradle 9.2.1, если он доступен. Иначе они пытаются скачать официальный Gradle 9.2.1, сверяют SHA-256 и запускают сборку. Для первого запуска поэтому нужен доступ к `services.gradle.org` и репозиториям Minecraft/NeoForge. Это checksum-проверяемый bootstrap-скрипт, а не официальный Gradle Wrapper: бинарный `gradle-wrapper.jar` в архив не включён.
 
-После успешной сборки файл ожидается в `build/libs/livingvillages-0.15.0.jar`. Положи его в папку `mods` профиля Minecraft 1.21.1 с совместимым NeoForge. Сначала проверяй в копии тестового мира; не запускай непроверенную сборку в основном сохранении.
+После успешной сборки файл ожидается в `build/libs/livingvillages-0.16.0.jar`. Положи его в папку `mods` профиля Minecraft 1.21.1 с совместимым NeoForge. Сначала проверяй в копии тестового мира; не запускай непроверенную сборку в основном сохранении.
 
 `BUILD_LOCAL.sh` запускает тот же bootstrap на Linux/macOS. GitHub Actions выполняет статические проверки, собирает проект и публикует JAR как артефакт после запуска workflow в репозитории.
 
 ## Что проверено в этом архиве
 
-- Версия проекта, имена артефактов и metadata обновлены до 0.15.0.
+- Версия feature-ветки, имена артефактов и metadata обновлены до 0.16.0; main пока остаётся на 0.15.0.
 - Новый `VillageBuilder` хранит план и этап на самом жителе, собирает настоящие доски и кровать из физических контейнеров и строит хижину по одному блоку.
 - Учитываются радиус досягаемости, прямая видимость, ночь, `mobGriefing`, активные рейсы других работников и остановка параллельного крафта.
 - Исправлена проверка семян фермы: используется явное соответствие ванильных предметов и культур, а не `Block.byItem`.
@@ -110,8 +120,9 @@
 - JSON-файлы переводов разбираются парсером.
 - Сборочные shell-скрипты проверяются через `sh -n`.
 - Исходники дополнительно компилируются с Minecraft/NeoForge classpath в GitHub Actions.
-- Объединённая ревизия исходников прошла [CI #402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349): сборка, 40/40 GameTests, dedicated server и software-OpenGL client; [CI-артефакт JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349/artifacts/13567479833).
-- В интеграционном CI выполняются 40 обязательных Minecraft GameTests через `runGameTestServer`; среди проверяемых областей — миграция реестра, резервирование хранилищ, изоляция соседних поселений, заказы/логистика, безопасная разведка и снабжение ферм водой.
+- Интеграция PR #6 в `main` прошла [CI #402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349): сборка, 40/40 GameTests, dedicated server и software-OpenGL client; [CI-артефакт JAR 0.15.0](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349/artifacts/13567479833).
+- Кодовая ревизия животноводства PR #7 прошла [CI #416](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42363241908): сборка, 43/43 GameTests, dedicated server и software-OpenGL client; [CI-артефакт JAR 0.16.0](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42363241908/artifacts/13571065332). Это артефакт проверки, а не опубликованный релиз.
+- GameTests через `runGameTestServer` покрывают миграцию реестра, резервирование хранилищ, изоляцию соседних поселений, заказы/логистику, безопасную разведку, снабжение ферм водой, чертёж загона, рецепты ограды/калитки/ножниц, границы загона и запрет выманивать овец из уже огороженных загонов.
 - Smoke-test dedicated server подтверждает, что сервер достиг сообщения готовности без ошибки загрузки мода.
 - Headless client smoke-test под Xvfb/software OpenGL создаёт настоящий экран старосты и проверяет семь кнопок/границы панели на окне `427×240`. Нажатия кнопок, сетевые ответы сервера и полный игровой сценарий не автоматизированы.
 
