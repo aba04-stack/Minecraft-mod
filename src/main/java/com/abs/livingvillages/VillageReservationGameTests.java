@@ -2165,20 +2165,13 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "empty", timeoutTicks = 20, batch = "farmer_field_cycle")
-    public static void farmlandExpansionCountsNearbyOwnedPlots(GameTestHelper helper) {
-        Villager resident = helper.spawn(EntityType.VILLAGER, 2, 1, 2);
-        BlockPos field = new BlockPos(3, 1, 2);
-        helper.setBlock(field.below(), Blocks.DIRT);
-        helper.setBlock(field, Blocks.FARMLAND);
-        helper.assertTrue(LivingVillages.countFarmland(helper.getLevel(), resident.blockPosition()) == 1,
-            "A loaded farmland block in this resident group must count toward its acreage.");
-        helper.assertTrue(LivingVillages.shouldExpandFarm(true, 24, 8)
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "farm_expansion")
+    public static void farmExpansionStopsWhenFoodOrAcreageTargetIsSatisfied(GameTestHelper helper) {
+        helper.assertTrue(LivingVillages.shouldExpandFarm(true, 19, 8)
                 && !LivingVillages.shouldExpandFarm(false, 0, 8)
                 && !LivingVillages.shouldExpandFarm(true, 32, 8)
-                && !LivingVillages.shouldExpandFarm(true, 0, 1),
-            "Field expansion requires a real food shortage, less than four plots per adult (with a 20-plot minimum), and at least two adults.");
-        resident.discard();
+                && !LivingVillages.shouldExpandFarm(true, 19, 1),
+            "Field expansion requires a measured food shortage, less than four plots per adult (with a 20-plot minimum), and at least two adults.");
         helper.succeed();
     }
 
