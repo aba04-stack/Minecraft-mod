@@ -135,6 +135,7 @@ public final class LivingVillages {
             }
 
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
+            VillageLivestock.maintainPenGate(level, villageCenter);
             long tickStartNanos = System.nanoTime();
             VillageRegistry.recordVisitAndRunCatchUp(level, villageCenter, level.getGameTime());
             VillageElder.ensureElder(level, villageCenter, villagers);
@@ -237,6 +238,7 @@ public final class LivingVillages {
             if (villagers.isEmpty() || isDuplicateArea(alreadyChecked, level, villagers)) continue;
             rememberActiveArea(alreadyChecked, level, villagers);
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
+            VillageLivestock.maintainPenGate(level, villageCenter);
             VillageRegistry.cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers)) {
