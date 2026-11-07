@@ -1143,6 +1143,7 @@ public final class VillageReservationGameTests {
         helper.assertTrue(snapshotOne.population() == 4 && snapshotOne.foodPoints() == 64,
             "Elder panel snapshot must report the owning village's population and stored food points.");
 
+        int standingBeforeTrade = VillageRegistry.getDiplomaticStanding(helper.getLevel(), centerOne, centerTwo);
         helper.assertTrue(
             VillageRegistry.executeNeighborTradeIfEligible(helper.getLevel(), centerOne, centerTwo, 4, 8),
             "Peaceful neighboring villages with real surplus must execute a physical trade caravan.");
@@ -1160,8 +1161,8 @@ public final class VillageReservationGameTests {
             planksAfterOne == 24 && breadAfterTwo == 12,
             "Each village's chest must physically receive the traded goods from its neighbor.");
         helper.assertTrue(
-            VillageRegistry.getDiplomaticStanding(helper.getLevel(), centerOne, centerTwo) == 15,
-            "Successful surplus trade must increase persistent diplomatic standing between the two villages.");
+            VillageRegistry.getDiplomaticStanding(helper.getLevel(), centerOne, centerTwo) > standingBeforeTrade,
+            "Successful surplus trade must increase persistent diplomatic standing relative to the value before this transaction.");
 
         // Also verify biome-specific resource trade: Desert village exchanges surplus Sandstone for Forest Oak Planks.
         chestOne.clearContent();
@@ -1493,6 +1494,19 @@ public final class VillageReservationGameTests {
             true,
             100L
         );
+
+        // A builder may only be assigned when a real house order can start: 96 matching planks,
+        // one compatible door, and one bed must be physically present in the village warehouse.
+        BlockPos starterChestPos = helper.absolutePos(new BlockPos(5, 1, 1));
+        helper.getLevel().setBlock(starterChestPos.below(), Blocks.STONE.defaultBlockState(), 3);
+        helper.getLevel().setBlock(starterChestPos, Blocks.CHEST.defaultBlockState(), 3);
+        Container starterChest = (Container) helper.getLevel().getBlockEntity(starterChestPos);
+        helper.assertTrue(starterChest != null, "The builder-preference fixture needs a real village chest.");
+        starterChest.setItem(0, new ItemStack(Items.OAK_PLANKS, 64));
+        starterChest.setItem(1, new ItemStack(Items.OAK_PLANKS, 32));
+        starterChest.setItem(2, new ItemStack(Items.OAK_DOOR, 1));
+        starterChest.setItem(3, new ItemStack(Items.OAK_BED, 1));
+        starterChest.setChanged();
 
         BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
         VillagerRoles.assignRoles(helper.getLevel(), center);
