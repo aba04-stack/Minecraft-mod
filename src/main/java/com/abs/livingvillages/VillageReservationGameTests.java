@@ -2615,6 +2615,27 @@ public final class VillageReservationGameTests {
                 && !VillageLivestock.isInsideVillagePen(helper.getLevel(), villageCenter, outside),
             "Only animals physically within the complete settlement pen count as village livestock.");
 
+        net.minecraft.world.entity.animal.Sheep unherded = helper.spawn(EntityType.SHEEP, 6, 1, 6);
+        unherded.setNoAi(true);
+        helper.assertTrue(!VillageLivestock.claimSheepAfterHerding(helper.getLevel(), villageCenter, unherded)
+                && unherded.getPersistentData().getString(VillageLivestock.SHEEP_OWNER_KEY).isBlank(),
+            "A sheep that merely appears inside the village pen must not be adopted without a recent wheat-lure record.");
+
+        unherded.getPersistentData().putString(VillageLivestock.SHEEP_LURE_OWNER, villageId.toString());
+        unherded.getPersistentData().putLong(VillageLivestock.SHEEP_LAST_LURE_TICK, helper.getLevel().getGameTime());
+        helper.assertTrue(VillageLivestock.claimSheepAfterHerding(helper.getLevel(), villageCenter, unherded)
+                && villageId.toString().equals(unherded.getPersistentData().getString(VillageLivestock.SHEEP_OWNER_KEY)),
+            "An unowned sheep may become village livestock after its own herder recently lured it into the pen.");
+
+        net.minecraft.world.entity.animal.Sheep named = helper.spawn(EntityType.SHEEP, 4, 1, 6);
+        named.setNoAi(true);
+        named.setCustomName(net.minecraft.network.chat.Component.literal("Player sheep"));
+        named.getPersistentData().putString(VillageLivestock.SHEEP_LURE_OWNER, villageId.toString());
+        named.getPersistentData().putLong(VillageLivestock.SHEEP_LAST_LURE_TICK, helper.getLevel().getGameTime());
+        helper.assertTrue(!VillageLivestock.claimSheepAfterHerding(helper.getLevel(), villageCenter, named)
+                && named.getPersistentData().getString(VillageLivestock.SHEEP_OWNER_KEY).isBlank(),
+            "A player-named sheep must never be adopted automatically, even inside the village pen.");
+
         ItemStack shears = new ItemStack(Items.SHEARS);
         helper.assertTrue(VillageLivestock.shearManagedSheep(helper.getLevel(), inside, shears, villageCenter)
                 && inside.isSheared() && shears.getDamageValue() > 0,
