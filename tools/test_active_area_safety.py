@@ -16,7 +16,7 @@ assert "level.getEntitiesOfClass(Villager.class, area, Villager::isAlive)" in ar
     "the shared village selector must filter out dead villagers"
 )
 
-start = source.index("private int countFarmland")
+start = source.index("static int countFarmland") if "static int countFarmland" in source else source.index("private int countFarmland")
 end = source.index("private BlockPos findFarmSite", start)
 farmland_method = source[start:end]
 guard = "if (!level.hasChunkAt(pos)) continue;"

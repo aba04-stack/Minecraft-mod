@@ -253,6 +253,32 @@ public final class VillageReservationGameTests {
         helper.assertTrue(VillageReservations.isStorageAvailable(
             helper.getLevel(), chest, owner),
             "The seed storage reservation must be released when seed fetching ends.");
+
+        // Builder-built animal pens use their own reservation kind and must keep it alive.
+        owner.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, true);
+        helper.assertTrue(VillageReservations.tryReserveStoragePositions(
+            helper.getLevel(), owner, List.of(chest), "animal_pen"),
+            "A builder must be able to reserve materials for a livestock pen.");
+        helper.assertTrue(!VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "A pen-material claim must remain exclusive while the builder project is active.");
+        owner.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, false);
+        helper.assertTrue(VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "A pen-material claim must be released when the builder project ends.");
+
+        // The herder retains its chest during the real fetch/delivery route.
+        owner.getPersistentData().putBoolean(VillageLivestock.RESERVATION_ACTIVE_KEY, true);
+        helper.assertTrue(VillageReservations.tryReserveStoragePositions(
+            helper.getLevel(), owner, List.of(chest), "livestock"),
+            "A herder must be able to reserve the chest it is visiting.");
+        helper.assertTrue(!VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "A livestock route must keep its storage claim until the route ends.");
+        owner.getPersistentData().putBoolean(VillageLivestock.RESERVATION_ACTIVE_KEY, false);
+        helper.assertTrue(VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "The herder's claim must be released when its storage route ends.");
         helper.succeed();
     }
 
@@ -513,15 +539,22 @@ public final class VillageReservationGameTests {
             "The bed owner must be recorded.");
         helper.assertTrue(VillageRegistry.isWorkBlockForVillage(helper.getLevel(), center, workBlock),
             "The work-block owner must be recorded.");
+        java.util.UUID villageId = VillageRegistry.villageId(helper.getLevel(), center);
+        helper.assertTrue(VillageRegistry.recordDesertStarterKitGranted(helper.getLevel(), center),
+            "A settlement may record its one-time desert starter cache after the real items are committed.");
+        helper.assertTrue(!VillageRegistry.recordDesertStarterKitGranted(helper.getLevel(), center),
+            "A second startup pass must not grant duplicate desert resources.");
 
         VillageRegistry live = VillageRegistry.get(helper.getLevel());
         CompoundTag saved = live.save(new CompoundTag(), helper.getLevel().registryAccess());
         VillageRegistry restored = VillageRegistry.load(saved, helper.getLevel().registryAccess());
+        helper.assertTrue(restored.hasDesertStarterKit(villageId),
+            "The one-time desert starter claim must survive SavedData reload.");
         CompoundTag roundTripped = restored.save(new CompoundTag(), helper.getLevel().registryAccess());
 
         for (String key : List.of(
             "villageAnchors", "knownHomes", "knownResidents",
-            "storageOwners", "bedOwners", "workBlockOwners")) {
+            "storageOwners", "bedOwners", "workBlockOwners", "desertStarterKits")) {
             Set<String> before = canonicalTagRows(saved, key);
             Set<String> after = canonicalTagRows(roundTripped, key);
             helper.assertTrue(!before.isEmpty(),
@@ -553,6 +586,7 @@ public final class VillageReservationGameTests {
                     ids.sort(String::compareTo);
                     rows.add(entry.getString("id") + "|" + String.join(",", ids));
                 }
+                case "desertStarterKits" -> rows.add(entry.getString("id"));
                 default -> rows.add(entry.getLong("pos") + "|" + entry.getString("village"));
             }
         }
@@ -624,6 +658,24 @@ public final class VillageReservationGameTests {
 
         BlockPos centerOne = helper.absolutePos(new BlockPos(2, 1, 1));
         BlockPos centerTwo = helper.absolutePos(new BlockPos(26, 1, 1));
+        List<Villager> firstResidentGroup = VillageArea.findVillagers(helper.getLevel(), centerOne, 32, 32);
+        List<Villager> secondResidentGroup = VillageArea.findVillagers(helper.getLevel(), centerTwo, 32, 32);
+        helper.assertTrue(firstResidentGroup.size() == 2 && secondResidentGroup.size() == 2,
+            "The two test HOME clusters must each resolve to exactly their own residents (first="
+                + firstResidentGroup.size() + ", second=" + secondResidentGroup.size() + ").");
+
+        java.util.UUID villageOneId = VillageRegistry.villageId(helper.getLevel(), centerOne);
+        java.util.UUID villageTwoId = VillageRegistry.villageId(helper.getLevel(), centerTwo);
+        helper.assertTrue(villageOneId != null && villageTwoId != null && !villageOneId.equals(villageTwoId),
+            "The two disjoint HOME clusters must resolve to distinct identities (first=" + villageOneId
+                + ", second=" + villageTwoId + ", firstGroup="
+                + firstResidentGroup.stream().map(v -> v.getUUID().toString()).toList()
+                + ", secondGroup=" + secondResidentGroup.stream().map(v -> v.getUUID().toString()).toList() + ").");
+        helper.assertTrue(VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerOne, storageOne)
+                && VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerTwo, storageTwo)
+                && !VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerOne, storageTwo)
+                && !VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerTwo, storageOne),
+            "A worker must resolve only the physical storage nearest to its own resident cluster.");
         helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerOne, storageOne),
             "The first chest must be owned by village one.");
         helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerTwo, storageTwo),
@@ -1099,6 +1151,7 @@ public final class VillageReservationGameTests {
         helper.assertTrue(snapshotOne.population() == 4 && snapshotOne.foodPoints() == 64,
             "Elder panel snapshot must report the owning village's population and stored food points.");
 
+        int standingBeforeTrade = VillageRegistry.getDiplomaticStanding(helper.getLevel(), centerOne, centerTwo);
         helper.assertTrue(
             VillageRegistry.executeNeighborTradeIfEligible(helper.getLevel(), centerOne, centerTwo, 4, 8),
             "Peaceful neighboring villages with real surplus must execute a physical trade caravan.");
@@ -1116,8 +1169,8 @@ public final class VillageReservationGameTests {
             planksAfterOne == 24 && breadAfterTwo == 12,
             "Each village's chest must physically receive the traded goods from its neighbor.");
         helper.assertTrue(
-            VillageRegistry.getDiplomaticStanding(helper.getLevel(), centerOne, centerTwo) == 15,
-            "Successful surplus trade must increase persistent diplomatic standing between the two villages.");
+            VillageRegistry.getDiplomaticStanding(helper.getLevel(), centerOne, centerTwo) > standingBeforeTrade,
+            "Successful surplus trade must increase persistent diplomatic standing relative to the value before this transaction.");
 
         // Also verify biome-specific resource trade: Desert village exchanges surplus Sandstone for Forest Oak Planks.
         chestOne.clearContent();
@@ -1449,6 +1502,19 @@ public final class VillageReservationGameTests {
             true,
             100L
         );
+
+        // A builder may only be assigned when a real house order can start: 96 matching planks,
+        // one compatible door, and one bed must be physically present in the village warehouse.
+        BlockPos starterChestPos = helper.absolutePos(new BlockPos(5, 1, 1));
+        helper.getLevel().setBlock(starterChestPos.below(), Blocks.STONE.defaultBlockState(), 3);
+        helper.getLevel().setBlock(starterChestPos, Blocks.CHEST.defaultBlockState(), 3);
+        Container starterChest = (Container) helper.getLevel().getBlockEntity(starterChestPos);
+        helper.assertTrue(starterChest != null, "The builder-preference fixture needs a real village chest.");
+        starterChest.setItem(0, new ItemStack(Items.OAK_PLANKS, 64));
+        starterChest.setItem(1, new ItemStack(Items.OAK_PLANKS, 32));
+        starterChest.setItem(2, new ItemStack(Items.OAK_DOOR, 1));
+        starterChest.setItem(3, new ItemStack(Items.WHITE_BED, 1));
+        starterChest.setChanged();
 
         BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
         VillagerRoles.assignRoles(helper.getLevel(), center);
@@ -2099,7 +2165,6 @@ public final class VillageReservationGameTests {
                 && starter.desiredMiners() == 2
                 && starter.desiredFarmers() == 1,
             "Low physical stock with local trees, ripe crops and tools must request the matching workers.");
-
         var stocked = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
                 8, 256, 160, 32, 256, 0, 0, 0, true, 3));
@@ -2109,13 +2174,70 @@ public final class VillageReservationGameTests {
                 && stocked.desiredMiners() == 0
                 && stocked.desiredFarmers() == 0,
             "Workers must not keep extracting resources after stock reaches its targets.");
+        helper.assertTrue(
+            VillagerRoles.desiredLumberjackSlots(true, false, 0, true) == 0
+                && VillagerRoles.desiredLumberjackSlots(true, true, 0, true) == 1
+                && VillagerRoles.desiredLumberjackSlots(false, true, 2, true) == 0,
+            "A queued house log order only assigns a lumberjack when an adult tree really exists and tree work is enabled.");
+        helper.assertTrue(LivingVillages.shouldExpandFarm(starter.needsFood(), 24, 8)
+                && !LivingVillages.shouldExpandFarm(stocked.needsFood(), 24, 8),
+            "Farm expansion must follow measured food demand rather than acreage alone.");
 
         var treeless = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
                 8, 0, 0, 0, 0, 0, 0, 0, false, 2));
         helper.assertTrue(
-            !treeless.needsWood() && treeless.desiredLumberjacks() == 0,
-            "A treeless settlement must not assign lumberjacks to a resource source that is not present.");
+            treeless.needsWood() && treeless.desiredLumberjacks() == 0,
+            "A treeless settlement must remember its unmet wood demand but must not assign a worker until a mature tree exists.");
+        var regrownForest = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 32, 0, 0, 0, 0, 0, 0, true, 2));
+        helper.assertTrue(regrownForest.needsWood() && regrownForest.desiredLumberjacks() == 2,
+            "When a real mature tree appears, the saved wood deficit must immediately request lumberjacks.");
+
+        var desert = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                2, 32, 0, 0, 16, 0, 0, 24, false, 1, true));
+        helper.assertTrue(desert.targetStoneUnits() == 96 && desert.needsStone()
+                && desert.desiredMiners() == 1 && desert.needsWood() && desert.desiredLumberjacks() == 0,
+            "A treeless desert village must remember its wood deficit without assigning a lumberjack, while keeping one miner until it can quarry the 96 sandstone blocks needed for one house.");
+        var desertHouseReady = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                2, 32, 96, 4, 16, 0, 0, 24, false, 1, true));
+        var desertWithOneTree = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                2, 32, 0, 0, 16, 0, 0, 24, true, 1, true));
+        helper.assertTrue(desertWithOneTree.treesAvailable()
+                && desertWithOneTree.targetStoneUnits() == 96
+                && desertWithOneTree.needsStone()
+                && VillageIndustry.needsDesertStarterKit(desertWithOneTree),
+            "A single planted tree must not disable the desert bootstrap or lower the first-house sandstone target.");
+
+        helper.assertTrue(desertHouseReady.targetStoneUnits() == 96
+                && !desertHouseReady.needsStone() && desertHouseReady.desiredMiners() == 0,
+            "The desert miner must be released after the full starter house bill is physically secured.");
+
+        List<ItemStack> desertKit = VillageIndustry.createDesertStarterKit();
+        helper.assertTrue(desertKit.stream().filter(stack -> stack.is(Items.SANDSTONE))
+                .mapToInt(ItemStack::getCount).sum() == 96
+                && desertKit.stream().filter(stack -> stack.is(Items.OAK_LOG))
+                    .mapToInt(ItemStack::getCount).sum() == 8
+                && desertKit.stream().anyMatch(stack -> stack.is(Items.STONE_PICKAXE))
+                && desertKit.stream().filter(stack -> stack.is(Items.WHEAT_SEEDS))
+                    .mapToInt(ItemStack::getCount).sum() == 24
+                && desertKit.stream().anyMatch(stack -> stack.is(Items.WATER_BUCKET))
+                && desertKit.stream().anyMatch(stack -> stack.is(Items.COMPOSTER)),
+            "The one-time desert cache must contain a complete first-house sandstone bill and a real starter farm/tool kit.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "farm_expansion")
+    public static void farmExpansionStopsWhenFoodOrAcreageTargetIsSatisfied(GameTestHelper helper) {
+        helper.assertTrue(LivingVillages.shouldExpandFarm(true, 19, 8)
+                && !LivingVillages.shouldExpandFarm(false, 0, 8)
+                && !LivingVillages.shouldExpandFarm(true, 32, 8)
+                && !LivingVillages.shouldExpandFarm(true, 19, 1),
+            "Field expansion requires a measured food shortage, less than four plots per adult (with a 20-plot minimum), and at least two adults.");
         helper.succeed();
     }
 
@@ -2495,6 +2617,10 @@ public final class VillageReservationGameTests {
             com.abs.livingvillages.domain.DailyLifeActivityModel.canAcceptSocialVisitor(0)
                 && !com.abs.livingvillages.domain.DailyLifeActivityModel.canAcceptSocialVisitor(1),
             "A resident may have at most one active social visitor to prevent crowding.");
+        helper.assertTrue(
+            com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisitInVillage(0)
+                && !com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisitInVillage(1),
+            "Only one social pair may be active in a village at a time.");
 
         boolean mustCancel = com.abs.livingvillages.domain.DailyLifeActivityModel.shouldCancelSocialVisit(
             true, true, false, false, false, false);
@@ -2507,6 +2633,280 @@ public final class VillageReservationGameTests {
             com.abs.livingvillages.domain.DailyLifeActivityModel.nextAttemptTick(1000L, true) == 3400L
                 && com.abs.livingvillages.domain.DailyLifeActivityModel.nextAttemptTick(1000L, false) == 1400L,
             "Successful visits and failed routes must use separate bounded cooldowns.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void livestockPenBlueprintAndCraftingRecipesUseVanillaMaterials(GameTestHelper helper) {
+        helper.assertTrue(VillageBuilder.hasValidLivestockPenBlueprint(),
+            "The builder blueprint must contain exactly 15 matching fences and one closed gate placed last.");
+        helper.assertTrue(VillageCraftingJobs.hasValidLivestockPenRecipes(),
+            "Fence, gate and shears recipes must use the exact vanilla material costs and outputs.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void villageHerdingPenOwnsItsInteriorAndShearsRealWool(GameTestHelper helper) {
+        BlockPos site = helper.absolutePos(new BlockPos(3, 1, 3));
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                helper.getLevel().setBlock(site.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), 3);
+                if (dx == 0 || dx == 4 || dz == 0 || dz == 4) {
+                    BlockPos boundary = site.offset(dx, 0, dz);
+                    if (dx == 2 && dz == 0) {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE_GATE.defaultBlockState()
+                            .setValue(net.minecraft.world.level.block.FenceGateBlock.OPEN, false), 3);
+                    } else {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE.defaultBlockState(), 3);
+                    }
+                } else {
+                    helper.getLevel().setBlock(site.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), 3);
+                }
+                helper.getLevel().setBlock(site.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), 3);
+            }
+        }
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        residentA.setNoAi(true);
+        residentB.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(1, 1, 1))));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(2, 1, 1))));
+
+        BlockPos villageCenter = helper.absolutePos(new BlockPos(2, 1, 1));
+        java.util.UUID villageId = VillageRegistry.villageId(helper.getLevel(), villageCenter);
+        helper.assertTrue(villageId != null, "A village identity must exist before the pen can own livestock.");
+        VillageRegistry.recordLivestockPenCheckpoint(helper.getLevel(), villageCenter,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "animal_pen", site.getX(), site.getY(), site.getZ(),
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(Items.OAK_FENCE).toString(),
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(Items.OAK_FENCE_GATE).toString(),
+                16, 16, "livestock-test-builder", helper.getLevel().getGameTime()));
+
+        net.minecraft.world.entity.animal.Sheep inside = helper.spawn(EntityType.SHEEP, 5, 1, 5);
+        net.minecraft.world.entity.animal.Sheep outside = helper.spawn(EntityType.SHEEP, 10, 1, 5);
+        inside.setNoAi(true);
+        outside.setNoAi(true);
+        inside.getPersistentData().putString(VillageLivestock.SHEEP_OWNER_KEY, villageId.toString());
+        outside.getPersistentData().putString(VillageLivestock.SHEEP_OWNER_KEY, villageId.toString());
+
+        helper.assertTrue(VillageLivestock.hasCompletePen(helper.getLevel(), villageCenter)
+                && VillageLivestock.isInsideVillagePen(helper.getLevel(), villageCenter, inside)
+                && !VillageLivestock.isInsideVillagePen(helper.getLevel(), villageCenter, outside),
+            "Only animals physically within the complete settlement pen count as village livestock.");
+
+        net.minecraft.world.entity.animal.Sheep unherded = helper.spawn(EntityType.SHEEP, 6, 1, 6);
+        unherded.setNoAi(true);
+        helper.assertTrue(!VillageLivestock.claimSheepAfterHerding(helper.getLevel(), villageCenter, unherded)
+                && unherded.getPersistentData().getString(VillageLivestock.SHEEP_OWNER_KEY).isBlank(),
+            "A sheep that merely appears inside the village pen must not be adopted without a recent wheat-lure record.");
+
+        unherded.getPersistentData().putString(VillageLivestock.SHEEP_LURE_OWNER, villageId.toString());
+        unherded.getPersistentData().putLong(VillageLivestock.SHEEP_LAST_LURE_TICK, helper.getLevel().getGameTime());
+        helper.assertTrue(VillageLivestock.claimSheepAfterHerding(helper.getLevel(), villageCenter, unherded)
+                && villageId.toString().equals(unherded.getPersistentData().getString(VillageLivestock.SHEEP_OWNER_KEY)),
+            "An unowned sheep may become village livestock after its own herder recently lured it into the pen.");
+
+        net.minecraft.world.entity.animal.Sheep named = helper.spawn(EntityType.SHEEP, 4, 1, 6);
+        named.setNoAi(true);
+        named.setCustomName(net.minecraft.network.chat.Component.literal("Player sheep"));
+        named.getPersistentData().putString(VillageLivestock.SHEEP_LURE_OWNER, villageId.toString());
+        named.getPersistentData().putLong(VillageLivestock.SHEEP_LAST_LURE_TICK, helper.getLevel().getGameTime());
+        helper.assertTrue(!VillageLivestock.claimSheepAfterHerding(helper.getLevel(), villageCenter, named)
+                && named.getPersistentData().getString(VillageLivestock.SHEEP_OWNER_KEY).isBlank(),
+            "A player-named sheep must never be adopted automatically, even inside the village pen.");
+
+        ItemStack shears = new ItemStack(Items.SHEARS);
+        helper.assertTrue(VillageLivestock.shearManagedSheep(helper.getLevel(), inside, shears, villageCenter)
+                && inside.isSheared() && shears.getDamageValue() > 0,
+            "Shearing must call Minecraft's real sheep interaction and damage the real shears.");
+        helper.assertTrue(!VillageLivestock.shearManagedSheep(helper.getLevel(), outside, shears, villageCenter)
+                && !outside.isSheared(),
+            "A village must never shear an owned animal outside its own pen.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void herderFindsAlternateReachableGateApproachWhenNorthSideIsBlocked(GameTestHelper helper) {
+        BlockPos gate = helper.absolutePos(new BlockPos(5, 1, 3));
+        BlockPos north = gate.north();
+        BlockPos alternate = north.east();
+
+        helper.getLevel().setBlock(north, Blocks.STONE.defaultBlockState(), 3);
+        helper.getLevel().setBlock(north.above(), Blocks.AIR.defaultBlockState(), 3);
+        helper.getLevel().setBlock(alternate.below(), Blocks.STONE.defaultBlockState(), 3);
+        helper.getLevel().setBlock(alternate, Blocks.AIR.defaultBlockState(), 3);
+        helper.getLevel().setBlock(alternate.above(), Blocks.AIR.defaultBlockState(), 3);
+
+        Villager herder = helper.spawn(EntityType.VILLAGER, 6, 1, 2);
+        herder.setNoAi(true);
+        BlockPos chosen = VillageLivestock.findPenGateApproachStand(helper.getLevel(), herder, gate);
+        helper.assertTrue(alternate.equals(chosen),
+            "When the direct north approach is obstructed, the herder must choose the nearby safe, reachable exterior stand. "
+                + "chosen=" + chosen + ", expected=" + alternate + ", villager=" + herder.blockPosition()
+                + ", floor=" + helper.getLevel().getBlockState(alternate.below())
+                + ", feet=" + helper.getLevel().getBlockState(alternate)
+                + ", head=" + helper.getLevel().getBlockState(alternate.above())
+                + ", chunksLoaded=" + helper.getLevel().hasChunkAt(alternate));
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void herderDoesNotLureSheepOutOfAnExistingPlayerPen(GameTestHelper helper) {
+        BlockPos site = helper.absolutePos(new BlockPos(3, 1, 3));
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                BlockPos floor = site.offset(dx, -1, dz);
+                helper.getLevel().setBlock(floor, Blocks.STONE.defaultBlockState(), 3);
+                if (dx == 0 || dx == 4 || dz == 0 || dz == 4) {
+                    BlockPos boundary = site.offset(dx, 0, dz);
+                    if (dx == 2 && dz == 0) {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE_GATE.defaultBlockState()
+                            .setValue(net.minecraft.world.level.block.FenceGateBlock.OPEN, true), 3);
+                    } else {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE.defaultBlockState(), 3);
+                    }
+                } else {
+                    helper.getLevel().setBlock(site.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), 3);
+                }
+                helper.getLevel().setBlock(site.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), 3);
+            }
+        }
+
+        net.minecraft.world.entity.animal.Sheep penned = helper.spawn(EntityType.SHEEP, 5, 1, 5);
+        net.minecraft.world.entity.animal.Sheep wild = helper.spawn(EntityType.SHEEP, 10, 1, 5);
+        penned.setNoAi(true);
+        wild.setNoAi(true);
+        helper.assertTrue(VillageLivestock.isInsideExistingFencePen(helper.getLevel(), penned),
+            "An animal already inside a fenced pen must not be lured away even if its gate is open.");
+        helper.assertTrue(!VillageLivestock.isInsideExistingFencePen(helper.getLevel(), wild),
+            "An unpenned sheep outside the enclosure must remain eligible for herding.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void herderUsesWheatOnlyForItsSelectedSheep(GameTestHelper helper) {
+        Villager herder = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        net.minecraft.world.entity.animal.Sheep target = helper.spawn(EntityType.SHEEP, 3, 1, 1);
+        net.minecraft.world.entity.animal.Sheep bystander = helper.spawn(EntityType.SHEEP, 4, 1, 1);
+        herder.setNoAi(true);
+        herder.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_HERDER);
+        herder.getPersistentData().putBoolean(VillageLivestock.ACTIVE_KEY, true);
+        herder.getPersistentData().putInt(VillageLivestock.STATE, VillageLivestock.STATE_HERD_APPROACH);
+        herder.getPersistentData().putString(VillageLivestock.TARGET_SHEEP, target.getUUID().toString());
+        herder.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, new ItemStack(Items.WHEAT));
+
+        helper.assertTrue(VillageLivestock.isCurrentHerdTarget(herder, target),
+            "The selected sheep must follow the active herder carrying real wheat.");
+        helper.assertTrue(!VillageLivestock.isCurrentHerdTarget(herder, bystander),
+            "Nearby sheep must not be attracted unless they are the selected herd target.");
+
+        herder.getPersistentData().putInt(VillageLivestock.STATE, 0);
+        helper.assertTrue(!VillageLivestock.isCurrentHerdTarget(herder, target),
+            "A herder outside an active herding phase must not attract sheep.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void damagedRegisteredPenProducesSafeInPlaceRepairPlan(GameTestHelper helper) {
+        BlockPos site = helper.absolutePos(new BlockPos(3, 1, 3));
+        BlockPos missingFence = site.offset(0, 0, 2);
+        BlockPos gatePos = site.offset(2, 0, 0);
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                helper.getLevel().setBlock(site.offset(dx, -1, dz), Blocks.STONE.defaultBlockState(), 3);
+                if (dx == 0 || dx == 4 || dz == 0 || dz == 4) {
+                    BlockPos boundary = site.offset(dx, 0, dz);
+                    if (boundary.equals(gatePos)) {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE_GATE.defaultBlockState(), 3);
+                    } else if (!boundary.equals(missingFence)) {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE.defaultBlockState(), 3);
+                    }
+                } else {
+                    helper.getLevel().setBlock(site.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), 3);
+                }
+                helper.getLevel().setBlock(site.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), 3);
+            }
+        }
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        residentA.setNoAi(true);
+        residentB.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(1, 1, 1))));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME,
+            GlobalPos.of(helper.getLevel().dimension(), helper.absolutePos(new BlockPos(2, 1, 1))));
+        BlockPos villageCenter = helper.absolutePos(new BlockPos(2, 1, 1));
+        java.util.UUID villageId = VillageRegistry.villageId(helper.getLevel(), villageCenter);
+        helper.assertTrue(villageId != null, "The village must have an identity before registering its pen.");
+
+        VillageRegistry.recordLivestockPenCheckpoint(helper.getLevel(), villageCenter,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "animal_pen", site.getX(), site.getY(), site.getZ(),
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(Items.OAK_FENCE).toString(),
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(Items.OAK_FENCE_GATE).toString(),
+                16, 16, "completed-test-builder", helper.getLevel().getGameTime()));
+
+        VillageLivestock.PenRepairPlan repair = VillageLivestock.getPenRepairPlan(helper.getLevel(), villageCenter);
+        helper.assertTrue(repair != null && repair.site().equals(site)
+                && repair.fenceItem() == Items.OAK_FENCE
+                && repair.gateItem() == Items.OAK_FENCE_GATE
+                && repair.missingFenceCount() == 1 && repair.missingGateCount() == 0,
+            "A missing fence must produce a one-item repair plan at the registered pen's original site.");
+
+        helper.getLevel().setBlock(missingFence, Blocks.OAK_FENCE.defaultBlockState(), 3);
+        helper.getLevel().setBlock(gatePos, Blocks.AIR.defaultBlockState(), 3);
+        VillageLivestock.PenRepairPlan gateRepair = VillageLivestock.getPenRepairPlan(helper.getLevel(), villageCenter);
+        helper.assertTrue(gateRepair != null && gateRepair.site().equals(site)
+                && gateRepair.missingFenceCount() == 0 && gateRepair.missingGateCount() == 1,
+            "A gate-only repair must not request or craft fifteen unnecessary fences.");
+
+        helper.getLevel().setBlock(gatePos, Blocks.STONE.defaultBlockState(), 3);
+        helper.assertTrue(VillageLivestock.getPenRepairPlan(helper.getLevel(), villageCenter) == null,
+            "A repair plan must refuse to overwrite a solid player/foreign block at the registered gate.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "settlement_bootstrap")
+    public static void builderWaitsUntilAnActualHouseOrPenBillIsAvailable(GameTestHelper helper) {
+        helper.assertTrue(!VillagerRoles.shouldAssignBuilder(true, false, false, false)
+                && !VillagerRoles.shouldAssignBuilder(true, false, true, false)
+                && VillagerRoles.shouldAssignBuilder(true, true, false, false)
+                && VillagerRoles.shouldAssignBuilder(false, false, true, true),
+            "A builder role must not consume the only free worker before a real house or pen material bill is ready.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "settlement_bootstrap")
+    public static void villagerProfessionNameplatePreservesPlayerNameAndAddsSpecialistRole(GameTestHelper helper) {
+        Villager villager = helper.spawn(EntityType.VILLAGER, 2, 1, 2);
+        villager.setVillagerData(villager.getVillagerData()
+            .setProfession(net.minecraft.world.entity.npc.VillagerProfession.FARMER));
+        villager.setCustomName(net.minecraft.network.chat.Component.literal("Player's villager"));
+        villager.setCustomNameVisible(false);
+        villager.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_LUMBERJACK);
+
+        VillagerNameplates.refreshNameplate(villager);
+        String display = villager.getCustomName() == null ? "" : villager.getCustomName().getString();
+        helper.assertTrue(villager.isCustomNameVisible()
+                && display.contains("Player's villager")
+                && display.contains("Farmer")
+                && display.contains("Lumberjack"),
+            "The visible label must retain a custom name and add both the vanilla profession and specialist role. Actual: " + display);
+
+        villager.setCustomName(net.minecraft.network.chat.Component.literal("Renamed by player"));
+        villager.setCustomNameVisible(true);
+        VillagerNameplates.refreshNameplate(villager);
+        helper.assertTrue(villager.getCustomName().getString().contains("Renamed by player"),
+            "A later player rename must be adopted as the new base name instead of being overwritten.");
+
+        VillagerNameplates.restoreNameplate(villager);
+        helper.assertTrue(villager.getCustomName().getString().equals("Renamed by player")
+                && villager.isCustomNameVisible() && !VillagerNameplates.isManaged(villager),
+            "Disabling nameplates must restore the newest player name and visibility state.");
         helper.succeed();
     }
 

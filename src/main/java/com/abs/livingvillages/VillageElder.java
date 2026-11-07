@@ -125,7 +125,9 @@ public final class VillageElder {
             elected.getPersistentData().putString(PERSONAL_NAME_KEY, personalName);
         }
         Component title = Component.translatable("livingvillages.elder.name", personalName);
-        if (elected.getCustomName() == null || !elected.getCustomName().equals(title)) {
+        if (VillagerNameplates.isManaged(elected)) {
+            VillagerNameplates.setOriginalName(elected, title, true);
+        } else if (elected.getCustomName() == null || !elected.getCustomName().equals(title)) {
             elected.setCustomName(title);
             elected.setCustomNameVisible(true);
         }
@@ -170,16 +172,23 @@ public final class VillageElder {
         var data = villager.getPersistentData();
         // Initialize the personality first, while the villager still has the original name.
         String personalName = VillagerSoul.getPersonalName(villager);
+        Component originalName = VillagerNameplates.getOriginalCustomName(villager);
+        boolean originalVisible = VillagerNameplates.getOriginalNameVisible(villager);
         data.putBoolean(ELDER_KEY, true);
         data.putString(PERSONAL_NAME_KEY, personalName);
-        data.putString(ORIGINAL_NAME_KEY, villager.hasCustomName() ? villager.getCustomName().getString() : "");
-        data.putBoolean(ORIGINAL_VISIBLE_KEY, villager.isCustomNameVisible());
+        data.putString(ORIGINAL_NAME_KEY, originalName == null ? "" : originalName.getString());
+        data.putBoolean(ORIGINAL_VISIBLE_KEY, originalVisible);
         if (!data.contains(AUTO_KEY)) data.putBoolean(AUTO_KEY, true);
         if (!data.contains(PRIORITY_KEY)) data.putInt(PRIORITY_KEY, PRIORITY_BALANCED);
         if (!data.contains(REQUEST_KEY)) data.putInt(REQUEST_KEY, REQUEST_NONE);
         if (!data.contains(NOTICE_KEY)) data.putString(NOTICE_KEY, "Староста готов управлять поселением.");
-        villager.setCustomName(Component.translatable("livingvillages.elder.name", personalName));
-        villager.setCustomNameVisible(true);
+        Component title = Component.translatable("livingvillages.elder.name", personalName);
+        if (VillagerNameplates.isManaged(villager)) {
+            VillagerNameplates.setOriginalName(villager, title, true);
+        } else {
+            villager.setCustomName(title);
+            villager.setCustomNameVisible(true);
+        }
     }
 
     private static void releaseElder(Villager villager) {
@@ -209,6 +218,7 @@ public final class VillageElder {
         data.remove(ORIGINAL_NAME_KEY);
         data.remove(ORIGINAL_VISIBLE_KEY);
         data.remove(PERSONAL_NAME_KEY);
+        VillagerNameplates.forgetTracking(villager);
     }
 
     public static boolean isAutomationEnabled(List<Villager> villagers) {
@@ -390,7 +400,11 @@ public final class VillageElder {
         int beds = countBeds(level, origin, radius);
         int food = countStoredFood(level, origin);
         var data = elder.getPersistentData();
-        String currentNotice = notice == null || notice.isBlank() ? data.getString(NOTICE_KEY) : notice;
+        String currentNotice = VillageIndustry.describeStartupStatus(level, origin, villagers);
+        String storedNotice = notice == null || notice.isBlank() ? data.getString(NOTICE_KEY) : notice;
+        if (!storedNotice.isBlank() && !currentNotice.contains(storedNotice)) {
+            currentNotice = currentNotice.isBlank() ? storedNotice : currentNotice + " " + storedNotice;
+        }
         String skills = summarizeSpecialistSkills(villagers);
         if (!skills.isBlank() && !currentNotice.contains("Мастера:")) {
             currentNotice = currentNotice.isBlank() ? skills : currentNotice + " " + skills;

@@ -59,11 +59,11 @@ public final class VillagerMining {
     private static final int TARGET_QUARRY = 1;
 
     private static final int TICK_STEP = 5;
-    private static final int SEARCH_RETRY_TICKS = 80;
+    private static final int SEARCH_RETRY_TICKS = 40;
     private static final int SUCCESS_RETRY_TICKS = 40;
-    private static final int ROUTE_RETRY_TICKS = 60;
+    private static final int ROUTE_RETRY_TICKS = 30;
     private static final int TASK_TIMEOUT_TICKS = 12000;
-    private static final float WALK_SPEED = 0.62F;
+    private static final float WALK_SPEED = 0.90F;
     private static final double REACH_SQR = 4.5D * 4.5D;
     private static final Direction[] HORIZONTAL = {
         Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST
@@ -115,6 +115,11 @@ public final class VillagerMining {
             return;
         }
         if (now < data.getLong(NEXT_SEARCH) || villager.getHealth() < villager.getMaxHealth() * 0.35F) {
+            return;
+        }
+        if (villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
+            && !VillageDailyLife.isVanillaIdle(villager)) {
+            data.putLong(NEXT_SEARCH, now + 20L);
             return;
         }
         if (VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) {

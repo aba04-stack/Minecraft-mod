@@ -79,7 +79,7 @@ public final class VillageFarmBuilder {
     private static final int FARM_SIZE = 5;
     private static final int CROP_COUNT = FARM_SIZE * FARM_SIZE - 1;
     private static final int TICK_STEP = 5;
-    private static final long RETRY_TICKS = 100L;
+    private static final long RETRY_TICKS = 40L;
     private static final long ROUTE_REISSUE_TICKS = 30L;
     private static final long STEP_DELAY_TICKS = 8L;
     private static final long WATER_ROUTE_TIMEOUT_TICKS = 1200L;
@@ -89,7 +89,7 @@ public final class VillageFarmBuilder {
     private static final int MAX_CACHED_WATER_REGIONS = 128;
     private static final Map<ServerLevel, Map<Long, WaterSourceCache>> WATER_SOURCE_CACHE = new WeakHashMap<>();
     private static final double INTERACTION_REACH = 4.5D;
-    private static final float WALK_SPEED = 0.58F;
+    private static final float WALK_SPEED = 0.90F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     private static final Item[] HOES = {Items.NETHERITE_HOE, Items.DIAMOND_HOE, Items.IRON_HOE,
         Items.GOLDEN_HOE, Items.STONE_HOE, Items.WOODEN_HOE};

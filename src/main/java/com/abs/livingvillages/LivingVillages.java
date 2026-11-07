@@ -39,7 +39,7 @@ import java.util.function.Predicate;
 import com.abs.livingvillages.domain.VillageWorkOrderModel;
 
 /**
- * Living Villages 0.15.0 for Minecraft Java 1.21.1 + NeoForge.
+ * Living Villages 0.16.0 for Minecraft Java 1.21.1 + NeoForge.
  *
  * Autonomous development uses physical resources and bounded vanilla-like recipes: logs become planks,
  * tools need ingredients, workstations consume building materials, and furnaces use real ore and fuel.
@@ -65,6 +65,7 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(VillageElder::onVillagerInteract);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onVillagerTick);
+        NeoForge.EVENT_BUS.addListener(VillagerNameplates::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onVillagerInteract);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onVillagerDamaged);
         NeoForge.EVENT_BUS.addListener(VillagerSoul::onMonsterKilledByPlayer);
@@ -81,8 +82,11 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillageBuilder::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageFarmBuilder::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillagePopulation::onVillagerTick);
+        NeoForge.EVENT_BUS.addListener(VillageLivestock::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageMonsterAI::onEntityTick);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalTick);
+        // Sheep attraction runs after vanilla/mod behavior so the herder's wheat route wins this tick.
+        NeoForge.EVENT_BUS.addListener(VillageLivestock::onAnimalTick);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalDamaged);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onBabySpawn);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalInteract);
@@ -99,15 +103,16 @@ public final class LivingVillages {
         MinecraftServer server = event.getServer();
 
         // Specialist assignment is lightweight and runs independently from the slower build planner.
-        if (tickCounter % 100L == 0L) {
+        if (tickCounter % 20L == 0L) {
             // Reconcile disabled/stale roles even when autonomous development is paused.
             assignRolesInActiveAreas(server);
         }
-        if (LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get() && tickCounter % 200L == 0L) {
+        if (LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get() && tickCounter % 100L == 0L) {
             runIndustryInActiveAreas(server);
         }
 
-        long intervalTicks = LivingVillagesConfig.SCAN_INTERVAL_SECONDS.get() * 20L;
+        // Cap legacy 60-second configurations so newly available work is planned promptly.
+        long intervalTicks = Math.min(LivingVillagesConfig.SCAN_INTERVAL_SECONDS.get(), 10) * 20L;
         boolean queuedElderOrder = tickCounter % 20L == 0L && hasPendingElderOrder(server);
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || (!queuedElderOrder && tickCounter % intervalTicks != 0L)) {
@@ -132,11 +137,15 @@ public final class LivingVillages {
             }
 
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
+            VillageLivestock.maintainPenGate(level, villageCenter);
             long tickStartNanos = System.nanoTime();
             VillageRegistry.recordVisitAndRunCatchUp(level, villageCenter, level.getGameTime());
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) {
                 VillageBuilder.tryResumeOrphanedHouseProject(level, villageCenter);
+                if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()) {
+                    VillageBuilder.tryResumeOrphanedLivestockPenProject(level, villageCenter);
+                }
             }
             if (LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
                 VillageFarmBuilder.tryResumeOrphanedFarmProject(level, villageCenter);
@@ -152,6 +161,16 @@ public final class LivingVillages {
             }
 
             int request = VillageElder.pendingRequest(villagers);
+            if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+                && (request == VillageElder.REQUEST_HOUSE || VillageElder.isAutomationEnabled(villagers))) {
+                VillageLivestock.ensurePenWorkOrder(level, villageCenter);
+                if (VillageLivestock.needsPen(level, villageCenter)
+                    && VillageLivestock.tryStartPenProject(level, villageCenter)) {
+                    VillageRegistry.recordDiagnostic(level, villageCenter, "Планировщик",
+                        "Сначала строится загон: после этого животновод приведёт овец на пшеницу.");
+                    continue;
+                }
+            }
             if (request == VillageElder.REQUEST_HOUSE && LivingVillagesConfig.ENABLE_HOUSING_PROJECTS.get()) {
                 BuildResult result = tryBuild(level, villageCenter, true);
                 if (result.success()) {
@@ -177,7 +196,7 @@ public final class LivingVillages {
             int priority = VillageElder.priorityForVillagers(villagers);
             int beds = countBeds(level, villageCenter);
             boolean housingNeeded = villagers.size() >= beds;
-            boolean foodProductionNeeded = !hasEnoughFarmland(level, villageCenter, villagers.size());
+            boolean foodProductionNeeded = shouldExpandFarm(level, villageCenter, villagers);
 
             if (priority == VillageElder.PRIORITY_FOOD && foodProductionNeeded
                 && LivingVillagesConfig.ENABLE_FARM_PROJECTS.get()) {
@@ -189,6 +208,11 @@ public final class LivingVillages {
             }
 
             if (housingNeeded && LivingVillagesConfig.ENABLE_HOUSING_PROJECTS.get()) {
+                if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()) {
+                    VillageLivestock.ensurePenWorkOrder(level, villageCenter);
+                    if (VillageLivestock.needsPen(level, villageCenter)
+                        && VillageLivestock.tryStartPenProject(level, villageCenter)) continue;
+                }
                 BuildResult result = tryBuild(level, villageCenter);
                 if (result.success()) {
                     LOGGER.info("Living Villages assigned a builder to construct a house at {}.", result.position());
@@ -216,9 +240,13 @@ public final class LivingVillages {
             if (villagers.isEmpty() || isDuplicateArea(alreadyChecked, level, villagers)) continue;
             rememberActiveArea(alreadyChecked, level, villagers);
             BlockPos villageCenter = averageVillagerPosition(villagers, center);
+            VillageLivestock.maintainPenGate(level, villageCenter);
             VillageRegistry.cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
             VillageElder.ensureElder(level, villageCenter, villagers);
             if (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers)) {
+                if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()) {
+                    VillageLivestock.ensurePenWorkOrder(level, villageCenter);
+                }
                 VillagerRoles.assignRoles(level, villageCenter);
             } else {
                 // Paused villages keep existing assignments but do not create new jobs.
@@ -288,10 +316,20 @@ public final class LivingVillages {
         BlockPos villageCenter = averageVillagerPosition(villagers, center);
         VillageRegistry.cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         VillageElder.ensureElder(level, villageCenter, villagers);
+        if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+            && LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) {
+            VillageBuilder.tryResumeOrphanedLivestockPenProject(level, villageCenter);
+        }
         if (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers)) {
             VillagerRoles.assignRoles(level, villageCenter);
             VillagePopulation.tickArea(level, villageCenter, villagers);
             VillageIndustry.tickArea(level, villageCenter);
+        }
+        if (LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+            && (VillageElder.isAutomationEnabled(villagers) || VillageElder.hasPendingRequest(villagers))) {
+            VillageLivestock.ensurePenWorkOrder(level, villageCenter);
+            if (VillageLivestock.needsPen(level, villageCenter)
+                && VillageLivestock.tryStartPenProject(level, villageCenter)) return;
         }
         if (villagers.size() < LivingVillagesConfig.MINIMUM_VILLAGERS.get()) return;
         if (villagers.stream().anyMatch(v -> v.getPersistentData().getBoolean(VillageCraftingJobs.ACTIVE_KEY)
@@ -550,26 +588,47 @@ public final class LivingVillages {
     }
 
     /**
-     * A fixed-size farm is enough for a tiny village, but growing settlements need
-     * additional fields. Four tilled blocks per villager is a conservative target;
-     * the planner adds a field only when total farmland drops below that target.
+     * Grow fields only when the settlement's measured food reserve is below its population-scaled
+     * target and the existing farmland capacity is too small. This prevents surplus villages from
+     * building fields forever just because their acreage is below the nominal target.
      */
-    private boolean hasEnoughFarmland(ServerLevel level, BlockPos center, int population) {
-        int requiredFarmland = Math.max(FARM_PRESENT_THRESHOLD, population * 4);
+    static boolean shouldExpandFarm(ServerLevel level, BlockPos center, List<Villager> residents) {
+        if (level == null || center == null || residents == null) return false;
+        int adults = (int) residents.stream().filter(v -> v != null && v.isAlive() && !v.isBaby()).count();
+        if (adults <= 1) return false;
+        boolean foodShortage = VillageResourcePlanner.getPlan(level, center, residents).needsFood();
+        return shouldExpandFarm(foodShortage, countFarmland(level, center), adults);
+    }
+
+    /** Pure decision rule kept separate so the shortage/acreage thresholds can be tested directly. */
+    static boolean shouldExpandFarm(boolean foodShortage, int farmlandCount, int adultPopulation) {
+        if (!foodShortage || adultPopulation <= 1) return false;
+        int requiredFarmland = Math.max(FARM_PRESENT_THRESHOLD, adultPopulation * 4);
+        return farmlandCount < requiredFarmland;
+    }
+
+    /**
+     * Keep the conservative acreage target at four farm blocks per adult, with a small-village
+     * floor. Only count loaded farmland that resolves to this settlement's nearest resident group;
+     * another nearby village's fields must not suppress this village's food-development plan.
+     */
+    static boolean hasEnoughFarmland(ServerLevel level, BlockPos center, int adultPopulation) {
+        int requiredFarmland = Math.max(FARM_PRESENT_THRESHOLD, adultPopulation * 4);
         return countFarmland(level, center) >= requiredFarmland;
     }
 
-    private int countFarmland(ServerLevel level, BlockPos center) {
+    static int countFarmland(ServerLevel level, BlockPos center) {
         int count = 0;
-        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
+        // Farm projects search no farther than 28 blocks from the village center. Include that
+        // complete reach even when the configured resident radius is smaller.
+        int radius = Math.max(28, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
         BlockPos min = center.offset(-radius, -8, -radius);
         BlockPos max = center.offset(radius, 8, radius);
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
-            // Never force-load distant chunks just to count farmland for an active village.
+            // Never force-load terrain, and do not count a neighbor settlement's farmland.
             if (!level.hasChunkAt(pos)) continue;
-            if (level.getBlockState(pos).is(Blocks.FARMLAND)) {
-                count++;
-            }
+            if (!level.getBlockState(pos).is(Blocks.FARMLAND)) continue;
+            if (VillageArea.isBlockInResidentGroup(level, center, pos)) count++;
         }
         return count;
     }

@@ -13,6 +13,7 @@ public final class DailyLifeActivityModel {
     public static final long SOCIAL_DURATION_TICKS = 100L;
     public static final long ROUTE_TIMEOUT_TICKS = 600L;
     public static final int MAX_VISITORS_PER_RESIDENT = 1;
+    public static final int MAX_ACTIVE_VISITS_PER_VILLAGE = 1;
 
     private DailyLifeActivityModel() {}
 
@@ -37,6 +38,10 @@ public final class DailyLifeActivityModel {
 
     public static boolean canAcceptSocialVisitor(int activeVisitorCount) {
         return activeVisitorCount < MAX_VISITORS_PER_RESIDENT;
+    }
+
+    public static boolean canStartSocialVisitInVillage(int activeVisitCount) {
+        return activeVisitCount < MAX_ACTIVE_VISITS_PER_VILLAGE;
     }
 
     public static boolean shouldCancelSocialVisit(

@@ -11,6 +11,7 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.BooleanValue ENABLE_HOUSING_PROJECTS;
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_BUILDER;
     public static final ModConfigSpec.BooleanValue ENABLE_FARM_PROJECTS;
+    public static final ModConfigSpec.BooleanValue ENABLE_DESERT_STARTER_KIT;
     public static final ModConfigSpec.IntValue SCAN_INTERVAL_SECONDS;
     public static final ModConfigSpec.IntValue VILLAGE_RADIUS_BLOCKS;
     public static final ModConfigSpec.IntValue RESOURCE_CHEST_RADIUS_BLOCKS;
@@ -19,6 +20,7 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.BooleanValue ENABLE_RELATIONSHIP_MEMORY;
     public static final ModConfigSpec.BooleanValue ENABLE_SNEAK_TO_TALK;
     public static final ModConfigSpec.BooleanValue SHOW_PERSONALITY_NAMES;
+    public static final ModConfigSpec.BooleanValue SHOW_VILLAGER_PROFESSION_NAMES;
     public static final ModConfigSpec.BooleanValue ENABLE_FARMER_STOCKPILING;
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGER_TREE_WORK;
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGER_REPLANTING;
@@ -41,6 +43,7 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.IntValue MAX_AI_CHECKS_PER_TICK;
     public static final ModConfigSpec.BooleanValue ENABLE_ANIMAL_BEHAVIOR;
     public static final ModConfigSpec.BooleanValue ENABLE_DAILY_LIFE;
+    public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_LIVESTOCK;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -70,10 +73,15 @@ public final class LivingVillagesConfig {
             .translation("livingvillages.config.enable_farm_projects")
             .define("enable_farm_projects", true);
 
+        ENABLE_DESERT_STARTER_KIT = builder
+            .comment("Один раз выдаёт ограниченный стартовый запас пустынной деревне при нехватке ресурсов. Набор не пополняется после выдачи.")
+            .translation("livingvillages.config.enable_desert_starter_kit")
+            .define("enable_desert_starter_kit", true);
+
         SCAN_INTERVAL_SECONDS = builder
             .comment("Как часто планировщик проверяет активные поселения, в секундах.")
             .translation("livingvillages.config.scan_interval_seconds")
-            .defineInRange("scan_interval_seconds", 60, 15, 600);
+            .defineInRange("scan_interval_seconds", 15, 15, 600);
 
         VILLAGE_RADIUS_BLOCKS = builder
             .comment("Радиус поиска жителей, кроватей и готовых построек, в блоках.")
@@ -109,6 +117,11 @@ public final class LivingVillagesConfig {
             .comment("Показывать личное имя над головой жителя. В больших деревнях может загромождать экран.")
             .translation("livingvillages.config.show_personality_names")
             .define("show_personality_names", false);
+
+        SHOW_VILLAGER_PROFESSION_NAMES = builder
+            .comment("Показывать над головой ванильную профессию и назначенную специальную роль жителя.")
+            .translation("livingvillages.config.show_villager_profession_names")
+            .define("show_villager_profession_names", true);
 
         ENABLE_FARMER_STOCKPILING = builder
             .comment("Фермеры сами относят излишки еды в ближайшие сундуки, сохраняя запас для размножения.")
@@ -218,7 +231,12 @@ public final class LivingVillagesConfig {
         ENABLE_DAILY_LIFE = builder
             .comment("Короткие социальные визиты взрослых жителей в свободное время. Не заменяет ванильное расписание и рабочие задачи.")
             .translation("livingvillages.config.enable_daily_life")
-            .define("enable_daily_life", true);
+            .define("enable_daily_life", false);
+
+        ENABLE_VILLAGE_LIVESTOCK = builder
+            .comment("Строитель возводит загон из реальных материалов, животновод приводит овец на настоящую пшеницу и собирает шерсть настоящими ножницами.")
+            .translation("livingvillages.config.enable_village_livestock")
+            .define("enable_village_livestock", true);
 
         SPEC = builder.build();
     }

@@ -90,11 +90,11 @@ def check_balanced(path: Path) -> None:
 def main() -> int:
     errors: list[str] = []
     props = (ROOT / "gradle.properties").read_text(encoding="utf-8")
-    if not re.search(r"(?m)^mod_version=0\.15\.0$", props):
-        errors.append("gradle.properties mod_version must be 0.15.0")
+    if not re.search(r"(?m)^mod_version=0\.16\.0$", props):
+        errors.append("gradle.properties mod_version must be 0.16.0")
     workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
-    if "livingvillages-0.15.0.jar" not in workflow or "livingvillages-0.15.0" not in workflow:
-        errors.append("GitHub Actions artifact name/path is not aligned with 0.15.0")
+    if "livingvillages-0.16.0.jar" not in workflow or "livingvillages-0.16.0" not in workflow:
+        errors.append("GitHub Actions artifact name/path is not aligned with 0.16.0")
     wrapper_props_path = ROOT / "gradle/wrapper/gradle-wrapper.properties"
     if not wrapper_props_path.exists():
         errors.append("Gradle wrapper properties are missing")
@@ -254,6 +254,24 @@ def main() -> int:
         errors.append(f"monster tactical AI regression check failed: {exc}")
 
     try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_worker_movement_speed.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"worker movement speed regression check failed: {exc}")
+
+    try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_desert_bootstrap.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"desert starter bootstrap regression check failed: {exc}")
+
+    try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_tree_work_lifecycle.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"tree work lifecycle regression check failed: {exc}")
+
+    try:
         subprocess.run(["java", str(ROOT / "tools/JavaSyntaxCheck.java"), str(ROOT / "src/main/java")],
                        check=True, capture_output=True, text=True)
     except Exception as exc:
@@ -277,7 +295,7 @@ def main() -> int:
             print(f"- {err}")
         return 1
     print("STATIC CHECKS PASSED")
-    print("- version/workflow aligned at 0.15.0")
+    print("- version/workflow aligned at 0.16.0")
     print("- Gradle 9.2.1 bootstrap pins the official distribution checksum")
     print("- translation JSON files valid")
     print("- Java comments/literals/delimiters balanced")
@@ -296,6 +314,7 @@ def main() -> int:
     print("- persistent storage reservations are conflict-checked and released on completion")
     print("- Minecraft GameTests cover competing claims and removed-chest cleanup")
     print("- resource-ledger feature markers present")
+    print("- all ten autonomous work routes use the tested 0.90 walk-speed baseline")
     print("- shell scripts pass sh -n")
     print("NOTE: This does not compile the Minecraft/NeoForge source or test behavior in game.")
     return 0

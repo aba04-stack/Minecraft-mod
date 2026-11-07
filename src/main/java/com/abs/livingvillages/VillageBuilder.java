@@ -20,6 +20,8 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FenceBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -35,6 +37,7 @@ import net.neoforged.neoforge.event.tick.EntityTickEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Worker-led, material-backed house construction. A builder withdraws actual planks and a bed
@@ -48,6 +51,9 @@ public final class VillageBuilder {
     private static final String PLANK_ITEM = P + "plank_item";
     private static final String DOOR_ITEM = P + "door_item";
     private static final String BED_ITEM = P + "bed_item";
+    private static final String PROJECT_KIND = P + "project_kind";
+    private static final String FENCE_ITEM = P + "fence_item";
+    private static final String GATE_ITEM = P + "gate_item";
     private static final String SITE_X = P + "site_x", SITE_Y = P + "site_y", SITE_Z = P + "site_z";
     private static final String STEP_INDEX = P + "step_index";
     private static final String STARTED = P + "started";
@@ -63,16 +69,22 @@ public final class VillageBuilder {
     private static final int FETCH_BED = 2;
     private static final int FETCH_DOOR = 3;
     private static final int BUILDING = 4;
+    private static final int FETCH_PEN_FENCES = 5;
+    private static final int FETCH_PEN_GATE = 6;
+    private static final int BUILDING_PEN = 7;
+    private static final int PEN_FENCES_REQUIRED = 15;
+    private static final String PEN_FENCES_REMAINING = P + "pen_fences_remaining";
+    private static final String PEN_GATE_REMAINING = P + "pen_gate_remaining";
     private static final int ROUTE_TO_STORAGE = 1;
     private static final int ROUTE_TO_BUILD_STEP = 2;
     private static final int PLANKS_REQUIRED = 96;
-    private static final long WORK_RETRY_TICKS = 100L;
+    private static final long WORK_RETRY_TICKS = 40L;
     private static final long ROUTE_REISSUE_TICKS = 30L;
     private static final long BUILD_STEP_INTERVAL_TICKS = 12L;
     private static final long NIGHT_START = 12000L;
     private static final long DAY_START = 1000L;
     private static final double PLACE_REACH = 4.5D;
-    private static final float WALK_SPEED = 0.62F;
+    private static final float WALK_SPEED = 0.90F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
 
     public static final List<Item> ALL_BED_ITEMS = List.of(
@@ -244,6 +256,7 @@ public final class VillageBuilder {
         }
         CompoundTag data = builder.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
+        data.putString(PROJECT_KIND, "house");
         data.putInt(PHASE, FETCH_PLANKS);
         String plankKey = BuiltInRegistries.ITEM.getKey(plankItem).toString();
         String doorKey = BuiltInRegistries.ITEM.getKey(doorItem).toString();
@@ -277,7 +290,147 @@ public final class VillageBuilder {
     }
 
     /**
-     * Resumes an unfinished house construction project if the original builder in this village
+     * Starts a real 5x5 livestock pen using 15 matching fences and one matching fence gate.
+     * The project shares the builder's checkpoint and work-order lifecycle, so a replacement
+     * builder can resume after death or removal.
+     */
+    public static boolean startLivestockPenProject(ServerLevel level, BlockPos center, BlockPos site,
+                                                   Item fenceItem, Item gateItem) {
+        return startLivestockPenProjectInternal(level, center, site, fenceItem, gateItem,
+            PEN_FENCES_REQUIRED, 1, false);
+    }
+
+    /** Repair a registered pen at its original position with only missing real materials. */
+    public static boolean startLivestockPenRepairProject(ServerLevel level, BlockPos center, BlockPos site,
+                                                         Item fenceItem, Item gateItem,
+                                                         int missingFences, int missingGate) {
+        return startLivestockPenProjectInternal(level, center, site, fenceItem, gateItem,
+            missingFences, missingGate, true);
+    }
+
+    private static boolean startLivestockPenProjectInternal(ServerLevel level, BlockPos center, BlockPos site,
+                                                            Item fenceItem, Item gateItem,
+                                                            int requestedFences, int requestedGate,
+                                                            boolean repair) {
+        int fences = Math.max(0, Math.min(PEN_FENCES_REQUIRED, requestedFences));
+        int gate = Math.max(0, Math.min(1, requestedGate));
+        if (level == null || center == null || site == null || fenceItem == null || gateItem == null
+            || fences + gate <= 0
+            || !LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+            || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
+            || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
+            || !(Block.byItem(fenceItem) instanceof FenceBlock fenceBlock)
+            || !(Block.byItem(gateItem) instanceof FenceGateBlock gateBlock)
+            || VillageLivestock.hasCompletePen(level, center)
+            || (repair
+                ? !matchesPenRepairProgress(level, site, fenceBlock, gateBlock, fences, gate)
+                : !isPenBuildSite(level, site))
+            || !VillageReservations.isProjectSiteAvailable(level, site, 4, null)) return false;
+
+        Villager builder = findAvailableBuilder(level, center);
+        if (builder == null) return false;
+        Map<Item, Integer> materialBill = new java.util.LinkedHashMap<>();
+        if (fences > 0) materialBill.put(fenceItem, fences);
+        if (gate > 0) materialBill.put(gateItem, gate);
+        if (!canFitProjectMaterials(builder.getInventory(), materialBill)) return false;
+        if (!VillageReservations.reserveStoragesForItems(level, builder.blockPosition(), builder, "animal_pen",
+            materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) return false;
+        if (!VillageWorkOrders.startProject(level, center, "animal_pen", site, builder, materialBill)) {
+            VillageReservations.release(builder.getPersistentData(), "animal_pen");
+            return false;
+        }
+
+        CompoundTag data = builder.getPersistentData();
+        data.putBoolean(ACTIVE_KEY, true);
+        data.putString(PROJECT_KIND, "animal_pen");
+        data.putString(FENCE_ITEM, BuiltInRegistries.ITEM.getKey(fenceItem).toString());
+        data.putString(GATE_ITEM, BuiltInRegistries.ITEM.getKey(gateItem).toString());
+        data.putInt(PEN_FENCES_REMAINING, fences);
+        data.putInt(PEN_GATE_REMAINING, gate);
+        data.putInt(PHASE, fences > 0 ? FETCH_PEN_FENCES : FETCH_PEN_GATE);
+        data.putInt(SITE_X, site.getX()); data.putInt(SITE_Y, site.getY()); data.putInt(SITE_Z, site.getZ());
+        data.putInt(STEP_INDEX, 0);
+        data.putLong(STARTED, level.getGameTime());
+        data.putLong(LAST_PROGRESS_TICK, level.getGameTime());
+        data.putLong(NEXT_ACTION, 0L);
+        clearOwnedRoute(builder, data);
+        VillageRegistry.recordLivestockPenCheckpoint(
+            level, center,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "animal_pen", site.getX(), site.getY(), site.getZ(),
+                BuiltInRegistries.ITEM.getKey(fenceItem).toString(),
+                BuiltInRegistries.ITEM.getKey(gateItem).toString(),
+                0, PEN_FENCES_REQUIRED + 1, builder.getUUID().toString(), level.getGameTime()
+            )
+        );
+        VillageRegistry.recordDiagnostic(level, center, "Загон",
+            repair ? "Строитель восстанавливает зарегистрированный загон на прежнем месте."
+                : "Строитель начал загон для овец из реальных материалов.");
+        return true;
+    }
+
+    /** Finds a flat, loaded, unobstructed 5x5 site without deleting existing solid blocks. */
+    public static BlockPos findLivestockPenSite(ServerLevel level, BlockPos center) {
+        if (level == null || center == null || !level.hasChunkAt(center)) return null;
+        int radius = Math.min(12, Math.max(6, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get() / 3));
+        int checked = 0;
+        // Search outward in deterministic rings and stop at a strict budget. This avoids
+        // allocating and sorting thousands of candidates during each settlement scan.
+        for (int ring = 0; ring <= radius && checked < 256; ring++) {
+            for (int dy : new int[]{0, -1, 1, -2, 2}) {
+                for (int dx = -ring; dx <= ring && checked < 256; dx++) {
+                    for (int dz = -ring; dz <= ring && checked < 256; dz++) {
+                        if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
+                        checked++;
+                        BlockPos site = center.offset(dx, dy, dz);
+                        if (isPenBuildSite(level, site)
+                            && VillageReservations.isProjectSiteAvailable(level, site, 4, null)) {
+                            return site.immutable();
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean isPenBuildSite(ServerLevel level, BlockPos site) {
+        if (level == null || site == null) return false;
+        AABB footprint = new AABB(site.getX(), site.getY(), site.getZ(),
+            site.getX() + 5.0D, site.getY() + 2.0D, site.getZ() + 5.0D);
+        if (!level.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, footprint,
+            entity -> entity.isAlive()).isEmpty()) return false;
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                BlockPos floor = site.offset(dx, -1, dz);
+                BlockPos lower = site.offset(dx, 0, dz);
+                BlockPos upper = site.offset(dx, 1, dz);
+                if (!level.hasChunkAt(floor) || !level.hasChunkAt(lower) || !level.hasChunkAt(upper)
+                    || !level.getBlockState(floor).blocksMotion()
+                    || !level.getFluidState(lower).isEmpty() || !level.getFluidState(upper).isEmpty()
+                    || !isAirOrReplaceableVegetation(level.getBlockState(lower))
+                    || !isAirOrReplaceableVegetation(level.getBlockState(upper))) return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean canFitProjectMaterials(Container inventory, java.util.Map<Item, Integer> bill) {
+        List<ItemStack> simulation = new ArrayList<>();
+        for (int i = 0; i < inventory.getContainerSize(); i++) simulation.add(inventory.getItem(i).copy());
+        for (java.util.Map.Entry<Item, Integer> entry : bill.entrySet()) {
+            int missing = Math.max(0, entry.getValue() - countItem(inventory, entry.getKey()));
+            while (missing > 0) {
+                int batch = Math.min(entry.getKey().getDefaultMaxStackSize(), missing);
+                if (!simulateInsert(simulation, new ItemStack(entry.getKey(), batch))) return false;
+                missing -= batch;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Resumes an unfinished house or animal-pen project if its original builder died or left.
      * died or was removed before completing all steps (resolves KI-006).
      */
     public static boolean tryResumeOrphanedHouseProject(ServerLevel level, BlockPos center) {
@@ -299,14 +452,23 @@ public final class VillageBuilder {
             return false;
         }
         BlockPos resumedSite = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        String projectKind = checkpoint.projectKind();
+        if (!"house".equals(projectKind)) return false;
         if (!VillageWorkOrders.rebindOrphanedProject(
-            level, center, "house", resumedSite, replacement, !ownerAliveInVillage)) return false;
+            level, center, projectKind, resumedSite, replacement, !ownerAliveInVillage)) return false;
 
         CompoundTag data = replacement.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
-        data.putInt(PHASE, FETCH_PLANKS);
-        data.putString(PLANK_ITEM, checkpoint.primaryMaterialId());
-        data.putString(DOOR_ITEM, checkpoint.secondaryMaterialId());
+        data.putString(PROJECT_KIND, projectKind);
+        if ("animal_pen".equals(projectKind)) {
+            data.putString(FENCE_ITEM, checkpoint.primaryMaterialId());
+            data.putString(GATE_ITEM, checkpoint.secondaryMaterialId());
+            data.putInt(PHASE, checkpoint.stepIndex() < PEN_FENCES_REQUIRED ? FETCH_PEN_FENCES : FETCH_PEN_GATE);
+        } else {
+            data.putInt(PHASE, FETCH_PLANKS);
+            data.putString(PLANK_ITEM, checkpoint.primaryMaterialId());
+            data.putString(DOOR_ITEM, checkpoint.secondaryMaterialId());
+        }
         data.putInt(SITE_X, checkpoint.siteX());
         data.putInt(SITE_Y, checkpoint.siteY());
         data.putInt(SITE_Z, checkpoint.siteZ());
@@ -331,6 +493,64 @@ public final class VillageBuilder {
                 level.getGameTime()
             )
         );
+        return true;
+    }
+
+    /** Resumes an orphaned livestock-pen project independently from house checkpoints. */
+    public static boolean tryResumeOrphanedLivestockPenProject(ServerLevel level, BlockPos center) {
+        if (level == null || center == null
+            || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
+            || !LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+            || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        if (checkpoint == null || !"animal_pen".equals(checkpoint.projectKind())) return false;
+        List<Villager> residents = VillageArea.findVillagers(level, center);
+        boolean ownerAliveInVillage = residents.stream().anyMatch(
+            v -> v.isAlive() && v.getUUID().toString().equals(checkpoint.ownerWorkerId()) && isProjectActive(v));
+        Villager replacement = findAvailableBuilder(level, center);
+        if (!com.abs.livingvillages.domain.SettlementSimulationModel.canResumeOrphanedProject(
+            checkpoint, ownerAliveInVillage, replacement != null)) return false;
+
+        BlockPos site = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        ResourceLocation fenceKey = ResourceLocation.tryParse(checkpoint.primaryMaterialId());
+        ResourceLocation gateKey = ResourceLocation.tryParse(checkpoint.secondaryMaterialId());
+        if (fenceKey == null || gateKey == null) return false;
+        Item fenceItem = BuiltInRegistries.ITEM.get(fenceKey);
+        Item gateItem = BuiltInRegistries.ITEM.get(gateKey);
+        Block fenceBlock = Block.byItem(fenceItem);
+        Block gateBlock = Block.byItem(gateItem);
+        if (!(fenceBlock instanceof FenceBlock) || !(gateBlock instanceof FenceGateBlock)) return false;
+        PenRepairProgress progress = inspectLivestockPenProgress(
+            level, site, fenceBlock, gateBlock, checkpoint.stepIndex());
+        if (progress == null) {
+            VillageRegistry.recordDiagnostic(level, center, "Загон",
+                "Возобновление остановлено: на месте недостающей ограды появился посторонний блок.");
+            return false;
+        }
+        if (!VillageWorkOrders.rebindOrphanedProject(level, center, "animal_pen", site,
+            replacement, !ownerAliveInVillage)) return false;
+
+        CompoundTag data = replacement.getPersistentData();
+        data.putBoolean(ACTIVE_KEY, true);
+        data.putString(PROJECT_KIND, "animal_pen");
+        data.putString(FENCE_ITEM, checkpoint.primaryMaterialId());
+        data.putString(GATE_ITEM, checkpoint.secondaryMaterialId());
+        data.putInt(SITE_X, checkpoint.siteX()); data.putInt(SITE_Y, checkpoint.siteY()); data.putInt(SITE_Z, checkpoint.siteZ());
+        data.putInt(STEP_INDEX, progress.resumeIndex());
+        data.putInt(PEN_FENCES_REMAINING, progress.missingFences());
+        data.putInt(PEN_GATE_REMAINING, progress.missingGate());
+        data.putInt(PHASE, progress.missingFences() > 0 ? FETCH_PEN_FENCES
+            : progress.missingGate() > 0 ? FETCH_PEN_GATE : BUILDING_PEN);
+        data.putLong(STARTED, level.getGameTime());
+        data.putLong(LAST_PROGRESS_TICK, level.getGameTime());
+        data.putLong(NEXT_ACTION, 0L);
+        clearOwnedRoute(replacement, data);
+        VillageRegistry.recordLivestockPenCheckpoint(level, center,
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "animal_pen", checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ(),
+                checkpoint.primaryMaterialId(), checkpoint.secondaryMaterialId(),
+                progress.resumeIndex(), checkpoint.totalSteps(),
+                replacement.getUUID().toString(), level.getGameTime()));
         return true;
     }
 
@@ -360,6 +580,17 @@ public final class VillageBuilder {
             return;
         }
 
+        if ("animal_pen".equals(data.getString(PROJECT_KIND))) {
+            switch (data.getInt(PHASE)) {
+                case FETCH_PEN_FENCES -> fetchRequiredItem(villager, level, data, getFenceItem(data),
+                    data.getInt(PEN_FENCES_REMAINING), FETCH_PEN_GATE);
+                case FETCH_PEN_GATE -> fetchRequiredItem(villager, level, data, getGateItem(data),
+                    data.getInt(PEN_GATE_REMAINING), BUILDING_PEN);
+                case BUILDING_PEN -> buildLivestockPenNextStep(villager, level, data, site);
+                default -> clearProject(villager, data, false);
+            }
+            return;
+        }
         switch (data.getInt(PHASE)) {
             case FETCH_PLANKS -> fetchRequiredItem(villager, level, data,
                 getPlankItem(data), Math.max(0, PLANKS_REQUIRED - Math.min(data.getInt(STEP_INDEX), PLANKS_REQUIRED)), FETCH_BED);
@@ -451,6 +682,199 @@ public final class VillageBuilder {
             return; // Wait for a real item to be delivered; never substitute a virtual resource.
         }
         setRoute(villager, data, target.stand(), target.storage(), ROUTE_TO_STORAGE, now);
+    }
+
+    private static void buildLivestockPenNextStep(Villager villager, ServerLevel level, CompoundTag data, BlockPos site) {
+        Item fenceItem = getFenceItem(data);
+        Item gateItem = getGateItem(data);
+        Block fenceBlock = Block.byItem(fenceItem);
+        Block gateBlock = Block.byItem(gateItem);
+        if (!(fenceBlock instanceof FenceBlock) || !(gateBlock instanceof FenceGateBlock)) {
+            clearProject(villager, data, false);
+            return;
+        }
+        List<BuildStep> steps = makeLivestockPenPlan(site, fenceBlock, gateBlock);
+        int index = data.getInt(STEP_INDEX);
+        if (index >= steps.size()) {
+            BlockPos center = projectVillageCenter(villager);
+            VillageRegistry.recordLivestockPenCheckpoint(level, center,
+                new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                    "animal_pen", site.getX(), site.getY(), site.getZ(),
+                    BuiltInRegistries.ITEM.getKey(fenceItem).toString(),
+                    BuiltInRegistries.ITEM.getKey(gateItem).toString(),
+                    steps.size(), steps.size(), villager.getUUID().toString(), level.getGameTime()));
+            VillagerProgression.recordCompletedWork(
+                villager, com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER,
+                6, true, level.getGameTime());
+            level.sendParticles(ParticleTypes.HAPPY_VILLAGER, villager.getX(), villager.getY() + 1.0D,
+                villager.getZ(), 4, 0.25D, 0.25D, 0.25D, 0.0D);
+            VillageRegistry.recordDiagnostic(level, center, "Загон", "Загон построен. Животновод может привести овец пшеницей.");
+            clearProject(villager, data, true);
+            return;
+        }
+
+        long now = level.getGameTime();
+        if (now < data.getLong(NEXT_ACTION)) return;
+        BuildStep step = steps.get(index);
+        if (!level.hasChunkAt(step.pos())) {
+            pauseRoute(villager, data);
+            return;
+        }
+        BlockState current = level.getBlockState(step.pos());
+        if (current.is(step.state().getBlock())) {
+            data.putInt(STEP_INDEX, index + 1);
+            clearOwnedRoute(villager, data);
+            savePenCheckpoint(villager, level, site, data, index + 1, steps.size());
+            return;
+        }
+        if (!isAirOrReplaceableVegetation(current)) {
+            clearOwnedRoute(villager, data);
+            data.putLong(NEXT_ACTION, now + WORK_RETRY_TICKS);
+            VillageRegistry.recordDiagnostic(level, projectVillageCenter(villager), "Загон",
+                "Строительство остановлено: на месте ограды находится посторонний блок.");
+            return;
+        }
+        if (!withinPlacementReach(villager, step.pos()) || !hasClearLine(villager, level, step.pos())) {
+            if (!data.getBoolean(ROUTE_ACTIVE) || data.getInt(ROUTE_KIND) != ROUTE_TO_BUILD_STEP) {
+                BlockPos stand = findReachableStand(level, villager, step.pos());
+                if (stand == null) {
+                    data.putLong(NEXT_ACTION, now + WORK_RETRY_TICKS);
+                    return;
+                }
+                setRoute(villager, data, stand, step.pos(), ROUTE_TO_BUILD_STEP, now);
+            } else {
+                atRouteTarget(villager, routeStand(data), data, now);
+            }
+            return;
+        }
+
+        clearOwnedRoute(villager, data);
+        if (!current.isAir() && isAirOrReplaceableVegetation(current)) level.destroyBlock(step.pos(), true);
+        if (removeItem(villager.getInventory(), step.item(), 1) != 1) {
+            data.putInt(PHASE, step.item() == getFenceItem(data) ? FETCH_PEN_FENCES : FETCH_PEN_GATE);
+            return;
+        }
+        if (!level.setBlock(step.pos(), step.state(), 3)) {
+            ItemStack remainder = villager.getInventory().addItem(new ItemStack(step.item()));
+            if (!remainder.isEmpty()) villager.spawnAtLocation(remainder);
+            villager.getInventory().setChanged();
+            return;
+        }
+        villager.getInventory().setChanged();
+        if (step.item() == getFenceItem(data)) {
+            data.putInt(PEN_FENCES_REMAINING, Math.max(0, data.getInt(PEN_FENCES_REMAINING) - 1));
+        } else if (step.item() == getGateItem(data)) {
+            data.putInt(PEN_GATE_REMAINING, Math.max(0, data.getInt(PEN_GATE_REMAINING) - 1));
+        }
+        villager.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+        int nextStep = index + 1;
+        data.putInt(STEP_INDEX, nextStep);
+        long adjustedInterval = VillagerProgression.adjustedDurationTicks(
+            villager, com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_BUILDER,
+            (int) BUILD_STEP_INTERVAL_TICKS);
+        data.putLong(NEXT_ACTION, now + Math.min(BUILD_STEP_INTERVAL_TICKS, adjustedInterval));
+        savePenCheckpoint(villager, level, site, data, nextStep, steps.size());
+    }
+
+    private static List<BuildStep> makeLivestockPenPlan(BlockPos base, Block fenceBlock, Block gateBlock) {
+        List<BuildStep> steps = new ArrayList<>(PEN_FENCES_REQUIRED + 1);
+        Item fenceItem = fenceBlock.asItem();
+        Item gateItem = gateBlock.asItem();
+        BlockPos gatePos = base.offset(2, 0, 0);
+        // Place all 15 fence pieces first and the gate last. Checkpoint recovery can then
+        // calculate the exact remaining fence count directly from STEP_INDEX.
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                if (dx != 0 && dx != 4 && dz != 0 && dz != 4) continue;
+                BlockPos pos = base.offset(dx, 0, dz);
+                if (pos.equals(gatePos)) continue;
+                steps.add(new BuildStep(pos, fenceBlock.defaultBlockState(), fenceItem, null, null));
+            }
+        }
+        BlockState gate = gateBlock.defaultBlockState()
+            .setValue(FenceGateBlock.FACING, Direction.SOUTH)
+            .setValue(FenceGateBlock.OPEN, false);
+        steps.add(new BuildStep(gatePos, gate, gateItem, null, null));
+        return steps;
+    }
+
+    private record PenRepairProgress(int resumeIndex, int missingFences, int missingGate) {}
+
+    /** Inspect the existing blueprint without changing the world or overwriting a foreign block. */
+    private static PenRepairProgress inspectLivestockPenProgress(ServerLevel level, BlockPos site,
+                                                                  Block fenceBlock, Block gateBlock,
+                                                                  int preferredIndex) {
+        if (level == null || site == null || fenceBlock == null || gateBlock == null) return null;
+        List<BuildStep> steps = makeLivestockPenPlan(site, fenceBlock, gateBlock);
+        int firstMissing = steps.size();
+        int missingFences = 0;
+        int missingGate = 0;
+        for (int i = 0; i < steps.size(); i++) {
+            BuildStep step = steps.get(i);
+            if (!level.hasChunkAt(step.pos()) || !level.hasChunkAt(step.pos().below())
+                || !level.getBlockState(step.pos().below()).blocksMotion()) return null;
+            BlockState current = level.getBlockState(step.pos());
+            if (current.is(step.state().getBlock())) continue;
+            if (!isAirOrReplaceableVegetation(current)) return null;
+            firstMissing = Math.min(firstMissing, i);
+            if (i < PEN_FENCES_REQUIRED) missingFences++;
+            else missingGate++;
+        }
+        int preferred = Math.max(0, Math.min(preferredIndex, steps.size()));
+        return new PenRepairProgress(Math.min(preferred, firstMissing), missingFences, missingGate);
+    }
+
+    private static boolean matchesPenRepairProgress(ServerLevel level, BlockPos site,
+                                                    Block fenceBlock, Block gateBlock,
+                                                    int expectedFences, int expectedGate) {
+        PenRepairProgress progress = inspectLivestockPenProgress(level, site, fenceBlock, gateBlock, 0);
+        return progress != null && progress.missingFences() == expectedFences
+            && progress.missingGate() == expectedGate && expectedFences + expectedGate > 0;
+    }
+
+    /** Deterministic blueprint contract used by GameTests: 15 matching fences and a final closed gate. */
+    static boolean hasValidLivestockPenBlueprint() {
+        List<BuildStep> steps = makeLivestockPenPlan(BlockPos.ZERO, Blocks.OAK_FENCE, Blocks.OAK_FENCE_GATE);
+        if (steps.size() != 16) return false;
+        java.util.Set<BlockPos> positions = new java.util.HashSet<>();
+        int fenceCount = 0;
+        for (int i = 0; i < steps.size(); i++) {
+            BuildStep step = steps.get(i);
+            if (!positions.add(step.pos()) || step.secondPos() != null) return false;
+            if (i < 15) {
+                if (step.item() != Items.OAK_FENCE) return false;
+                fenceCount++;
+            } else if (step.item() != Items.OAK_FENCE_GATE
+                || !(step.state().getBlock() instanceof FenceGateBlock)
+                || step.state().getValue(FenceGateBlock.OPEN)) {
+                return false;
+            }
+        }
+        return fenceCount == PEN_FENCES_REQUIRED;
+    }
+
+    private static void savePenCheckpoint(Villager villager, ServerLevel level, BlockPos site,
+                                          CompoundTag data, int stepIndex, int totalSteps) {
+        VillageRegistry.recordLivestockPenCheckpoint(level, projectVillageCenter(villager),
+            new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "animal_pen", site.getX(), site.getY(), site.getZ(),
+                data.getString(FENCE_ITEM), data.getString(GATE_ITEM),
+                stepIndex, totalSteps, villager.getUUID().toString(), level.getGameTime()));
+    }
+
+    private static BlockPos projectVillageCenter(Villager villager) {
+        BlockPos home = VillagerRoles.getHome(villager);
+        return home == null ? villager.blockPosition() : home;
+    }
+
+    private static Item getFenceItem(CompoundTag data) {
+        ResourceLocation key = ResourceLocation.tryParse(data.getString(FENCE_ITEM));
+        return key == null ? Items.AIR : BuiltInRegistries.ITEM.get(key);
+    }
+
+    private static Item getGateItem(CompoundTag data) {
+        ResourceLocation key = ResourceLocation.tryParse(data.getString(GATE_ITEM));
+        return key == null ? Items.AIR : BuiltInRegistries.ITEM.get(key);
     }
 
     private static void buildNextStep(Villager villager, ServerLevel level, CompoundTag data, BlockPos site) {
@@ -654,18 +1078,25 @@ public final class VillageBuilder {
         int radius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
+        BlockPos villageCenter = projectVillageCenter(villager);
         for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-radius, -6, -radius), origin.offset(radius, 6, radius))) {
             if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                || !VillageRegistry.isStorageForVillage(level, villageCenter, pos)
                 || !VillageReservations.isStorageAvailable(level, pos, villager)) continue;
             if (!(level.getBlockEntity(pos) instanceof Container container) || countItem(container, item) <= 0) continue;
             candidates.add(pos.immutable());
         }
         candidates.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
+        String projectKind = "animal_pen".equals(villager.getPersistentData().getString(PROJECT_KIND))
+            ? "animal_pen" : "house";
         for (BlockPos storage : candidates) {
             for (Direction direction : HORIZONTAL) {
                 BlockPos stand = storage.relative(direction);
                 if (!isSafeStand(level, stand)) continue;
-                if (!VillageReservations.tryAddStorageReservation(level, villager, storage, "house")) break;
+                boolean reserved = "animal_pen".equals(projectKind)
+                    ? VillageReservations.tryAddStorageReservation(level, villager, storage, "animal_pen")
+                    : VillageReservations.tryAddStorageReservation(level, villager, storage, "house");
+                if (!reserved) break;
                 return new StorageTarget(storage, stand.immutable());
             }
         }
@@ -753,10 +1184,17 @@ public final class VillageBuilder {
             else VillageWorkOrders.cancelProject(level, villager);
         }
         clearOwnedRoute(villager, data);
-        VillageReservations.release(data, "house");
+        String projectKind = data.getString(PROJECT_KIND);
+        if ("animal_pen".equals(projectKind)) {
+            VillageReservations.release(data, "animal_pen");
+        } else {
+            VillageReservations.release(data, "house");
+        }
         data.putBoolean(ACTIVE_KEY, false);
-        data.remove(PHASE); data.remove(PLANK_ITEM); data.remove(DOOR_ITEM); data.remove(BED_ITEM); data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);
+        data.remove(PHASE); data.remove(PROJECT_KIND); data.remove(PLANK_ITEM); data.remove(DOOR_ITEM); data.remove(BED_ITEM);
+        data.remove(FENCE_ITEM); data.remove(GATE_ITEM); data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);
         data.remove(STEP_INDEX); data.remove(STARTED); data.remove(LAST_PROGRESS_TICK); data.remove(NEXT_ACTION);
+        data.remove(PEN_FENCES_REMAINING); data.remove(PEN_GATE_REMAINING);
     }
 
     private static boolean hasOtherActiveTask(CompoundTag data) {
@@ -768,7 +1206,8 @@ public final class VillageBuilder {
             || data.getBoolean(VillagePopulation.ACTIVE_KEY)
             || data.getBoolean("livingvillages_logistics_active")
             || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
-            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY);
+            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
+            || data.getBoolean(VillageLivestock.ACTIVE_KEY);
     }
 
     private static Item getPlankItem(CompoundTag data) {

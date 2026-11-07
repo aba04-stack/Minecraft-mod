@@ -15,8 +15,17 @@ public final class VillageResourceDemandModel {
         int plantableFarmland,
         int availableSeeds,
         boolean treesAvailable,
-        int availablePickaxes
-    ) {}
+        int availablePickaxes,
+        boolean desertBiome
+    ) {
+        /** Backwards-compatible constructor for non-desert/domain-only callers. */
+        public Stock(int adultPopulation, int woodUnits, int stoneUnits, int oreUnits,
+                     int foodPoints, int matureCrops, int plantableFarmland, int availableSeeds,
+                     boolean treesAvailable, int availablePickaxes) {
+            this(adultPopulation, woodUnits, stoneUnits, oreUnits, foodPoints, matureCrops,
+                plantableFarmland, availableSeeds, treesAvailable, availablePickaxes, false);
+        }
+    }
 
     public record Plan(
         int targetWoodUnits,
@@ -61,17 +70,23 @@ public final class VillageResourceDemandModel {
         // Wood units use plank-equivalents: one real log counts as four planks.
         // Targets scale with population, but are capped to prevent runaway stockpiling.
         int targetWood = clamp(48 + adults * 8, 96, 256);
-        int targetStone = clamp(24 + adults * 4, 48, 160);
+        // Treeless settlements must be able to quarry the complete 96-block sandstone bill
+        // for their first house before the miner is released.
+        int targetStone = stock.desertBiome() || !treesAvailable
+            ? clamp(Math.max(96, 24 + adults * 4), 96, 160)
+            : clamp(24 + adults * 4, 48, 160);
         int targetOre = clamp(adults * 2, 4, 32);
         int targetFood = clamp(adults * 8, 32, 256);
 
-        boolean needsWood = adults > 1 && treesAvailable && wood < targetWood;
+        // Keep demand visible after the last mature tree is felled. The source flag controls
+        // whether a lumberjack can be assigned now, not whether the village still needs wood.
+        boolean needsWood = adults > 1 && wood < targetWood;
         boolean needsStone = adults > 1 && stone < targetStone;
         boolean needsOre = adults > 1 && ore < targetOre;
         boolean needsFood = adults > 1 && food < targetFood;
 
         int populationWorkSlots = Math.max(1, Math.min(3, (adults + 5) / 6));
-        int desiredLumberjacks = needsWood ? populationWorkSlots : 0;
+        int desiredLumberjacks = needsWood && treesAvailable ? populationWorkSlots : 0;
         int desiredMiners = needsStone || needsOre
             ? Math.min(pickaxes, Math.max(1, Math.min(3, (adults + 4) / 6))) : 0;
         int desiredFarmers = needsFood && (crops > 0 || (plantableFarmland > 0 && availableSeeds > 0))

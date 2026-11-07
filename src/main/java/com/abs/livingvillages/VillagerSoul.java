@@ -539,8 +539,8 @@ public final class VillagerSoul {
     }
 
     private static void applyNameSetting(Villager villager, CompoundTag soul) {
-        // The elder has a separate visible title; don't overwrite it with the ordinary nameplate.
-        if (VillageElder.isElder(villager)) return;
+        // Elder titles and composed profession/specialist nameplates are managed separately.
+        if (VillageElder.isElder(villager) || VillagerNameplates.isManaged(villager)) return;
         boolean showNames = LivingVillagesConfig.SHOW_PERSONALITY_NAMES.get();
         boolean assigned = soul.getBoolean("modAssignedName");
         String name = soul.getString("name");

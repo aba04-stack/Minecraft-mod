@@ -1,5 +1,6 @@
 package com.abs.livingvillages;
 
+import com.abs.livingvillages.domain.VillageResourceDemandModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.particles.ParticleTypes;
@@ -69,14 +70,16 @@ public final class VillagerTreeWork {
     private static final int TICK_STEP = 5;
     private static final int LOG_CHOP_STEPS = 12; // roughly 3 seconds
     private static final int LEAF_CLEAR_STEPS = 4; // roughly 1 second
-    private static final int SEARCH_RETRY_TICKS = 120;
+    private static final int SEARCH_RETRY_TICKS = 40;
     private static final int SUCCESS_RETRY_TICKS = 40;
-    private static final int ROUTE_RETRY_TICKS = 60;
+    private static final int ROUTE_RETRY_TICKS = 30;
     private static final int TASK_TIMEOUT_TICKS = 2400;
     private static final long REPLANT_RETRY_TICKS = 40L;
-    private static final long REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS = 100L;
+    // Five seconds was too short for ordinary vanilla leaf decay and sapling drops.
+    // Two minutes is still bounded, but gives the worker a realistic chance to find a real item.
+    private static final long REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS = 2400L;
     private static final double BREAK_REACH_SQR = 4.0D * 4.0D;
-    private static final float WALK_SPEED = 0.55F;
+    private static final float WALK_SPEED = 0.90F;
 
     private VillagerTreeWork() {}
 
@@ -134,6 +137,12 @@ public final class VillagerTreeWork {
             return;
         }
         if (now < data.getLong(NEXT_SEARCH) || !isAvailableWorker(villager)) return;
+        // Preserve an active vanilla work/POI route, but replace an ordinary idle stroll with useful work.
+        if (villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
+            && !VillageDailyLife.isVanillaIdle(villager)) {
+            data.putLong(NEXT_SEARCH, now + 20L);
+            return;
+        }
 
         // Do not interrupt active farmer storage trips or emergency vanilla states (sleeping/trading/panic).
         if (data.getBoolean("livingvillages_autonomy_target_active")
@@ -181,9 +190,15 @@ public final class VillagerTreeWork {
         CompoundTag data = villager.getPersistentData();
         BlockPos home = VillagerRoles.getHome(villager);
         if (home == null) home = villager.blockPosition();
-        boolean generalWoodDemand = VillageResourcePlanner.getPlan((ServerLevel) villager.level(), home).needsWood();
-        boolean queuedWoodDemand = VillageWorkOrders.pendingWoodLogItem((ServerLevel) villager.level(), home) != Items.AIR;
-        if (!generalWoodDemand && !queuedWoodDemand) return false;
+        VillageResourceDemandModel.Plan resourcePlan =
+            VillageResourcePlanner.getPlan((ServerLevel) villager.level(), home);
+        boolean queuedWoodDemand = VillageWorkOrders.pendingWoodLogItem(
+            (ServerLevel) villager.level(), home) != Items.AIR;
+        // Keep wood shortages in the settlement plan, but only send a worker when a real
+        // mature tree is available. This prevents idle villagers circling an empty tree search.
+        boolean harvestableWoodDemand = resourcePlan.treesAvailable()
+            && (resourcePlan.needsWood() || queuedWoodDemand);
+        if (!harvestableWoodDemand) return false;
         boolean roleAllowsForestWork = (role.isEmpty()
                 || VillagerRoles.isLumberjack(villager)
                 || (VillagerRoles.ROLE_BUILDER.equals(role) && !VillageBuilder.isProjectActive(villager))
@@ -633,6 +648,9 @@ public final class VillagerTreeWork {
         data.putLong(REPLANT_NEXT_ATTEMPT, 0L);
         data.putBoolean(REPLANT_SITE_SET, false);
         data.putBoolean(REPLANT_FETCH_ACTIVE, false);
+        BlockPos home = VillagerRoles.getHome(villager);
+        VillageRegistry.recordDiagnostic(level, home == null ? treeBase : home, "Лес",
+            "Дерево срублено. Лесоруб ищет настоящий саженец среди дропов и на общем складе.");
     }
 
     private static void continueReplantTask(Villager villager, ServerLevel level, CompoundTag data, long now) {
@@ -669,6 +687,9 @@ public final class VillagerTreeWork {
             }
             if (tryFetchSaplingFromStorage(villager, level, data, source, expectedSapling, allowAnySpecies, now)) return;
             if (now - started >= REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS) {
+                BlockPos home = VillagerRoles.getHome(villager);
+                VillageRegistry.recordDiagnostic(level, home == null ? source : home, "Лес",
+                    "За 2 минуты не найден настоящий саженец. Рабочий ждёт новый саженец или взрослое дерево; бесплатные саженцы не создаются.");
                 cancelReplantTask(villager, data);
                 data.putLong(NEXT_SEARCH, now + SUCCESS_RETRY_TICKS);
                 return;
@@ -734,6 +755,9 @@ public final class VillagerTreeWork {
             inventory.setChanged();
             level.sendParticles(ParticleTypes.HAPPY_VILLAGER, site.getX() + 0.5D, site.getY() + 0.6D,
                 site.getZ() + 0.5D, 4, 0.2D, 0.2D, 0.2D, 0.01D);
+            BlockPos home = VillagerRoles.getHome(villager);
+            VillageRegistry.recordDiagnostic(level, home == null ? source : home, "Лес",
+                "Посажен настоящий саженец. Лесоруб продолжит работу после появления взрослого дерева.");
             cancelReplantTask(villager, data);
             data.putLong(NEXT_SEARCH, now + SUCCESS_RETRY_TICKS);
         }
@@ -862,7 +886,7 @@ public final class VillagerTreeWork {
 
     private static ItemEntity findNearbySaplingDrop(ServerLevel level, BlockPos source, Block preferred,
                                                      boolean allowAnySpecies) {
-        AABB area = new AABB(source).inflate(8.0D, 4.0D, 8.0D);
+        AABB area = new AABB(source).inflate(12.0D, 6.0D, 12.0D);
         List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, area,
             entity -> entity.isAlive() && isSaplingStack(entity.getItem()));
         drops.sort(Comparator.comparingDouble(entity -> entity.distanceToSqr(Vec3.atCenterOf(source))));

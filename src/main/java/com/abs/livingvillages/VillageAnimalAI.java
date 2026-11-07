@@ -101,6 +101,7 @@ public final class VillageAnimalAI {
             return;
         }
         registerOffspringFromParents(parentA, parentB, child, parentA.level().getGameTime());
+        VillageLivestock.inheritSheepOwnership(parentA, parentB, child);
     }
 
     public static int classifySpeciesArchetype(Animal animal) {
@@ -507,6 +508,14 @@ public final class VillageAnimalAI {
         if (player.isShiftKeyDown() && held.isEmpty()) {
             event.setCancellationResult(net.minecraft.world.InteractionResult.SUCCESS);
             event.setCanceled(true);
+            if (animal instanceof Sheep) {
+                player.sendSystemMessage(
+                    net.minecraft.network.chat.Component.literal(
+                        "Овец не нужно закреплять вручную: животновод сам приведёт их в загон поселения на настоящую пшеницу.")
+                        .withStyle(net.minecraft.ChatFormatting.GRAY)
+                );
+                return;
+            }
             player.sendSystemMessage(
                 net.minecraft.network.chat.Component.literal(describeAnimalStatus(animal))
                     .withStyle(net.minecraft.ChatFormatting.GRAY)

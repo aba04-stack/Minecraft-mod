@@ -3,6 +3,7 @@ package com.abs.livingvillages;
 import com.abs.livingvillages.domain.VillageResourceDemandModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BiomeTags;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.npc.Villager;
@@ -125,7 +126,8 @@ public final class VillageResourcePlanner {
         int pickaxes = VillageIndustry.countAvailablePickaxes(level, center);
         return new VillageResourceDemandModel.Stock(
             adults, woodUnits, stoneUnits, oreUnits, foodPoints, matureCrops,
-            plantableFarmland, seedUnits, treesAvailable, pickaxes);
+            plantableFarmland, seedUnits, treesAvailable, pickaxes,
+            level.getBiome(center).is(BiomeTags.HAS_VILLAGE_DESERT));
     }
 
     private static int[] addStack(ItemStack stack, int wood, int stone, int ore, int food) {

@@ -83,12 +83,16 @@ public final class VillageDailyLife {
             || villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
             || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)
             || VillagerRoles.isGuard(villager)
+            || hasSpecialistAssignment(villager)
             || hasHigherPriorityTask(data)
             || !data.getString(CLAIMED_BY).isBlank()
             || isVillageAlarmActive(villager, level, now)
             || !VillageTickBudget.tryConsumeAiCheck(level)) {
             return false;
         }
+        // At most one social pair per village. Several pairs starting on the same idle tick
+        // made residents crowd around the same meeting area.
+        if (hasActiveSocialVisitInVillage(villager, level)) return false;
 
         Villager peer = findAvailablePeer(villager, level);
         boolean canStart = DailyLifeActivityModel.canStartSocialVisit(
@@ -133,7 +137,8 @@ public final class VillageDailyLife {
             villager.isAlive(),
             peer != null && peer.isAlive(),
             isVanillaIdle(villager) && peer != null && isVanillaIdle(peer),
-            hasHigherPriorityTask(data) || (peer != null && hasHigherPriorityTask(peer.getPersistentData())),
+            hasSpecialistAssignment(villager) || hasHigherPriorityTask(data)
+                || (peer != null && (hasSpecialistAssignment(peer) || hasHigherPriorityTask(peer.getPersistentData()))),
             alarm,
             timedOut
         );
@@ -187,6 +192,7 @@ public final class VillageDailyLife {
                 && candidate.distanceToSqr(villager) <= MAX_SOCIAL_DISTANCE_SQR
                 && !candidate.getPersistentData().getBoolean(ACTIVE)
                 && !VillagerRoles.isGuard(candidate)
+                && !hasSpecialistAssignment(candidate)
                 && isSameVillageIfKnown(villager, candidate, level)
                 && isVanillaIdle(candidate)
                 && !candidate.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
@@ -207,6 +213,14 @@ public final class VillageDailyLife {
             if (path != null && path.canReach()) return candidate;
         }
         return null;
+    }
+
+    private static boolean hasActiveSocialVisitInVillage(Villager villager, ServerLevel level) {
+        int activeVisits = 0;
+        for (Villager resident : VillageArea.findVillagers(level, villager.blockPosition())) {
+            if (resident.getPersistentData().getBoolean(ACTIVE)) activeVisits++;
+        }
+        return !DailyLifeActivityModel.canStartSocialVisitInVillage(activeVisits);
     }
 
     private static boolean isSameVillageIfKnown(Villager first, Villager second, ServerLevel level) {
@@ -257,6 +271,16 @@ public final class VillageDailyLife {
         return villager.getBrain().getActiveNonCoreActivity().orElse(null) == Activity.IDLE;
     }
 
+    /** True while the villager is currently following a low-priority social-visit route. */
+    public static boolean isOnSocialVisit(Villager villager) {
+        return villager != null && villager.getPersistentData().getBoolean(ACTIVE);
+    }
+
+    private static boolean hasSpecialistAssignment(Villager villager) {
+        return villager != null
+            && !villager.getPersistentData().getString(VillagerRoles.ROLE_KEY).isBlank();
+    }
+
     private static boolean isVillageAlarmActive(Villager villager, ServerLevel level, long now) {
         net.minecraft.core.BlockPos center = VillagerRoles.getHome(villager);
         if (center == null) center = villager.blockPosition();
@@ -273,11 +297,11 @@ public final class VillageDailyLife {
             || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
             || data.getBoolean(VillageBuilder.ACTIVE_KEY)
             || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
-            || data.getBoolean(VillagePopulation.ACTIVE_KEY)
             || data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
             || data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY)
             || data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY)
-            || data.getBoolean("livingvillages_autonomy_target_active");
+            || data.getBoolean("livingvillages_autonomy_target_active")
+            || data.getBoolean(VillageLivestock.ACTIVE_KEY);
     }
 
     private static void setRoute(Villager villager, Villager target) {

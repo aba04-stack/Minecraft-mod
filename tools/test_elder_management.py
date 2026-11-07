@@ -24,4 +24,8 @@ assert 'VillageElder::registerPayloads' in main and 'VillageElder::onVillagerInt
 assert 'renderBackground(graphics, mouseX, mouseY, partialTick)' in client, "Screen must use the 1.21.1 renderBackground signature"
 assert 'PacketDistributor.sendToServer(new VillageElder.ElderAction(data.elderUuid(), action))' in client
 assert 'livingvillages.elder.order_house' in client and 'livingvillages.elder.order_farm' in client
-print("ELDER MANAGEMENT PASSED: elected only in a populated area, server-validated actions, valid 1.21.1 screen API, config-aware orders")
+assert 'VillagerNameplates::onVillagerTick' in main, "profession labels must be synchronized by the server"
+assert 'define("show_villager_profession_names", true)' in (java / "LivingVillagesConfig.java").read_text(encoding="utf-8")
+assert 'VillageIndustry.describeStartupStatus' in elder, "elder panel must explain the current settlement bootstrap blocker"
+assert 'font.split(notice, PANEL_WIDTH - 40)' in client, "long startup diagnostics must not cover management buttons"
+print("ELDER MANAGEMENT PASSED: right-click panel, server-validated actions, profession nameplates, bounded startup diagnostics")

@@ -60,7 +60,7 @@ public final class VillagePopulation {
     private static final int TARGET_STAND_REACH_SQR = 4;
     private static final long TASK_TIMEOUT_TICKS = 12000L;
     private static final long RETRY_DELAY_TICKS = 40L;
-    private static final float WALK_SPEED = 0.55F;
+    private static final float WALK_SPEED = 0.90F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     private static final Item[] ROOT_FOODS = {Items.CARROT, Items.POTATO, Items.BEETROOT};
     private static final Item[] FOOD_ORDER = {Items.CARROT, Items.POTATO, Items.BEETROOT, Items.BREAD};

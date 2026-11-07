@@ -174,8 +174,16 @@ public final class VillageReservations {
     public static boolean isStorageAvailable(ServerLevel level, BlockPos storage, Villager owner) {
         if (storage == null) return false;
         if (owner != null) {
+            // Verify the physical chest resolves to the same nearest resident cluster as this
+            // exact worker. A stored HOME anchor alone can be stale or ambiguous after relocation.
+            if (!VillageArea.isStorageInResidentGroup(level, owner, storage)) return false;
             BlockPos groupCenter = VillagerRoles.getHome(owner);
-            if (groupCenter == null) groupCenter = owner.blockPosition();
+            if (groupCenter == null) {
+                groupCenter = owner.getBrain().getMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.HOME)
+                    .filter(home -> home.dimension().equals(level.dimension()))
+                    .map(net.minecraft.core.GlobalPos::pos)
+                    .orElse(owner.blockPosition());
+            }
             if (!VillageRegistry.isStorageForVillage(level, groupCenter, storage)) return false;
         }
         AABB search = new AABB(storage).inflate(LOOKUP_RADIUS, 24.0D, LOOKUP_RADIUS);
@@ -226,7 +234,8 @@ public final class VillageReservations {
         }
 
         boolean taskActive = switch (data.getString(KIND)) {
-            case "house" -> data.getBoolean(VillageBuilder.ACTIVE_KEY);
+            case "house", "animal_pen" -> data.getBoolean(VillageBuilder.ACTIVE_KEY);
+            case "livestock" -> data.getBoolean(VillageLivestock.RESERVATION_ACTIVE_KEY);
             case "farm" -> data.getBoolean(VillageFarmBuilder.ACTIVE_KEY);
             case "crafting" -> data.getBoolean(VillageCraftingJobs.ACTIVE_KEY);
             case "food_delivery" -> data.getBoolean(VillagePopulation.ACTIVE_KEY);
