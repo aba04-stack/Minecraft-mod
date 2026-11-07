@@ -101,6 +101,7 @@ public final class VillageAnimalAI {
             return;
         }
         registerOffspringFromParents(parentA, parentB, child, parentA.level().getGameTime());
+        VillageLivestock.inheritSheepOwnership(parentA, parentB, child);
     }
 
     public static int classifySpeciesArchetype(Animal animal) {
@@ -507,6 +508,26 @@ public final class VillageAnimalAI {
         if (player.isShiftKeyDown() && held.isEmpty()) {
             event.setCancellationResult(net.minecraft.world.InteractionResult.SUCCESS);
             event.setCanceled(true);
+            if (animal instanceof Sheep sheep && animal.level() instanceof ServerLevel serverLevel) {
+                java.util.UUID adoptedBy = VillageLivestock.adoptSheepForNearestVillage(serverLevel, sheep);
+                if (adoptedBy != null) {
+                    player.sendSystemMessage(
+                        net.minecraft.network.chat.Component.literal(
+                            "Овца закреплена за поселением. Жители будут собирать шерсть только при нехватке материалов для жилья.")
+                            .withStyle(net.minecraft.ChatFormatting.GREEN)
+                    );
+                    return;
+                }
+                String owner = sheep.getPersistentData().getString(VillageLivestock.SHEEP_OWNER_KEY);
+                String reason = owner.isBlank()
+                    ? "Овца не закреплена: помести её в закрытый загон рядом с одним поселением и повтори действие."
+                    : "Овца уже принадлежит другому поселению; переназначение запрещено.";
+                player.sendSystemMessage(
+                    net.minecraft.network.chat.Component.literal(reason)
+                        .withStyle(net.minecraft.ChatFormatting.YELLOW)
+                );
+                return;
+            }
             player.sendSystemMessage(
                 net.minecraft.network.chat.Component.literal(describeAnimalStatus(animal))
                     .withStyle(net.minecraft.ChatFormatting.GRAY)
