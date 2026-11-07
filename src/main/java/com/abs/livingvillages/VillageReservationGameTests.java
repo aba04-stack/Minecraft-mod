@@ -539,15 +539,22 @@ public final class VillageReservationGameTests {
             "The bed owner must be recorded.");
         helper.assertTrue(VillageRegistry.isWorkBlockForVillage(helper.getLevel(), center, workBlock),
             "The work-block owner must be recorded.");
+        java.util.UUID villageId = VillageRegistry.villageId(helper.getLevel(), center);
+        helper.assertTrue(VillageRegistry.recordDesertStarterKitGranted(helper.getLevel(), center),
+            "A settlement may record its one-time desert starter cache after the real items are committed.");
+        helper.assertTrue(!VillageRegistry.recordDesertStarterKitGranted(helper.getLevel(), center),
+            "A second startup pass must not grant duplicate desert resources.");
 
         VillageRegistry live = VillageRegistry.get(helper.getLevel());
         CompoundTag saved = live.save(new CompoundTag(), helper.getLevel().registryAccess());
         VillageRegistry restored = VillageRegistry.load(saved, helper.getLevel().registryAccess());
+        helper.assertTrue(restored.hasDesertStarterKit(villageId),
+            "The one-time desert starter claim must survive SavedData reload.");
         CompoundTag roundTripped = restored.save(new CompoundTag(), helper.getLevel().registryAccess());
 
         for (String key : List.of(
             "villageAnchors", "knownHomes", "knownResidents",
-            "storageOwners", "bedOwners", "workBlockOwners")) {
+            "storageOwners", "bedOwners", "workBlockOwners", "desertStarterKits")) {
             Set<String> before = canonicalTagRows(saved, key);
             Set<String> after = canonicalTagRows(roundTripped, key);
             helper.assertTrue(!before.isEmpty(),
@@ -579,6 +586,7 @@ public final class VillageReservationGameTests {
                     ids.sort(String::compareTo);
                     rows.add(entry.getString("id") + "|" + String.join(",", ids));
                 }
+                case "desertStarterKits" -> rows.add(entry.getString("id"));
                 default -> rows.add(entry.getLong("pos") + "|" + entry.getString("village"));
             }
         }
@@ -2176,6 +2184,30 @@ public final class VillageReservationGameTests {
         helper.assertTrue(
             !treeless.needsWood() && treeless.desiredLumberjacks() == 0,
             "A treeless settlement must not assign lumberjacks to a resource source that is not present.");
+
+        var desert = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                2, 32, 0, 0, 16, 0, 0, 24, false, 1));
+        helper.assertTrue(desert.targetStoneUnits() == 96 && desert.needsStone()
+                && desert.desiredMiners() == 1 && !desert.needsWood(),
+            "A treeless desert village with a real pickaxe must keep one miner until it can quarry the full 96 sandstone blocks needed for one house.");
+        var desertHouseReady = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                2, 32, 96, 0, 16, 0, 0, 24, false, 1));
+        helper.assertTrue(!desertHouseReady.needsStone() && desertHouseReady.desiredMiners() == 0,
+            "The desert miner must be released after the full starter house bill is physically secured.");
+
+        List<ItemStack> desertKit = VillageIndustry.createDesertStarterKit();
+        helper.assertTrue(desertKit.stream().filter(stack -> stack.is(Items.SANDSTONE))
+                .mapToInt(ItemStack::getCount).sum() == 96
+                && desertKit.stream().filter(stack -> stack.is(Items.OAK_LOG))
+                    .mapToInt(ItemStack::getCount).sum() == 8
+                && desertKit.stream().anyMatch(stack -> stack.is(Items.STONE_PICKAXE))
+                && desertKit.stream().filter(stack -> stack.is(Items.WHEAT_SEEDS))
+                    .mapToInt(ItemStack::getCount).sum() == 24
+                && desertKit.stream().anyMatch(stack -> stack.is(Items.WATER_BUCKET))
+                && desertKit.stream().anyMatch(stack -> stack.is(Items.COMPOSTER)),
+            "The one-time desert cache must contain a complete first-house sandstone bill and a real starter farm/tool kit.");
         helper.succeed();
     }
 
