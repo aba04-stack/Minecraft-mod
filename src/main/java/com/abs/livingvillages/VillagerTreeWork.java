@@ -1,5 +1,6 @@
 package com.abs.livingvillages;
 
+import com.abs.livingvillages.domain.VillageResourceDemandModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.particles.ParticleTypes;
