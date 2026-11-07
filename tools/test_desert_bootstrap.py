@@ -13,7 +13,7 @@ JAVA_TESTS = (ROOT / "src/main/java/com/abs/livingvillages/VillageReservationGam
 for marker in (
     "ENABLE_DESERT_STARTER_KIT",
     'define("enable_desert_starter_kit", true)',
-    "BiomeTags.IS_DESERT",
+    "BiomeTags.HAS_VILLAGE_DESERT",
     "VillageRegistry.hasDesertStarterKit(level, center)",
     "VillageRegistry.recordDesertStarterKitGranted(level, center)",
     "VillageResourcePlanner.getPlan(level, center, villagers)",
