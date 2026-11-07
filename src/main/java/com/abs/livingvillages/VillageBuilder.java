@@ -37,6 +37,7 @@ import net.neoforged.neoforge.event.tick.EntityTickEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Worker-led, material-backed house construction. A builder withdraws actual planks and a bed
@@ -369,7 +370,8 @@ public final class VillageBuilder {
 
     private static boolean isPenBuildSite(ServerLevel level, BlockPos site) {
         if (level == null || site == null) return false;
-        AABB footprint = new AABB(site, site.offset(5, 2, 5));
+        AABB footprint = new AABB(site.getX(), site.getY(), site.getZ(),
+            site.getX() + 5.0D, site.getY() + 2.0D, site.getZ() + 5.0D);
         if (!level.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, footprint,
             entity -> entity.isAlive()).isEmpty()) return false;
         for (int dx = 0; dx < 5; dx++) {
