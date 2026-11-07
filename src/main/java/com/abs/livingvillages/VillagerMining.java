@@ -63,7 +63,7 @@ public final class VillagerMining {
     private static final int SUCCESS_RETRY_TICKS = 40;
     private static final int ROUTE_RETRY_TICKS = 60;
     private static final int TASK_TIMEOUT_TICKS = 12000;
-    private static final float WALK_SPEED = 0.62F;
+    private static final float WALK_SPEED = 0.80F;
     private static final double REACH_SQR = 4.5D * 4.5D;
     private static final Direction[] HORIZONTAL = {
         Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST

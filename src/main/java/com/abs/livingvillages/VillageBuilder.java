@@ -84,7 +84,7 @@ public final class VillageBuilder {
     private static final long NIGHT_START = 12000L;
     private static final long DAY_START = 1000L;
     private static final double PLACE_REACH = 4.5D;
-    private static final float WALK_SPEED = 0.62F;
+    private static final float WALK_SPEED = 0.80F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
 
     public static final List<Item> ALL_BED_ITEMS = List.of(

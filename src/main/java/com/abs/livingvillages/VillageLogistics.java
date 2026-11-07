@@ -51,7 +51,7 @@ public final class VillageLogistics {
     private static final int SUCCESS_RETRY_TICKS = 80;
     private static final int TRIP_TIMEOUT_TICKS = 2400;
     private static final int PICKUP_RADIUS = 4;
-    private static final float WALK_SPEED = 0.55F;
+    private static final float WALK_SPEED = 0.80F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
 
     private VillageLogistics() {}

@@ -76,7 +76,7 @@ public final class VillagerTreeWork {
     private static final long REPLANT_RETRY_TICKS = 40L;
     private static final long REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS = 100L;
     private static final double BREAK_REACH_SQR = 4.0D * 4.0D;
-    private static final float WALK_SPEED = 0.55F;
+    private static final float WALK_SPEED = 0.80F;
 
     private VillagerTreeWork() {}
 
