@@ -56,6 +56,7 @@
   "livingvillages.elder.name": "Village Elder · {0}",
   "livingvillages.elder.screen_title": "Village Management",
   "livingvillages.elder.status_heading": "Settlement status",
+  "livingvillages.elder.notice_page": "Summary %1$s/%2$s - click to continue",
   "livingvillages.elder.actions_heading": "Management",
   "livingvillages.elder.pause_auto": "Pause new orders",
   "livingvillages.elder.resume_auto": "Resume new orders",

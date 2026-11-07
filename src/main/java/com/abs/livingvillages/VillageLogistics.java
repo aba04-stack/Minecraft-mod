@@ -246,6 +246,9 @@ public final class VillageLogistics {
                 BlockPos center = VillagerRoles.getHome(villager);
                 if (center == null) center = villager.blockPosition();
                 VillageWorkOrders.invalidateMaterialDemandCache(level, center);
+                // A real delivery changes what the village owns, so quotas must see it at once
+                // instead of waiting for the next cached planner refresh.
+                VillageResourcePlanner.invalidate(level, center);
             }
             VillagerProgression.recordCompletedWork(
                 villager,

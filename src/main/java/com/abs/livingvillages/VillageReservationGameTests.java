@@ -2231,6 +2231,63 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "resource_demand_precision")
+    public static void reservedMaterialsAndConcreteDeficitsDrivePreciseWorkerDemand(GameTestHelper helper) {
+        // A full wood stock that is already committed to an active house project is not free stock.
+        var committed = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, 0, 0, true, 3, false,
+                4, 0, 0, true, 200, 0, 0, 0));
+        helper.assertTrue(committed.freeWoodUnits() == 56 && committed.needsWood()
+                && committed.freeStoneUnits() == 160 && !committed.needsStone(),
+            "Materials reserved by an active order must keep counting as a shortage instead of idling the lumberjacks.");
+
+        var uncommitted = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, 0, 0, true, 3));
+        helper.assertTrue(uncommitted.freeWoodUnits() == 256 && !uncommitted.needsWood(),
+            "Without reservations the measured stock must stay fully available to the village.");
+
+        // The coarse ore bucket hides a concrete fuel/metal deficit; the precise buckets expose it.
+        helper.assertTrue(committed.needsFuel() && committed.needsIron() && committed.needsOreWork()
+                && committed.targetFuelUnits() == 8 && committed.targetIronUnits() == 8,
+            "Coal and iron must be tracked separately from the coarse ore bucket.");
+
+        var fueled = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, 0, 0, true, 3, false,
+                16, 12, 6, true, 0, 0, 0, 0));
+        helper.assertTrue(!fueled.needsFuel() && !fueled.needsIron() && !fueled.needsSaplings()
+                && !fueled.needsOreWork() && fueled.shortageCount() == 0,
+            "A settlement holding real fuel, iron and saplings must report no shortage at all.");
+
+        // Forest stewardship: a harvested village without saplings keeps a visible regeneration deficit.
+        var bareForest = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, 0, 0, true, 3, false,
+                16, 12, 0, true, 0, 0, 0, 0));
+        helper.assertTrue(bareForest.needsSaplings() && bareForest.targetSaplings() == 6
+                && bareForest.shortageCount() == 1,
+            "A standing forest without stored saplings must report exactly one regeneration deficit.");
+        var treelessVillage = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, 0, 0, false, 3, false,
+                16, 12, 0, true, 0, 0, 0, 0));
+        helper.assertTrue(!treelessVillage.needsSaplings(),
+            "Sapling demand must disappear together with the local trees it would replant.");
+
+        // Role quota: a concrete coal/iron deficit releases one miner even when bulk stone is full.
+        helper.assertTrue(
+            VillagerRoles.desiredMinerSlots(true, 2, 0, false, true, false) == 1
+                && VillagerRoles.desiredMinerSlots(true, 2, 0, false, false, false) == 0
+                && VillagerRoles.desiredMinerSlots(false, 2, 3, true, true, true) == 0
+                && VillagerRoles.desiredMinerSlots(true, 0, 3, true, true, true) == 0
+                && VillagerRoles.desiredMinerSlots(true, 1, 3, false, true, true) == 1
+                && VillagerRoles.desiredMinerSlots(true, 3, 2, true, false, false) == 2,
+            "A miner slot must follow real pickaxes and a concrete ore deficit, never a disabled role.");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "farm_expansion")
     public static void farmExpansionStopsWhenFoodOrAcreageTargetIsSatisfied(GameTestHelper helper) {
         helper.assertTrue(LivingVillages.shouldExpandFarm(true, 19, 8)

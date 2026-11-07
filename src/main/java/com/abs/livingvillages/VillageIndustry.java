@@ -202,6 +202,11 @@ public final class VillageIndustry {
         return hasBlock(level, center, Blocks.CRAFTING_TABLE, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
     }
 
+    /** A real furnace in the village makes fuel demand meaningful for the resource planner. */
+    public static boolean hasFurnace(ServerLevel level, BlockPos center) {
+        return hasBlock(level, center, Blocks.FURNACE, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
+    }
+
     public static int countAvailablePickaxes(ServerLevel level, BlockPos center) {
         return countTools(level, center, VillageIndustry::isPickaxe,
             villager -> isUnassignedAvailableAdult(villager) || VillagerRoles.isMiner(villager));
@@ -871,6 +876,15 @@ public final class VillageIndustry {
         }
         if (plan.needsFood() && plan.availableSeeds() == 0 && plan.matureCrops() == 0) {
             return "Старт: для фермы нужны 24 семени одного вида, мотыга, ведро воды и компостер.";
+        }
+        if (plan.needsFuel()) {
+            return "Дефицит: нет угля или древесного угля — плавка встанет, пока шахтёр не добудет настоящее топливо.";
+        }
+        if (plan.needsIron()) {
+            return "Дефицит: нет железа — кирки, мечи и ножницы требуют настоящих слитков.";
+        }
+        if (plan.needsSaplings()) {
+            return "Дефицит: нет саженцев — после вырубки лес не восстановится сам.";
         }
         return "Старт: общий склад и верстак готовы; жители используют только настоящие ресурсы.";
     }

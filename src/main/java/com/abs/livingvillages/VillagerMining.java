@@ -139,7 +139,8 @@ public final class VillagerMining {
         com.abs.livingvillages.domain.VillageResourceDemandModel.Plan demand =
             VillageResourcePlanner.getPlan(level, home);
         Item requestedQuarryOutput = VillageWorkOrders.pendingQuarryOutputItem(level, home);
-        if (!demand.needsMining() && requestedQuarryOutput == Items.AIR) return;
+        boolean oreDemand = demand.needsOreWork();
+        if (!demand.needsMining() && !oreDemand && requestedQuarryOutput == Items.AIR) return;
 
         BlockPos target;
         int targetKind;
@@ -147,7 +148,7 @@ public final class VillagerMining {
             target = findNearestQuarryBlock(level, villager, pickaxe, requestedQuarryOutput);
             targetKind = TARGET_QUARRY;
         } else {
-            target = demand.needsOre() ? findNearestOre(level, villager, pickaxe) : null;
+            target = oreDemand ? findNearestOre(level, villager, pickaxe, preferredOres(demand)) : null;
             targetKind = TARGET_ORE;
             // Use visible stone only when the village stock is below its actual stone-material target.
             if (target == null && demand.needsStone()) {
@@ -293,10 +294,32 @@ public final class VillagerMining {
         resetProgress(data);
     }
 
-    private static BlockPos findNearestOre(ServerLevel level, Villager villager, ItemStack tool) {
+    /**
+     * Orders the ore search by the village's concrete deficit instead of treating all ores as one
+     * bucket: coal first while the furnace has no fuel, iron next while tool metal is missing.
+     * An empty list keeps the plain nearest-ore behaviour.
+     */
+    private static List<Block> preferredOres(
+            com.abs.livingvillages.domain.VillageResourceDemandModel.Plan demand) {
+        if (demand == null) return List.of();
+        List<Block> preferred = new ArrayList<>(4);
+        if (demand.needsFuel()) {
+            preferred.add(Blocks.COAL_ORE);
+            preferred.add(Blocks.DEEPSLATE_COAL_ORE);
+        }
+        if (demand.needsIron()) {
+            preferred.add(Blocks.IRON_ORE);
+            preferred.add(Blocks.DEEPSLATE_IRON_ORE);
+        }
+        return preferred;
+    }
+
+    private static BlockPos findNearestOre(ServerLevel level, Villager villager, ItemStack tool,
+                                           List<Block> preferredOres) {
         int radius = LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get();
         BlockPos origin = villager.blockPosition();
-        List<BlockPos> candidates = new ArrayList<>();
+        List<BlockPos> wanted = new ArrayList<>();
+        List<BlockPos> others = new ArrayList<>();
         int surfaceY = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
             origin.getX(), origin.getZ());
         // Surface workers keep the cheaper vanilla-like scan. Once a miner is actually underground,
@@ -315,13 +338,18 @@ public final class VillagerMining {
                         && isSafeMineTarget(level, villager, pos, state)
                         && hasExposedFace(level, pos)
                         && findWorkPosition(level, villager, pos) != null) {
-                        candidates.add(pos.immutable());
+                        boolean deficitOre = preferredOres != null && preferredOres.contains(state.getBlock());
+                        (deficitOre ? wanted : others).add(pos.immutable());
                     }
                 }
             }
         }
-        candidates.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
-        return candidates.isEmpty() ? null : candidates.get(0);
+        Comparator<BlockPos> byDistance =
+            Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos)));
+        wanted.sort(byDistance);
+        others.sort(byDistance);
+        if (!wanted.isEmpty()) return wanted.get(0);
+        return others.isEmpty() ? null : others.get(0);
     }
 
     /** True while the settlement's stone/sandstone stock is below the amount needed for tools, a furnace, and structural expansion. */

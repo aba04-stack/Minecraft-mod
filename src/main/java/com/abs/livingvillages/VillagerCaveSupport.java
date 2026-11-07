@@ -189,7 +189,7 @@ public final class VillagerCaveSupport {
 
         BlockPos home = VillagerRoles.getHome(villager);
         if (home == null) home = villager.blockPosition();
-        if (!VillageResourcePlanner.getPlan(level, home).needsOre()) {
+        if (!VillageResourcePlanner.getPlan(level, home).needsOreWork()) {
             data.putLong(NEXT_SCOUT, now + SCOUT_EMPTY_RETRY_TICKS);
             return;
         }

@@ -20,8 +20,11 @@ assert "inflate(12.0D, 6.0D, 12.0D)" in TREE, (
 assert 'recordDiagnostic(level, home == null ? source : home, "Лес"' in TREE, (
     "the elder panel diagnostics must explain when no real sapling can be found"
 )
-assert "boolean needsWood = adults > 1 && wood < targetWood;" in DEMAND, (
+assert "boolean needsWood = adults > 1 && freeWood < targetWood;" in DEMAND, (
     "wood demand must remain recorded after the last mature tree has been felled"
+)
+assert "private static int freeOf(int measured, int reserved) {" in DEMAND, (
+    "wood demand must be judged on unreserved stock so an active project cannot idle the lumberjacks"
 )
 assert "int desiredLumberjacks = needsWood && treesAvailable ? populationWorkSlots : 0;" in DEMAND, (
     "do not send a lumberjack to a location with no mature tree"

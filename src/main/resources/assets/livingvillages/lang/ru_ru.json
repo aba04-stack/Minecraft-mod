@@ -56,6 +56,7 @@
   "livingvillages.elder.name": "Староста · {0}",
   "livingvillages.elder.screen_title": "Управление деревней",
   "livingvillages.elder.status_heading": "Состояние поселения",
+  "livingvillages.elder.notice_page": "Сводка %1$s/%2$s — клик листает дальше",
   "livingvillages.elder.actions_heading": "Управление",
   "livingvillages.elder.pause_auto": "Приостановить новые заказы",
   "livingvillages.elder.resume_auto": "Возобновить новые заказы",
