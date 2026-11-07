@@ -64,7 +64,7 @@ public final class VillageCraftingJobs {
     private static final int JOB_TIMEOUT_TICKS = 48000;
     private static final int ROUTE_REISSUE_TICKS = 40;
     private static final int RETRY_TICKS = 40;
-    private static final float WALK_SPEED = 0.55F;
+    private static final float WALK_SPEED = 0.80F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
 
     private VillageCraftingJobs() {}

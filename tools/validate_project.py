@@ -254,6 +254,12 @@ def main() -> int:
         errors.append(f"monster tactical AI regression check failed: {exc}")
 
     try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_worker_movement_speed.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"worker movement speed regression check failed: {exc}")
+
+    try:
         subprocess.run(["java", str(ROOT / "tools/JavaSyntaxCheck.java"), str(ROOT / "src/main/java")],
                        check=True, capture_output=True, text=True)
     except Exception as exc:
@@ -296,6 +302,7 @@ def main() -> int:
     print("- persistent storage reservations are conflict-checked and released on completion")
     print("- Minecraft GameTests cover competing claims and removed-chest cleanup")
     print("- resource-ledger feature markers present")
+    print("- all autonomous worker routes use the tested 0.80 walk-speed baseline")
     print("- shell scripts pass sh -n")
     print("NOTE: This does not compile the Minecraft/NeoForge source or test behavior in game.")
     return 0

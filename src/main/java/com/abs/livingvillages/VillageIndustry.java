@@ -41,7 +41,7 @@ public final class VillageIndustry {
     private static final String LAST_ROUTE = P + "last_route";
     private static final int BUILD_SCAN_RADIUS = 16;
     private static final int LOCAL_STORAGE_RADIUS = 16;
-    private static final float WALK_SPEED = 0.55F;
+    private static final float WALK_SPEED = 0.80F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     private static final List<Item> RAW_METALS = List.of(Items.RAW_IRON, Items.RAW_COPPER, Items.RAW_GOLD);
     private static final List<Item> FUELS = List.of(Items.COAL, Items.CHARCOAL, Items.OAK_PLANKS, Items.SPRUCE_PLANKS,

@@ -88,7 +88,7 @@ public final class VillagerCaveSupport {
     private static final double VISITED_SCOUT_DISTANCE_SQUARED = 16.0D;
     private static final double VISITED_TRAIL_DISTANCE_SQUARED = 64.0D;
     private static final double ARRIVAL_DISTANCE_SQUARED = 6.25D;
-    private static final float WALK_SPEED = 0.62F;
+    private static final float WALK_SPEED = 0.80F;
 
     private VillagerCaveSupport() {
     }
