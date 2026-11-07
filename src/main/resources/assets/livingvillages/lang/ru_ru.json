@@ -9,7 +9,7 @@
   "livingvillages.config.village_radius_blocks": "Радиус деревни (блоки)",
   "livingvillages.config.resource_chest_radius_blocks": "Радиус поиска хранилищ (блоки)",
   "livingvillages.config.minimum_villagers": "Минимум жителей",
-  "livingvillages.config.enable_desert_starter_kit": "Одноразовый стартовый склад для пустынных деревень без деревьев",
+  "livingvillages.config.enable_desert_starter_kit": "Одноразовый стартовый склад для пустынных деревень при нехватке ресурсов",
   "livingvillages.config.enable_personalities": "Характер и настроение жителей",
   "livingvillages.config.enable_relationship_memory": "Память об игроке и отношениях",
   "livingvillages.config.enable_sneak_to_talk": "Разговор и подарки (Shift + ПКМ)",
