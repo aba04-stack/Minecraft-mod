@@ -680,7 +680,8 @@ public final class VillageLivestock {
             || animalAction == com.abs.livingvillages.domain.TrustAndAnimalModel.ANIMAL_ACTION_SEEK_SHELTER) return;
         if (villageId == null || (!owner.isBlank() && !owner.equals(villageId.toString()))
             || (!lureOwner.isBlank() && !lureOwner.equals(villageId.toString()) && now - lastLure < HERD_TIMEOUT_TICKS)
-            || isInsideVillagePen(level, center, sheep) || sheep.distanceToSqr(herder) > SHEEP_LURE_RADIUS_SQR
+            || isInsideVillagePen(level, center, sheep) || isInsideExistingFencePen(level, sheep)
+            || sheep.distanceToSqr(herder) > SHEEP_LURE_RADIUS_SQR
             || !canSeeSheep(level, sheep, herder)) return;
 
         if (now - lastLure < 20L) return;
@@ -739,6 +740,42 @@ public final class VillageLivestock {
         if (!activeAtGate) closePenGateIfClear(level, center);
     }
 
+    /**
+     * Do not lure livestock out of an existing 5x5 fenced/walled pen, including a pen whose
+     * gate was left open. Vanilla has no universal player-owner field for sheep, so treating
+     * any already enclosed animal as unavailable is the conservative no-theft policy.
+     */
+    static boolean isInsideExistingFencePen(ServerLevel level, Sheep sheep) {
+        if (level == null || sheep == null || !sheep.isAlive()
+            || !level.hasChunkAt(sheep.blockPosition())
+            || !level.getBlockState(sheep.blockPosition().below()).blocksMotion()) return false;
+        BlockPos animalPos = sheep.blockPosition();
+        for (int offsetX = -1; offsetX <= 1; offsetX++) {
+            for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                BlockPos penCenter = animalPos.offset(offsetX, 0, offsetZ);
+                boolean enclosed = true;
+                for (int dx = -2; dx <= 2 && enclosed; dx++) {
+                    for (int dz = -2; dz <= 2; dz++) {
+                        if (Math.abs(dx) != 2 && Math.abs(dz) != 2) continue;
+                        BlockPos boundary = penCenter.offset(dx, 0, dz);
+                        if (!level.hasChunkAt(boundary)) {
+                            enclosed = false;
+                            break;
+                        }
+                        var block = level.getBlockState(boundary).getBlock();
+                        if (!(block instanceof FenceBlock) && !(block instanceof FenceGateBlock)
+                            && !(block instanceof net.minecraft.world.level.block.WallBlock)) {
+                            enclosed = false;
+                            break;
+                        }
+                    }
+                }
+                if (enclosed) return true;
+            }
+        }
+        return false;
+    }
+
     private static List<Sheep> findHerdableSheep(ServerLevel level, BlockPos center) {
         if (level == null || center == null) return List.of();
         UUID villageId = VillageRegistry.villageId(level, center);
@@ -759,7 +796,12 @@ public final class VillageLivestock {
                 || heldByOtherVillage;
         });
         candidates.sort(Comparator.comparingDouble(sheep -> sheep.distanceToSqr(Vec3.atCenterOf(center))));
-        return candidates.size() > MAX_SHEEP_SCAN ? List.copyOf(candidates.subList(0, MAX_SHEEP_SCAN)) : List.copyOf(candidates);
+        if (candidates.size() > MAX_SHEEP_SCAN) {
+            candidates = new ArrayList<>(candidates.subList(0, MAX_SHEEP_SCAN));
+        }
+        candidates.removeIf(sheep -> isInsideVillagePen(level, center, sheep)
+            || isInsideExistingFencePen(level, sheep));
+        return List.copyOf(candidates);
     }
 
     private static Sheep findNearestHerdableSheep(Villager herder, ServerLevel level, BlockPos center) {
