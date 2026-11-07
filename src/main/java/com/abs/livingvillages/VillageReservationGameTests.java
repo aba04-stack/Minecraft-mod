@@ -650,6 +650,15 @@ public final class VillageReservationGameTests {
 
         BlockPos centerOne = helper.absolutePos(new BlockPos(2, 1, 1));
         BlockPos centerTwo = helper.absolutePos(new BlockPos(26, 1, 1));
+        java.util.UUID villageOneId = VillageRegistry.villageId(helper.getLevel(), centerOne);
+        java.util.UUID villageTwoId = VillageRegistry.villageId(helper.getLevel(), centerTwo);
+        helper.assertTrue(villageOneId != null && villageTwoId != null && !villageOneId.equals(villageTwoId),
+            "The two disjoint HOME clusters must resolve to distinct persistent village identities.");
+        helper.assertTrue(VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerOne, storageOne)
+                && VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerTwo, storageTwo)
+                && !VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerOne, storageTwo)
+                && !VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerTwo, storageOne),
+            "A worker must resolve only the physical storage nearest to its own resident cluster.");
         helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerOne, storageOne),
             "The first chest must be owned by village one.");
         helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), centerTwo, storageTwo),
