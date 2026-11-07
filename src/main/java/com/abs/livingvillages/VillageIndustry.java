@@ -756,7 +756,22 @@ public final class VillageIndustry {
         data.remove(ROUTE_X); data.remove(ROUTE_Y); data.remove(ROUTE_Z); data.remove(LAST_ROUTE);
     }
 
-    private static Item plankItemForLog(ItemStack stack) {
+    private static final List<Item> PLANK_LOG_ITEMS = List.of(
+        Items.OAK_LOG, Items.SPRUCE_LOG, Items.BIRCH_LOG, Items.JUNGLE_LOG,
+        Items.ACACIA_LOG, Items.DARK_OAK_LOG, Items.MANGROVE_LOG, Items.CHERRY_LOG,
+        Items.CRIMSON_STEM, Items.WARPED_STEM
+    );
+
+    /** Returns the real log consumed by the existing 1 log -> 4 matching planks recipe. */
+    public static Item logItemForPlanks(Item plankItem) {
+        if (plankItem == null || plankItem == Items.AIR) return Items.AIR;
+        for (Item logItem : PLANK_LOG_ITEMS) {
+            if (plankItemForLog(new ItemStack(logItem)) == plankItem) return logItem;
+        }
+        return Items.AIR;
+    }
+
+    public static Item plankItemForLog(ItemStack stack) {
         if (stack.isEmpty()) return null;
         Block block = Block.byItem(stack.getItem());
         if (!block.defaultBlockState().is(BlockTags.LOGS)) return null;

@@ -240,6 +240,25 @@ public final class VillageWorkOrderModel {
         return Map.copyOf(missing);
     }
 
+    /**
+     * Returns how many real input items are still needed after counting finished output
+     * and the output yield of available inputs. For logs-to-planks, outputPerInput is 4.
+     */
+    public static int missingInputCount(
+        int outputDemand,
+        int availableOutput,
+        int availableInputs,
+        int outputPerInput
+    ) {
+        if (outputPerInput <= 0) return 0;
+        long missingOutput = Math.max(0L,
+            (long) Math.max(0, outputDemand)
+                - Math.max(0, availableOutput)
+                - (long) Math.max(0, availableInputs) * outputPerInput);
+        long missingInputs = (missingOutput + outputPerInput - 1L) / outputPerInput;
+        return (int) Math.min(Integer.MAX_VALUE, missingInputs);
+    }
+
     public static List<Requirement> normalizeRequirements(List<Requirement> requirements) {
         if (requirements == null || requirements.isEmpty()) return List.of();
         if (requirements.size() > MAX_REQUIREMENTS_PER_ORDER) return null;

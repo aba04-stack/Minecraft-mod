@@ -12,6 +12,7 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.memory.WalkTarget;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.GameRules;
@@ -131,14 +132,22 @@ public final class VillagerMining {
         if (home == null) home = villager.blockPosition();
         com.abs.livingvillages.domain.VillageResourceDemandModel.Plan demand =
             VillageResourcePlanner.getPlan(level, home);
-        if (!demand.needsMining()) return;
+        Item requestedQuarryOutput = VillageWorkOrders.pendingQuarryOutputItem(level, home);
+        if (!demand.needsMining() && requestedQuarryOutput == Items.AIR) return;
 
-        BlockPos target = demand.needsOre() ? findNearestOre(level, villager, pickaxe) : null;
-        int targetKind = TARGET_ORE;
-        // Use visible stone only when the village stock is below its actual stone-material target.
-        if (target == null && demand.needsStone()) {
-            target = findNearestQuarryBlock(level, villager, pickaxe);
+        BlockPos target;
+        int targetKind;
+        if (requestedQuarryOutput != Items.AIR) {
+            target = findNearestQuarryBlock(level, villager, pickaxe, requestedQuarryOutput);
             targetKind = TARGET_QUARRY;
+        } else {
+            target = demand.needsOre() ? findNearestOre(level, villager, pickaxe) : null;
+            targetKind = TARGET_ORE;
+            // Use visible stone only when the village stock is below its actual stone-material target.
+            if (target == null && demand.needsStone()) {
+                target = findNearestQuarryBlock(level, villager, pickaxe, Items.AIR);
+                targetKind = TARGET_QUARRY;
+            }
         }
         if (target == null) {
             data.putLong(NEXT_SEARCH, now + SEARCH_RETRY_TICKS);
@@ -341,7 +350,9 @@ public final class VillagerMining {
     }
 
     /** Quarry only exposed, natural-looking stone/sandstone blocks; the normal pickaxe, reach and drop rules still apply. */
-    private static BlockPos findNearestQuarryBlock(ServerLevel level, Villager villager, ItemStack tool) {
+    private static BlockPos findNearestQuarryBlock(
+        ServerLevel level, Villager villager, ItemStack tool, Item requiredOutput
+    ) {
         int radius = Math.min(16, LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
@@ -353,6 +364,7 @@ public final class VillagerMining {
                     if (!level.hasChunkAt(pos)) continue;
                     BlockState state = level.getBlockState(pos);
                     if (!isQuarryBlock(state) || !toolCanMine(tool, state)
+                        || (requiredOutput != Items.AIR && !quarryBlockProduces(state, requiredOutput))
                         || !isSafeMineTarget(level, villager, pos, state)
                         || isReservedByAnotherMiner(level, villager, pos)) continue;
                     if (!hasExposedFace(level, pos)) continue;
@@ -422,6 +434,14 @@ public final class VillagerMining {
                 return true;
             }
         }
+        return false;
+    }
+
+    static boolean quarryBlockProduces(BlockState state, Item output) {
+        if (output == Items.COBBLESTONE) return state.is(Blocks.STONE) || state.is(Blocks.COBBLESTONE);
+        if (output == Items.SANDSTONE) return state.is(Blocks.SANDSTONE);
+        if (output == Items.RED_SANDSTONE) return state.is(Blocks.RED_SANDSTONE);
+        if (output == Items.TERRACOTTA) return state.is(Blocks.TERRACOTTA);
         return false;
     }
 

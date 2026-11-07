@@ -15,6 +15,7 @@ import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.GameRules;
@@ -141,7 +142,10 @@ public final class VillagerTreeWork {
             return;
         }
 
-        BlockPos log = findNearestTreeLog(level, villager);
+        BlockPos home = VillagerRoles.getHome(villager);
+        if (home == null) home = villager.blockPosition();
+        Item requiredLog = VillageWorkOrders.pendingWoodLogItem(level, home);
+        BlockPos log = findNearestTreeLog(level, villager, requiredLog);
         if (log == null) {
             data.putLong(NEXT_SEARCH, now + SEARCH_RETRY_TICKS);
             return;
@@ -177,7 +181,9 @@ public final class VillagerTreeWork {
         CompoundTag data = villager.getPersistentData();
         BlockPos home = VillagerRoles.getHome(villager);
         if (home == null) home = villager.blockPosition();
-        if (!VillageResourcePlanner.getPlan((ServerLevel) villager.level(), home).needsWood()) return false;
+        boolean generalWoodDemand = VillageResourcePlanner.getPlan((ServerLevel) villager.level(), home).needsWood();
+        boolean queuedWoodDemand = VillageWorkOrders.pendingWoodLogItem((ServerLevel) villager.level(), home) != Items.AIR;
+        if (!generalWoodDemand && !queuedWoodDemand) return false;
         boolean roleAllowsForestWork = (role.isEmpty()
                 || VillagerRoles.isLumberjack(villager)
                 || (VillagerRoles.ROLE_BUILDER.equals(role) && !VillageBuilder.isProjectActive(villager))
@@ -239,7 +245,7 @@ public final class VillagerTreeWork {
         progressBreaking(villager, level, data, log, false);
     }
 
-    private static BlockPos findNearestTreeLog(ServerLevel level, Villager villager) {
+    private static BlockPos findNearestTreeLog(ServerLevel level, Villager villager, Item requiredLog) {
         int radius = LivingVillagesConfig.TREE_SEARCH_RADIUS_BLOCKS.get();
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
@@ -250,7 +256,8 @@ public final class VillagerTreeWork {
                     BlockPos pos = origin.offset(dx, dy, dz);
                     if (!level.hasChunkAt(pos)) continue;
                     BlockState state = level.getBlockState(pos);
-                    if (state.is(BlockTags.LOGS) && state.getDestroySpeed(level, pos) >= 0.0F) {
+                    if (state.is(BlockTags.LOGS) && state.getDestroySpeed(level, pos) >= 0.0F
+                        && (requiredLog == Items.AIR || Block.byItem(requiredLog) == state.getBlock())) {
                         candidates.add(pos.immutable());
                     }
                 }

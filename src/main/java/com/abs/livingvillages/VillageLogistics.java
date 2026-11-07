@@ -159,34 +159,7 @@ public final class VillageLogistics {
     private static Map<String, Integer> pendingMaterialDeficits(Villager courier, ServerLevel level) {
         BlockPos center = VillagerRoles.getHome(courier);
         if (center == null) center = courier.blockPosition();
-        List<VillageWorkOrderModel.Order> orders =
-            VillageWorkOrders.list(level, center, level.getGameTime());
-
-        Set<String> wantedIds = new HashSet<>();
-        for (VillageWorkOrderModel.Order order : orders) {
-            if (order.state() != VillageWorkOrderModel.OPEN
-                && order.state() != VillageWorkOrderModel.WAITING_FOR_RESOURCES) continue;
-            for (VillageWorkOrderModel.Requirement requirement : order.requirements()) {
-                if (requirement != null && requirement.isValid()) wantedIds.add(requirement.itemId());
-            }
-        }
-        if (wantedIds.isEmpty()) return null;
-
-        Map<String, Integer> accessibleStock =
-            VillageRegistry.countAvailableOwnedStorageItems(level, center, wantedIds);
-        Map<String, Integer> inTransit = new HashMap<>();
-        for (Villager resident : VillageArea.findVillagers(level, center)) {
-            CompoundTag residentData = resident.getPersistentData();
-            if (resident != courier && !residentData.getBoolean(ACTIVE)
-                && !residentData.getBoolean(CARGO_IN_TRANSIT)) continue;
-            for (int slot = 0; slot < resident.getInventory().getContainerSize(); slot++) {
-                ItemStack stack = resident.getInventory().getItem(slot);
-                if (stack.isEmpty()) continue;
-                String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-                if (wantedIds.contains(itemId)) inTransit.merge(itemId, stack.getCount(), Integer::sum);
-            }
-        }
-        return new HashMap<>(VillageWorkOrderModel.unmetRequirements(orders, accessibleStock, inTransit));
+        return VillageWorkOrders.pendingMaterialPickupDeficits(level, center);
     }
 
     private static void collectNearbyMaterials(

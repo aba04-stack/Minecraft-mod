@@ -2212,6 +2212,20 @@ public final class VillageReservationGameTests {
             "Courier demand must subtract accessible chest stock and in-transit cargo, ignore started orders, and include farm inputs."
         );
 
+        helper.assertTrue(
+            com.abs.livingvillages.domain.VillageWorkOrderModel.missingInputCount(96, 20, 15, 4) == 4
+                && com.abs.livingvillages.domain.VillageWorkOrderModel.missingInputCount(96, 20, 19, 4) == 0
+                && VillageIndustry.logItemForPlanks(Items.OAK_PLANKS) == Items.OAK_LOG
+                && VillageIndustry.logItemForPlanks(Items.BIRCH_PLANKS) == Items.BIRCH_LOG,
+            "Queued plank demand must translate to the correct log species and account for four planks per log."
+        );
+        helper.assertTrue(
+            VillagerMining.quarryBlockProduces(Blocks.STONE.defaultBlockState(), Items.COBBLESTONE)
+                && VillagerMining.quarryBlockProduces(Blocks.SANDSTONE.defaultBlockState(), Items.SANDSTONE)
+                && !VillagerMining.quarryBlockProduces(Blocks.RED_SANDSTONE.defaultBlockState(), Items.SANDSTONE),
+            "A miner must select quarry blocks that produce the exact item requested by the work order."
+        );
+
         Map<String, Integer> fulfilled = com.abs.livingvillages.domain.VillageWorkOrderModel.unmetRequirements(
             List.of(house, farm),
             Map.of(

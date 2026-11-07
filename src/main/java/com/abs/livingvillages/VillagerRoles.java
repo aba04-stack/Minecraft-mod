@@ -4,6 +4,8 @@ import com.abs.livingvillages.domain.VillageResourceDemandModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.phys.AABB;
 
@@ -98,12 +100,18 @@ public final class VillagerRoles {
             && (VillageBuilder.housingNeeded(level, center, all.size()) || VillageElder.hasHouseRequest(all));
 
         VillageResourceDemandModel.Plan resourcePlan = VillageResourcePlanner.getPlan(level, center, all);
+        boolean pendingWoodDemand = VillageWorkOrders.pendingWoodLogItem(level, center) != Items.AIR;
+        boolean pendingQuarryDemand = VillageWorkOrders.pendingQuarryOutputItem(level, center) != Items.AIR;
+        int desiredLumberjacksForQueue = LivingVillagesConfig.ENABLE_VILLAGER_TREE_WORK.get()
+            ? Math.max(resourcePlan.desiredLumberjacks(), pendingWoodDemand ? 1 : 0) : 0;
+        int desiredMinersForQueue = LivingVillagesConfig.ENABLE_MINER_ROLE.get() && availablePickaxes > 0
+            ? Math.max(resourcePlan.desiredMiners(), pendingQuarryDemand ? 1 : 0) : 0;
         int excessLumberjacks = Math.max(0, (int) all.stream().filter(VillagerRoles::isLumberjack).count()
-            - resourcePlan.desiredLumberjacks());
+            - desiredLumberjacksForQueue);
         int excessFarmers = Math.max(0, (int) all.stream().filter(VillagerRoles::isFarmer).count()
             - resourcePlan.desiredFarmers());
         int excessMiners = Math.max(0, (int) all.stream().filter(VillagerRoles::isMiner).count()
-            - resourcePlan.desiredMiners());
+            - desiredMinersForQueue);
         long now = level.getGameTime();
 
         // Disabled or surplus roles are released only when their current task is complete and
@@ -179,12 +187,10 @@ public final class VillagerRoles {
 
         int desiredBuilders = housingNeeded ? 1 : 0;
         int desiredCraftspeople = workshopExists ? 1 : 0;
-        int desiredLumberjacks = LivingVillagesConfig.ENABLE_VILLAGER_TREE_WORK.get()
-            ? resourcePlan.desiredLumberjacks() : 0;
+        int desiredLumberjacks = desiredLumberjacksForQueue;
         int desiredFarmers = LivingVillagesConfig.ENABLE_FARMER_STOCKPILING.get()
             ? resourcePlan.desiredFarmers() : 0;
-        int desiredMiners = LivingVillagesConfig.ENABLE_MINER_ROLE.get()
-            ? resourcePlan.desiredMiners() : 0;
+        int desiredMiners = desiredMinersForQueue;
         int guardDivisor = VillageElder.priorityForVillagers(all) == VillageElder.PRIORITY_DEFENSE ? 4 : 6;
         int desiredGuards = LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get() && adultPopulation >= 3
             ? Math.min(Math.max(1, (int) adultPopulation / guardDivisor), availableSwords) : 0;
@@ -241,7 +247,7 @@ public final class VillagerRoles {
         Villager selected = null;
         for (Villager candidate : candidates) {
             boolean canStart = ROLE_CRAFTSMAN.equals(role) || ROLE_BUILDER.equals(role)
-                || (ROLE_LUMBERJACK.equals(role) && resourcePlan.needsWood())
+                || (ROLE_LUMBERJACK.equals(role) && (resourcePlan.needsWood() || pendingWoodDemand))
                 || (ROLE_FARMER.equals(role) && resourcePlan.needsFood()
                     && (resourcePlan.matureCrops() > 0
                         || (resourcePlan.plantableFarmland() > 0 && resourcePlan.availableSeeds() > 0)))
