@@ -1,14 +1,14 @@
 # Living Villages 0.15.0 (Living Civilization) — логичная автономная деревня
 
 **Целевая версия в конфигурации (`gradle.properties`):** Minecraft Java Edition 1.21.1 · NeoForge 21.1.264 · Java 21 · Gradle 9.2.1.  
-**Статус кода 0.15.0:** `TESTED` в рамках статических проверок, полной сборки `./gradlew build`, 20 внутриигровых `GameTest`, dedicated-server и headless-client smoke-тестов в GitHub Actions CI (`IMPLEMENTED` для полного интерактивного цикла в живом мире; см. [`docs/VERSION_COMPATIBILITY.md`](docs/VERSION_COMPATIBILITY.md) и [`docs/TESTING.md`](docs/TESTING.md)).
+**Статус интеграционного кандидата 0.15.0:** commit `af45d40a1070f48abffb4e6d97e52c33be2d5ea4` прошёл CI #399: сборка, 40/40 обязательных GameTests, запуск dedicated server и клиента с software OpenGL. Это подтверждает проверенные автоматические сценарии, но не заменяет длительное тестирование полного развития поселения в обычном мире. PR #6 направлен в `main` и пока остаётся Draft. См. [`docs/TESTING.md`](docs/TESTING.md) и [план автономного развития](docs/SETTLEMENT_AUTONOMY_PLAN.md).
 
 > **Полная техническая документация проекта Living Civilization:**
 > - [Главный обзор и навигация (`README.md`)](README.md) · [Техническое задание (`docs/PROJECT_SPEC.md`)](docs/PROJECT_SPEC.md) · [Дорожная карта (`docs/ROADMAP.md`)](docs/ROADMAP.md)
 > - [Целевая архитектура (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md) · [Прокачка профессий (`docs/PROGRESSION.md`)](docs/PROGRESSION.md) · [Опасный мир и ИИ монстров (`docs/MONSTERS.md`)](docs/MONSTERS.md)
 > - [Производительность (`docs/PERFORMANCE.md`)](docs/PERFORMANCE.md) · [Сохранения (`docs/SAVE_DATA.md`)](docs/SAVE_DATA.md) · [Тестирование (`docs/TESTING.md`)](docs/TESTING.md) · [Качество релизов (`docs/RELEASE_QUALITY.md`)](docs/RELEASE_QUALITY.md)
 
-Проект собирается на Java 21. **Последняя полная проверка GitHub Actions прошла 27 октября 2026** для commit `c0f111dd81eea237aa3262c0913c27de42ef8022`: статические проверки, `./gradlew build`, десять внутриигровых Minecraft GameTests, запуск dedicated server и headless-клиента под Xvfb/software OpenGL завершились успешно. Клиентский smoke-test создал настоящий экран старосты и подтвердил, что все семь кнопок помещаются в логическом окне `427×240`. Тест не нажимает кнопки и не проверяет ответы сервера; полный игровой цикл двух деревень тоже требует проверки в обычном мире. [Результат CI](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119) · [Скачать JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119/artifacts/12761080201).
+**Последняя интеграционная проверка:** 7 ноября 2026, commit `af45d40a1070f48abffb4e6d97e52c33be2d5ea4`, [GitHub Actions run #399](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42356912395). Успешно завершились статические проверки, Gradle build, 40/40 GameTests, dedicated-server smoke-test и client smoke-test с software OpenGL. [Проверенный CI JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42356912395/artifacts/13568540072) — артефакт проверки, не опубликованный релиз.
 
 ## Выбор группы жителей и границы деревень
 
@@ -110,10 +110,10 @@
 - JSON-файлы переводов разбираются парсером.
 - Сборочные shell-скрипты проверяются через `sh -n`.
 - Исходники дополнительно компилируются с Minecraft/NeoForge classpath в GitHub Actions.
-- `./gradlew build`, десять GameTests и headless-проверка компоновки экрана старосты успешно выполнены для commit `c0f111dd81eea237aa3262c0913c27de42ef8022`; [проверенный JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/40560233119/artifacts/12761080201).
-- Десять Minecraft GameTests реально выполнены через `runGameTestServer`, включая миграцию старого реестра без списка HOME-алиасов, резервирование чужих сундуков и переезд жителей без HOME рядом с соседней деревней.
+- Интеграционная ревизия `af45d40a1070f48abffb4e6d97e52c33be2d5ea4` прошла [CI #399](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42356912395): сборка, 40/40 GameTests, dedicated server и software-OpenGL client; [CI-артефакт JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42356912395/artifacts/13568540072).
+- В интеграционном CI выполняются 40 обязательных Minecraft GameTests через `runGameTestServer`; среди проверяемых областей — миграция реестра, резервирование хранилищ, изоляция соседних поселений, заказы/логистика, безопасная разведка и снабжение ферм водой.
 - Smoke-test dedicated server подтверждает, что сервер достиг сообщения готовности без ошибки загрузки мода.
 - Headless client smoke-test под Xvfb/software OpenGL создаёт настоящий экран старосты и проверяет семь кнопок/границы панели на окне `427×240`. Нажатия кнопок, сетевые ответы сервера и полный игровой сценарий не автоматизированы.
 
 **Ещё не проверено:** интерактивные нажатия в панели старосты и обработка серверных ответов, полный игровой цикл двух настоящих деревень с разными старостами/заказами, конкуренция нескольких рабочих в реальном мире, восстановление заказа после гибели рабочего, размножение и мультиплеер. Серверные GameTests и клиентский тест компоновки подтверждают ограниченные сценарии, но не доказывают, что все механики работают без ошибок в обычной игре.
-> [Пещерная разведка и укрепления](docs/CAVE_EXPLORATION_AND_FORTIFICATIONS.md) — отдельный план памяти пещерных маршрутов, освещения, безопасной автоматической постройки заборов и следующей очереди развития поселения.
+> [Пещерная разведка и укрепления](docs/CAVE_EXPLORATION_AND_FORTIFICATIONS.md) — описание реализованной памяти маршрутов, безопасной разведки, факелов и патрульного освещения, а также ещё не реализованных оград и полной карты пещер.
