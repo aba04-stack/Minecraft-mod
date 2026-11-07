@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression contract for finite treeless-desert settlement bootstrap."""
+"""Regression contract for finite resource-deficient desert settlement bootstrap."""
 from pathlib import Path
 import re
 
@@ -35,8 +35,12 @@ assert 'tag.put("desertStarterKits", desertStarterTags)' in REGISTRY, "desert st
 assert 'tag.getList("desertStarterKits", Tag.TAG_COMPOUND)' in REGISTRY, "desert starter claims must load"
 assert "recordDesertStarterKitGranted" in JAVA_TESTS
 assert "desertHouseReady.targetStoneUnits() == 96" in JAVA_TESTS
-assert re.search(r"int targetStone = treesAvailable\s*\?\s*clamp\(24 \+ adults \* 4, 48, 160\)\s*:\s*clamp\(Math\.max\(96, 24 \+ adults \* 4\), 96, 160\);", DEMAND), (
-    "treeless settlements must keep at least a full 96-block house target for quarrying"
+assert "boolean desertBiome" in DEMAND, "resource demand must distinguish desert settlements even after a tree is planted"
+assert re.search(r"int targetStone = stock\.desertBiome\(\) \|\| !treesAvailable\s*\?\s*clamp\(Math\.max\(96, 24 \+ adults \* 4\), 96, 160\)\s*:\s*clamp\(24 \+ adults \* 4, 48, 160\);", DEMAND), (
+    "desert settlements must keep at least a full 96-block house target even when a real tree is available"
 )
+assert "needsDesertStarterKit(demand)" in INDUSTRY
+assert "needsDesertStarterKit(VillageResourcePlanner.getPlan(level, center, residents))" in INDUSTRY
+assert "desertWithOneTree.targetStoneUnits() == 96" in JAVA_TESTS
 assert "new ItemStack(Items.BED" not in INDUSTRY, "desert kit must not use a nonexistent generic bed item"
 print("DESERT STARTER CONTRACT PASSED: finite saved one-time kit, rollback-safe storage insertion, and 96-block treeless quarry target")
