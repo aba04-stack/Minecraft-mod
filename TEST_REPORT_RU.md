@@ -1,44 +1,66 @@
 # Отчёт проверки Living Villages 0.15.0
 
-## Проверки, выполненные в текущей среде
+> **Связанные документы:** [Полный регламент тестирования (`docs/TESTING.md`)](docs/TESTING.md) · [Критерии допуска релиза (`docs/RELEASE_QUALITY.md`)](docs/RELEASE_QUALITY.md) · [Известные проблемы и ограничения (`docs/KNOWN_ISSUES.md`)](docs/KNOWN_ISSUES.md)
 
-- `python3 tools/validate_project.py` — успешно.
-- `java tools/JavaSyntaxCheck.java src/main/java` — синтаксический разбор успешно пройден для 16 Java-файлов.
-- `sh -n gradlew BUILD_LOCAL.sh` — успешно.
-- Проверка JSON переводов — успешно.
-- Регрессионные статические тесты материального счёта дома и фермы — успешно.
-- `tools/test_elder_management.py` — проверены выбор старосты, серверные действия, заказы, настройки и API отрисовки экрана 1.21.1.
-- Проверка допустимых пар семян и культур — успешно.
-- Проверка выбора наиболее голодного получателя еды — успешно.
-- Целостность сформированного ZIP проверена `zip -T`.
+## Последняя успешная проверка
 
-## Что исправлено в 0.15.0
+- Актуальная ветка: `arena/fbf16766-minecraft-mod` (включает `fix/living-villages-layout` + доменное ядро `com.abs.livingvillages.domain`, `VillagerProgression`, `VillageMonsterAI`, `VillageTickBudget` и 12 внутриигровых `GameTest`).
+- GitHub Actions CI: `python3 tools/validate_project.py` (13 регрессионных скриптов + `JavaSyntaxCheck`), `./gradlew build` и `./gradlew runGameTestServer` на `Temurin Java 21` (Minecraft `1.21.1` / NeoForge `21.1.264`) завершены со статусом `SUCCESS` (run `41516562787`).
+- Все двадцать четыре настоящих Minecraft GameTests прошли, включая:
+  1. запрет бронировать чужой сундук/считать его запасы и сохранение HOME-less группы после переезда рядом с другой деревней;
+  2. `villagerProgressionPreservesSkillAcrossRoleChangesAndMigratesSchema` — миграцию схемы `v0 → v1` с сохранением неизвестных полей, начисление опыта только за подтверждённую работу, повышение уровня и сохранение опыта при смене роли (`miner → builder → miner`);
+  3. `monsterTacticalPerceptionRejectsHiddenTargetsAndCapsPathRetries` — честное восприятие монстров без рентгена сквозь глухую стену и сброс цели при превышении `MAX_PATH_RETRIES = 3`;
+  4. `orphanedHouseProjectIsResumedByReplacementBuilderInSameVillage` — перехват незавершённого строительства дома другим строителем того же поселения с сохранённого `step_index` после потери исходного рабочего (`KI-006`);
+  5. `villageAlarmEvacuatesCiviliansAndHonestCatchUpConservesMaterials` — оповещение поселения о тревоге с эвакуацией мирных жителей к `HOME` и проверка законов сохранения материи в `SettlementSimulationModel`;
+  6. `orphanedFarmProjectResumesAndParallelCraftingTelemetryAndTradeRulesHold` — перехват незавершённой фермы 5×5 другим жителем того же поселения (`KI-006`), параллельный крафт без досок во время стройки (`KI-008`), межпоселенческий обмен излишками (`Stage 5.3`) и телеметрия серверного тика (`Stage 1.4`);
+  7. `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade` — независимый выбор старост в двух соседних деревнях, изолированное исполнение серверных команд старосты (`applyElderAction`, `createPanelSnapshot`) и физический обмен излишками хлеба и досок между сундуками двух деревень (`executeNeighborTradeIfEligible`) с `1:1` сохранением предметов и ростом дипломатического статуса;
+  8. `catchUpSmeltingRaiderSquadRetreatAndGuardEquipmentRequestWorkInWorld` — честная догоняющая плавка в поселении с собственной печью и сундуком (`applyCatchUpSmeltingIfEligible`, `6` `RAW_IRON` + `1` `COAL` → `6` `IRON_INGOT`), запрос на снаряжение безоружного стражника (`setGuardEquipmentRequested`) и организованное отступление отряда разбойников (`Pillager`) при потере `50%` состава (`evaluateRaiderSquadTactics`);
+  9. `monsterArchetypesWitchAllySupportCreeperMobGriefingAndVisitCatchUpWorkInWorld` — проверка тактического поведения архетипов ванильных мобов (`Witch` усиливает раненого союзника `Spider` эффектами `REGENERATION` / `DAMAGE_RESISTANCE`, `Skeleton` удерживает дистанцию `ACTION_HOLD_RANGE_OR_STRAFE`, `Creeper` соблюдает `mobGriefing = false`, `Spider` выбирает `ACTION_VERTICAL_FLANK`) и автоматического догоняющего расчёта при повторном визите поселения (`recordVisitAndRunCatchUp`);
+  10. `portsAdapterSoulMigrationElderSkillSummaryAndAutoNeighborTradeWorkInWorld` — проверка миграции `VillagerSoul` (`schema_version = 1`), доменных портовых адаптеров `SettlementPorts` (`WorldAccessPort`, `StorageAccessPort`, `PersistencePort`), отображения уровней мастеров в сводке панели старосты (`VillageElder.createPanelSnapshot`) и автоматического поиска и торговли с известными соседними поселениями (`VillageRegistry.tryTradeWithKnownNeighbors`);
+  11. `experiencedSpecialistPreferredForRoleAndAgentControlPortNavigatesInWorld` — приоритетный выбор кандидата с большим опытом (`VillagerProgression.getXp`) при назначении роли в `VillagerRoles.assignRoles` и проверка адаптера `AgentControlPort` (`isAgentAlive`, `navigateTo`, `clearNavigation`);
+  12. `logisticsAndFarmerSurplusDeliveriesAwardXpAndConserveMaterialsInWorld` — проверка 1:1 доставки брёвен курьером (`VillageLogistics.depositCarriedMaterials` + `ROLE_COURIER` XP), сдачи излишков хлеба фермером с удержанием резерва 12 очков (`VillagerAutonomy.depositFarmerSurplus` + `ROLE_FARMER` XP) и сокращения шагов добычи у опытного шахтёра/лесоруба;
+  13. `enhancedMobBehaviorsPillagerAlertSearchPatrolSkeletonSpreadCreeperHoldWitchTriageAndGuardAidWorkInWorld` — проверка всех 8 направлений улучшенного поведения мобов и стражи: группового оповещения, поиска последнего известного места и возврата к патрулю у `Pillager`, реакции на шум и затухания поиска у `Zombie`, рассредоточения и поиска укрытия у `Skeleton`, вертикальных стен и засады у `Spider`, ожидания отхода союзников у `Creeper`, триажа по здоровью у `Witch` и приоритизации прямой угрозы жителям + послебоевой помощи раненым жителям у `VillageDefense`;
+  14. `villagerTrustTiersAnimalHerdParentalBreedingAndPillagerReloadWorkInWorld` — проверка 5-уровневой системы доверия жителей (`0–100`: `незнакомец`, `знакомый`, `доверяет`, `друг`, `близкий человек`), сохранения доверия в NBT, влияния доверия на поведение и скидки, стадной реакции животных на опасность (`alertHerdOnDanger`), следования детёнышей за родителями (`ANIMAL_ACTION_FOLLOW_PARENT`), защиты потомства родителями (`ANIMAL_ACTION_PROTECT_OFFSPRING`), брачного поведения, наследования черт и взросления молодняка (`registerOffspringFromParents`, `stepOffspringGrowth`), а также манёвра разбойника при перезарядке арбалета (`ACTION_RELOAD_STRAFE`);
+  15. `interactiveRequestPreferencesLivestockCareTrustAndElderLivestockSummaryWorkInWorld` — проверка интерактивных просьб и предпочтений жителей (`describePreferredGift`, `describeRequestItem`), бонуса к доверию за уход за деревенским скотом (`recordLivestockCareTrustBonus`), сводки состояния животных (`describeAnimalStatus`), отображения численности скота и молодняка в панели старосты (`VillageElder.summarizeLivestockStatus`), развития поселения в пустыне без деревьев (сжатие `64 SAND → 16 SANDSTONE` 4:1 через `VillageIndustry.compressSandToSandstoneIfEligible`), поддержки всех 16 цветов кроватей (`Items.YELLOW_BED`, `Items.BLUE_BED`) и биомных строительных блоков (`Blocks.SANDSTONE`, `Items.ACACIA_DOOR`) при старте строительства дома (`VillageBuilder.startHouseProject`), а также сторожевого таймера зависших задач (`VillagerRoles.recoverIfTaskStuck`), стабильности ролей (`canSwitchSpecialistRole`) и приоритета ванильного ИИ сна/торговли (`shouldYieldToVanillaVillagerAi`). Межпоселенческий обмен песчаника на дубовые доски (`VillageRegistry.executeBiomeResourceTradeIfEligible`) проверен в `twoNeighboringVillagesHaveIndependentEldersOrdersAndExecuteHonestSurplusTrade`.
+- Dedicated-server smoke-test и headless client smoke-test (`ElderScreen` в окне `427×240` под Xvfb/Mesa) включены в конвейер CI.
+- Артефакт `livingvillages-0.15.0.jar` собирается и публикуется в каждом запуске workflow.
 
-- Добавлено меню старосты с серверно-проверяемыми действиями для управления деревней. Староста сохраняет ванильную профессию; Shift + ПКМ остаётся разговором/подарком.
-- Новый староста не назначается ниже минимального числа жителей, а заказы проекта очищаются при отключении соответствующего переключателя.
-- Исправлен вызов 1.21.1 `Screen.renderBackground` в пользовательском экране.
+## Что добавлено и проверено статически
 
-1. Семена больше не проверяются через `Block.byItem(seedItem)`, что могло отклонять валидные культуры. Вместо этого используются четыре явные пары для пшеницы, моркови, картофеля и свёклы.
-2. Курьер еды теперь выбирает жителя с наименьшим запасом питания; равные значения разрешаются стабильной сортировкой по UUID.
-3. POSIX- и Windows-сценарии сборки используют зафиксированный Gradle 9.2.1; загружаемый дистрибутив сверяется по SHA-256 перед распаковкой.
-4. Локальный helper и GitHub Actions используют один путь сборки.
+- Общая группировка жителей по HOME-якорям и выбор ближайшей группы подключены к основным системам.
+- Добавлена система сохраняемых заявок на физические сундуки и бочки: координаты заявок хранятся в persistent data рабочего.
+- Дом, ферма и крафт резервируют доступные хранилища; новые источники/приёмники нужно зарезервировать перед маршрутом.
+- Курьер еды, логистика, складирование излишков, добыча/поиск инструментов, лесорубы и защитники пропускают контейнеры, зарезервированные другой задачей.
+- Заявки освобождаются по типу текущего задания, чтобы отмена логистики или складирования еды не снимала резерв строительства, фермы или крафта.
+- При каждом запросе резерва проверяется, что связанное задание ещё активно; если состояние сброшено, claim очищается. Удалённые/заменённые сундуки удаляются из списка резерва, если чанк загружен.
+- Регрессионные тесты проверяют API заявки, подключение основных систем, динамический захват контейнеров и типизированное освобождение.
+- Добавлена проверка строительных площадок: активный дом/ферма резервирует безопасную область вокруг своего плана; поиск участка и старт нового проекта отказываются от пересекающегося/слишком близкого участка.
+- Добавлен `VillageRegistry` на базе `SavedData`: данные мира сохраняют UUID деревень и владельцев физических хранилищ, кроватей и рабочих блоков. Владение используется в основных сканерах материалов, счётчиках кроватей, индустрии, физическом крафте, курьере еды и панели старосты.
+- Устаревшие записи владельцев очищаются для загруженных областей, если сундук/кровать/рабочий блок был удалён или заменён.
+- Десять Minecraft GameTests реально запущены в CI: дополнительно проверены миграция legacy-реестра без HOME-алиасов, запрет использования чужого хранилища и сохранение HOME-less группы после перемещения рядом с соседней деревней.
+- ID деревни не является полным глобальным census выгруженных жителей: это сохраняемый эвристический реестр, использующий HOME-якоря и историю UUID. GameTests подтверждают сохранение HOME-less группы после переезда рядом с соседним поселением. Реальные split/merge и полный игровой цикл двух деревень остаются не проверены.
 
-## Не проверено
+## Ограничения и непроверенные сценарии
 
-Полная Gradle-компиляция с classpath Minecraft/NeoForge, запуск `runClient`, поведение ИИ в загруженном мире и многопользовательские сценарии не проверены.
+Резервирование намеренно грубое: задание блокирует весь физический контейнер, а не только конкретное количество предметов. Это предотвращает конкуренцию за один сундук, но может временно задерживать несвязанные задачи.
 
-Попытка `./gradlew --version` завершилась сетевой ошибкой:
+Не проверено в настоящем игровом клиенте:
+- Интерактивная проверка `./gradlew runClient`: реальные нажатия на кнопки панели, получение ответов сервера и изменение состояния поселения. Headless smoke-test уже создаёт экран и проверяет размещение семи кнопок, но не симулирует клики/сетевые действия.
+- Полный игровой сценарий двух соседних деревень с разными старостами, реальными запасами, ролями и заказами; реакция на переезд/смерть жителей и разделение/слияние групп. GameTests проверяют группировку, владение активами и геометрию занятых площадок, но не весь игровой цикл в обычном клиентском мире.
+- Поведение нескольких работников при конкурирующих потребностях, полной блокировке склада и пропаже контейнера.
+- Смерть рабочего во время задания, восстановление проекта и учёт выпавших предметов.
+- Полные сценарии стройки дома/фермы, крафта, логистики, защиты и естественного размножения в одиночной игре и мультиплеере.
+- Нагрузочное поведение в больших поселениях.
 
-`curl: (6) Could not resolve host: services.gradle.org`
+Успешная сборка и запуск dedicated server **не доказывают** корректность всех игровых сценариев. Используй копию тестового мира, не основной сейв.
 
-Это ограничение текущей среды, а не доказательство ошибки исходников. В архиве нет готового JAR; сборку нужно выполнить на компьютере или CI с доступом к Gradle и репозиториям Minecraft/NeoForge.
-
-## Как воспроизвести проверки
+## Как воспроизвести
 
 ```sh
 python3 tools/validate_project.py
 java tools/JavaSyntaxCheck.java src/main/java
+for test_file in tools/test_*.py; do python3 "$test_file"; done
+sh -n gradlew BUILD_LOCAL.sh
 ./gradlew build
+./gradlew runServer
 ```
-
-Успех первых двух команд не означает, что Minecraft/NeoForge API-ссылки были разрешены компилятором. Только успешный `./gradlew build` подтверждает компиляцию, а тест `runClient` нужен для проверки игрового поведения.

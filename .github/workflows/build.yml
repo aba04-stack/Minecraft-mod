@@ -1,0 +1,129 @@
+name: Build mod
+
+on:
+  push:
+    branches: [main, 'arena/**', 'feature/**']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish the playable GitHub Release after a separately reviewed release build"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: living-villages-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Run static project checks
+        run: python3 tools/validate_project.py
+      - name: Build with checksum-pinned Gradle bootstrap
+        run: ./gradlew build
+      - name: Run in-world reservation GameTests
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build
+          if ! ./gradlew runGameTestServer 2>&1 | tee build/gametest.log; then
+            (grep -iE "failed|timeout|GameTestAssertException|MultipleTestTracker|Exception" build/gametest.log || tail -n 20 build/gametest.log) | sed 's/^.*]: //' | tr -d '\r' | tail -n 15 | while IFS= read -r line; do
+              echo "::error file=src/main/java/com/abs/livingvillages/VillageReservationGameTests.java,line=1::$line"
+            done
+            exit 1
+          fi
+      - name: Smoke-test dedicated server startup
+        if: github.event_name == 'pull_request' || startsWith(github.ref_name, 'arena/') || startsWith(github.ref_name, 'feature/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p run/server build
+          printf 'eula=true\n' > run/server/eula.txt
+          log_file=build/server-smoke.log
+
+          # Run in a separate process group so timeout cleanup also stops the Java server child.
+          setsid ./gradlew runServer > "$log_file" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill -TERM -- "-$server_pid" 2>/dev/null || true
+            sleep 2
+            kill -KILL -- "-$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          deadline=$((SECONDS + 150))
+          while (( SECONDS < deadline )); do
+            if grep -Eq 'Done \([0-9.]+s\)! For help, type "help"' "$log_file"; then
+              echo "Dedicated server reached the ready state."
+              exit 0
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo "Dedicated server exited before becoming ready."
+              tail -n 200 "$log_file" || true
+              if [ -f run/server/logs/latest.log ]; then tail -n 200 run/server/logs/latest.log; fi
+              exit 1
+            fi
+            sleep 2
+          done
+
+          echo "Dedicated server did not reach the ready state within 150 seconds."
+          tail -n 200 "$log_file" || true
+          if [ -f run/server/logs/latest.log ]; then tail -n 200 run/server/logs/latest.log; fi
+          exit 1
+      - name: Smoke-test client startup with software OpenGL
+        if: github.event_name == 'pull_request' || startsWith(github.ref_name, 'arena/') || startsWith(github.ref_name, 'feature/')
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0
+          bash tools/smoke_test_client.sh
+      - name: Upload mod JAR
+        uses: actions/upload-artifact@v7
+        with:
+          name: livingvillages-0.15.0
+          path: build/libs/livingvillages-0.15.0.jar
+          if-no-files-found: error
+      - name: Publish playable GitHub Release and JAR blob
+        # Never publish/overwrite a release on a normal push or PR merge.
+        # A release must be an explicit manual action after a reviewed release build.
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BLOB_SHA=$(python3 -c '
+          import base64, json, os, subprocess
+          from pathlib import Path
+          b64 = base64.b64encode(Path("build/libs/livingvillages-0.15.0.jar").read_bytes()).decode()
+          payload = json.dumps({"content": b64, "encoding": "base64"})
+          repo = os.environ["GITHUB_REPOSITORY"]
+          out = subprocess.check_output(["gh", "api", f"repos/{repo}/git/blobs", "--input", "-"], input=payload.encode())
+          print(json.loads(out)["sha"])
+          ')
+          SHA256=$(sha256sum build/libs/livingvillages-0.15.0.jar | awk '{print $1}')
+          NOTES="Готовая сборка Living Villages 0.15.0 для Minecraft Java Edition 1.21.1 + NeoForge 21.1.264.\n\n- SHA-256: \`$SHA256\`\n- JAR_BLOB_SHA: \`$BLOB_SHA\`\n- Commit: \`$GITHUB_SHA\`"
+          if gh release view v0.15.0 >/dev/null 2>&1; then
+            gh release upload v0.15.0 build/libs/livingvillages-0.15.0.jar --clobber
+            gh release edit v0.15.0 --title "Living Villages 0.15.0 (Minecraft 1.21.1 + NeoForge)" --notes "$(printf "$NOTES")"
+          else
+            gh release create v0.15.0 build/libs/livingvillages-0.15.0.jar \
+              --target "$GITHUB_SHA" \
+              --title "Living Villages 0.15.0 (Minecraft 1.21.1 + NeoForge)" \
+              --notes "$(printf "$NOTES")"
+          fi
