@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.GameRules;
+import net.minecraft.tags.BiomeTags;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -66,6 +67,9 @@ public final class VillageIndustry {
         if (villagers.isEmpty()) return;
 
         List<StorageRef> storages = findStorages(level, center, radius);
+        if (tryGrantDesertStarterKit(level, center, villagers, storages)) {
+            storages = findStorages(level, center, radius);
+        }
         if (storages.isEmpty()) {
             // If physical chests exist but are reserved by active projects, do not mistake them
             // for a brand-new settlement and attempt duplicate storage bootstrap from inventory.
@@ -671,6 +675,154 @@ public final class VillageIndustry {
             && hasStorageBlock(level, center, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
     }
 
+    /**
+     * A treeless desert settlement receives one finite starter cache. This is an explicit,
+     * persisted bootstrap exception, not a recurring item generator: after the cache is
+     * committed its village UUID is recorded in SavedData and no second cache can be granted.
+     */
+    static boolean tryGrantDesertStarterKit(
+            ServerLevel level, BlockPos center, List<Villager> villagers, List<StorageRef> storages) {
+        if (!LivingVillagesConfig.ENABLE_DESERT_STARTER_KIT.get()
+            || level == null || center == null || villagers == null
+            || !level.getBiome(center).is(BiomeTags.IS_DESERT)
+            || villagers.stream().filter(v -> v != null && v.isAlive() && !v.isBaby()).count()
+                < LivingVillagesConfig.MINIMUM_VILLAGERS.get()
+            || VillageRegistry.hasDesertStarterKit(level, center)) return false;
+
+        VillageResourceDemandModel.Plan demand = VillageResourcePlanner.getPlan(level, center, villagers);
+        if (demand.treesAvailable()) return false;
+
+        // If the only owned container is currently reserved, wait instead of creating duplicate depots.
+        if ((storages == null || storages.isEmpty())
+            && hasStorageBlock(level, center, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) {
+            VillageRegistry.recordDiagnostic(level, center, "Старт", "Пустынный набор ждёт освобождения общего склада");
+            return false;
+        }
+
+        List<ItemStack> bundle = createDesertStarterKit();
+        StorageRef destination = storages == null ? null : storages.stream()
+            .filter(ref -> canFitBundle(ref.container(), bundle))
+            .min(Comparator.comparingDouble(ref -> ref.pos().distSqr(center)))
+            .orElse(null);
+
+        boolean createdStorage = false;
+        BlockPos storagePos;
+        Container destinationContainer;
+        if (destination != null) {
+            storagePos = destination.pos();
+            destinationContainer = destination.container();
+        } else {
+            BlockPos site = findBuildSiteNear(level, center, 6);
+            if (site == null) {
+                VillageRegistry.recordDiagnostic(level, center, "Старт", "Пустынный набор ждёт безопасного места для первого склада");
+                return false;
+            }
+            BlockState previous = level.getBlockState(site);
+            if (!previous.isAir() && VillageBuilder.isAirOrReplaceableVegetation(previous)) {
+                level.destroyBlock(site, true);
+            }
+            if (!level.setBlock(site, Blocks.CHEST.defaultBlockState(), 3)
+                || !(level.getBlockEntity(site) instanceof Container placed)) return false;
+            storagePos = site.immutable();
+            destinationContainer = placed;
+            createdStorage = true;
+        }
+
+        if (!VillageRegistry.isStorageForVillage(level, center, storagePos)) {
+            if (createdStorage) level.removeBlock(storagePos, false);
+            VillageRegistry.recordDiagnostic(level, center, "Старт", "Не удалось закрепить пустынный склад за этим поселением");
+            return false;
+        }
+
+        ItemStack[] before = snapshotContainer(destinationContainer);
+        if (!insertBundle(destinationContainer, bundle)
+            || !VillageRegistry.recordDesertStarterKitGranted(level, center)) {
+            restoreContainer(destinationContainer, before);
+            if (createdStorage) level.removeBlock(storagePos, false);
+            VillageRegistry.recordDiagnostic(level, center, "Старт", "Не удалось безопасно разместить пустынный стартовый запас");
+            return false;
+        }
+        destinationContainer.setChanged();
+        VillageRegistry.recordDiagnostic(level, center, "Старт",
+            "Одноразовый пустынный набор готов: песчаник для первого дома, брёвна, кирка, еда и комплект фермы");
+        return true;
+    }
+
+    /** One real house bill, a basic workbench supply and one real 5x5 farm bill. */
+    static List<ItemStack> createDesertStarterKit() {
+        return List.of(
+            new ItemStack(Items.OAK_LOG, 8),
+            new ItemStack(Items.SANDSTONE, 96),
+            new ItemStack(Items.STONE_PICKAXE, 1),
+            new ItemStack(Items.WOODEN_HOE, 1),
+            new ItemStack(Items.WHEAT_SEEDS, 24),
+            new ItemStack(Items.WATER_BUCKET, 1),
+            new ItemStack(Items.COMPOSTER, 1),
+            new ItemStack(Items.BREAD, 4),
+            new ItemStack(Items.OAK_DOOR, 1),
+            new ItemStack(Items.WHITE_BED, 1)
+        );
+    }
+
+    private static boolean canFitBundle(Container container, List<ItemStack> bundle) {
+        if (container == null || bundle == null) return false;
+        ItemStack[] simulated = snapshotContainer(container);
+        for (ItemStack required : bundle) {
+            if (required == null || required.isEmpty()) continue;
+            int remaining = required.getCount();
+            for (int pass = 0; pass < 2 && remaining > 0; pass++) {
+                for (int slot = 0; slot < simulated.length && remaining > 0; slot++) {
+                    if (!container.canPlaceItem(slot, required)) continue;
+                    ItemStack current = simulated[slot];
+                    if (pass == 0) {
+                        if (current.isEmpty()
+                            || !ItemStack.isSameItemSameComponents(current, required)) continue;
+                        int capacity = Math.min(current.getMaxStackSize(), container.getMaxStackSize())
+                            - current.getCount();
+                        int moved = Math.min(Math.max(0, capacity), remaining);
+                        if (moved > 0) {
+                            current.grow(moved);
+                            remaining -= moved;
+                        }
+                    } else if (current.isEmpty()) {
+                        int moved = Math.min(remaining,
+                            Math.min(required.getMaxStackSize(), container.getMaxStackSize()));
+                        ItemStack placed = required.copy();
+                        placed.setCount(moved);
+                        simulated[slot] = placed;
+                        remaining -= moved;
+                    }
+                }
+            }
+            if (remaining > 0) return false;
+        }
+        return true;
+    }
+
+    private static boolean insertBundle(Container container, List<ItemStack> bundle) {
+        if (!canFitBundle(container, bundle)) return false;
+        for (ItemStack required : bundle) {
+            if (required == null || required.isEmpty()) continue;
+            if (!insertIntoContainer(container, required.copy())) return false;
+        }
+        container.setChanged();
+        return true;
+    }
+
+    private static ItemStack[] snapshotContainer(Container container) {
+        ItemStack[] copy = new ItemStack[container.getContainerSize()];
+        for (int slot = 0; slot < copy.length; slot++) copy[slot] = container.getItem(slot).copy();
+        return copy;
+    }
+
+    private static void restoreContainer(Container container, ItemStack[] snapshot) {
+        if (container == null || snapshot == null || snapshot.length != container.getContainerSize()) return;
+        for (int slot = 0; slot < snapshot.length; slot++) {
+            container.setItem(slot, snapshot[slot].copy());
+        }
+        container.setChanged();
+    }
+
     /** A compact setup hint shown by the elder so a new settlement never fails silently. */
     public static String describeStartupStatus(ServerLevel level, BlockPos center, List<Villager> residents) {
         if (level == null || center == null) return "";
@@ -679,6 +831,15 @@ public final class VillageIndustry {
         if (adults < LivingVillagesConfig.MINIMUM_VILLAGERS.get()) {
             return "Старт: нужно взрослых жителей — " + adults + "/"
                 + LivingVillagesConfig.MINIMUM_VILLAGERS.get() + ".";
+        }
+        if (LivingVillagesConfig.ENABLE_DESERT_STARTER_KIT.get()
+            && level.getBiome(center).is(BiomeTags.IS_DESERT)
+            && !VillageResourcePlanner.getPlan(level, center, residents).treesAvailable()
+            && !VillageRegistry.hasDesertStarterKit(level, center)) {
+            return "Пустынный старт: готовится одноразовый склад с ресурсами, киркой и комплектом первой фермы.";
+        }
+        if (VillageRegistry.hasDesertStarterKit(level, center)) {
+            return "Стартовый запас пустынного поселения выдан один раз. Дальше жители добывают и производят ресурсы сами.";
         }
 
         int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
