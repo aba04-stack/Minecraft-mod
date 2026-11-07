@@ -84,6 +84,8 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillageLivestock::onVillagerTick);
         NeoForge.EVENT_BUS.addListener(VillageMonsterAI::onEntityTick);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalTick);
+        // Sheep attraction runs after vanilla/mod behavior so the herder's wheat route wins this tick.
+        NeoForge.EVENT_BUS.addListener(VillageLivestock::onAnimalTick);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalDamaged);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onBabySpawn);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalInteract);
