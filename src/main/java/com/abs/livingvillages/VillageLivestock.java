@@ -276,20 +276,6 @@ public final class VillageLivestock {
         return pendingPenRequirement(level, center, false);
     }
 
-    /** Matching plank input for the fence order; keeps the chosen wood species consistent. */
-    public static Item pendingPenPlankItem(ServerLevel level, BlockPos center) {
-        Item fence = pendingPenFenceItem(level, center);
-        if (fence == Items.AIR) return Items.AIR;
-        ResourceLocation key = BuiltInRegistries.ITEM.getKey(fence);
-        String path = key.getPath();
-        if (!path.endsWith("_fence")) return Items.AIR;
-        ResourceLocation plankKey = ResourceLocation.tryParse(
-            key.getNamespace() + ":" + path.substring(0, path.length() - "_fence".length()) + "_planks");
-        if (plankKey == null) return Items.AIR;
-        Item planks = BuiltInRegistries.ITEM.get(plankKey);
-        return Block.byItem(planks).defaultBlockState().is(net.minecraft.tags.BlockTags.PLANKS) ? planks : Items.AIR;
-    }
-
     /** Resolves the matching plank type from the material-pinned fence requirement. */
     public static Item pendingPenPlankItem(ServerLevel level, BlockPos center) {
         Item fence = pendingPenFenceItem(level, center);
