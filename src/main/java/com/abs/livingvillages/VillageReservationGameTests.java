@@ -2143,10 +2143,6 @@ public final class VillageReservationGameTests {
                 && starter.desiredMiners() == 2
                 && starter.desiredFarmers() == 1,
             "Low physical stock with local trees, ripe crops and tools must request the matching workers.");
-        helper.assertTrue(LivingVillages.shouldExpandFarm(starter.needsFood(), 24, 8)
-                && !LivingVillages.shouldExpandFarm(stocked.needsFood(), 24, 8),
-            "Farm expansion must follow measured food demand rather than acreage alone.");
-
         var stocked = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
                 8, 256, 160, 32, 256, 0, 0, 0, true, 3));
@@ -2156,6 +2152,9 @@ public final class VillageReservationGameTests {
                 && stocked.desiredMiners() == 0
                 && stocked.desiredFarmers() == 0,
             "Workers must not keep extracting resources after stock reaches its targets.");
+        helper.assertTrue(LivingVillages.shouldExpandFarm(starter.needsFood(), 24, 8)
+                && !LivingVillages.shouldExpandFarm(stocked.needsFood(), 24, 8),
+            "Farm expansion must follow measured food demand rather than acreage alone.");
 
         var treeless = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
