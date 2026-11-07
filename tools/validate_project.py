@@ -266,6 +266,12 @@ def main() -> int:
         errors.append(f"desert starter bootstrap regression check failed: {exc}")
 
     try:
+        subprocess.run([sys.executable, str(ROOT / "tools/test_tree_work_lifecycle.py")],
+                       check=True, capture_output=True, text=True)
+    except Exception as exc:
+        errors.append(f"tree work lifecycle regression check failed: {exc}")
+
+    try:
         subprocess.run(["java", str(ROOT / "tools/JavaSyntaxCheck.java"), str(ROOT / "src/main/java")],
                        check=True, capture_output=True, text=True)
     except Exception as exc:
