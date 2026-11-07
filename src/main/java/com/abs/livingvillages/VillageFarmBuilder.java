@@ -33,6 +33,7 @@ import com.abs.livingvillages.domain.VillageWorkOrderModel;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * A farm is a real worker project, not a one-tick block generator. The worker carries actual seeds,
@@ -46,6 +47,9 @@ public final class VillageFarmBuilder {
     private static final String P = "livingvillages_farm_build_";
     private static final String PHASE = P + "phase";
     private static final String SEED_ITEM = P + "seed_item";
+    private static final String WATER_ITEM = P + "water_item";
+    private static final String WATER_ROUTE_STARTED = P + "water_route_started";
+    private static final String WATER_SEARCH_FAILURES = P + "water_search_failures";
     private static final String CROP_BLOCK = P + "crop_block";
     private static final String SITE_X = P + "site_x", SITE_Y = P + "site_y", SITE_Z = P + "site_z";
     private static final String STEP_INDEX = P + "step_index";
@@ -63,9 +67,11 @@ public final class VillageFarmBuilder {
     private static final int FETCH_HOE = 4;
     private static final int BUILDING = 5;
     private static final int RETURN_BUCKET = 6;
+    private static final int FILL_WATER = 7;
     private static final int ROUTE_TO_STORAGE = 1;
     private static final int ROUTE_TO_STEP = 2;
     private static final int ROUTE_TO_OUTPUT = 3;
+    private static final int ROUTE_TO_WATER_SOURCE = 4;
 
     private static final int FARM_SIZE = 5;
     private static final int CROP_COUNT = FARM_SIZE * FARM_SIZE - 1;
@@ -73,6 +79,9 @@ public final class VillageFarmBuilder {
     private static final long RETRY_TICKS = 100L;
     private static final long ROUTE_REISSUE_TICKS = 30L;
     private static final long STEP_DELAY_TICKS = 8L;
+    private static final long WATER_ROUTE_TIMEOUT_TICKS = 1200L;
+    private static final long WATER_SOURCE_RETRY_TICKS = 1200L;
+    private static final int MAX_WATER_ROUTE_FAILURES = 3;
     private static final double INTERACTION_REACH = 4.5D;
     private static final float WALK_SPEED = 0.58F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
@@ -120,6 +129,109 @@ public final class VillageFarmBuilder {
             || (seedItem == Items.BEETROOT_SEEDS && cropBlock == Blocks.BEETROOTS);
     }
 
+    /** Prefer an already-filled real bucket. Otherwise an empty bucket can be filled in-world. */
+    public static Item selectWaterSupplyItem(List<Container> storages) {
+        if (containsItem(storages, Items.WATER_BUCKET)) return Items.WATER_BUCKET;
+        if (containsItem(storages, Items.BUCKET)) return Items.BUCKET;
+        return Items.BUCKET;
+    }
+
+    /**
+     * Only a real source block in a supported, multi-source pool is eligible. Two horizontal
+     * neighboring source blocks and a solid floor keep workers from draining isolated springs.
+     */
+    public static boolean isRenewableWaterSource(ServerLevel level, BlockPos source) {
+        if (level == null || source == null || !level.hasChunkAt(source)
+            || !level.hasChunkAt(source.below())
+            || !level.getBlockState(source).is(Blocks.WATER)
+            || !level.getFluidState(source).isSource()
+            || !level.getBlockState(source.below()).blocksMotion()) return false;
+        int supportedNeighbors = 0;
+        for (Direction direction : HORIZONTAL) {
+            BlockPos neighbor = source.relative(direction);
+            if (!level.hasChunkAt(neighbor) || !level.hasChunkAt(neighbor.below())) continue;
+            if (level.getBlockState(neighbor).is(Blocks.WATER)
+                && level.getFluidState(neighbor).isSource()
+                && level.getBlockState(neighbor.below()).blocksMotion()) {
+                supportedNeighbors++;
+            }
+        }
+        return supportedNeighbors >= 2;
+    }
+
+    /** Bounded search over already-loaded village chunks; never loads terrain to find water. */
+    public static boolean hasRenewableWaterSource(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return false;
+        int radius = Math.max(4, Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()));
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -4; dy <= 4; dy++) {
+                    BlockPos candidate = center.offset(dx, dy, dz);
+                    if (isRenewableWaterSource(level, candidate)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static BlockPos findNearestRenewableWaterSource(ServerLevel level, Villager worker, int radius) {
+        BlockPos origin = worker.blockPosition();
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -4; dy <= 4; dy++) {
+                    BlockPos candidate = origin.offset(dx, dy, dz);
+                    if (!isRenewableWaterSource(level, candidate)) continue;
+                    double distance = worker.distanceToSqr(Vec3.atCenterOf(candidate));
+                    if (distance < bestDistance) {
+                        best = candidate.immutable();
+                        bestDistance = distance;
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Performs a real bucket interaction: one supported source is removed and one water bucket
+     * is placed in the worker's inventory. The operation rolls back if either side cannot commit.
+     */
+    public static boolean collectWaterFromSource(ServerLevel level, Villager worker, BlockPos source) {
+        if (level == null || worker == null || !worker.isAlive() || worker.level() != level
+            || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
+            || !isRenewableWaterSource(level, source)
+            || !withinReach(worker, source)
+            || !canSeeTarget(level, worker.getEyePosition(), source, worker)) return false;
+        SimpleContainer inventory = worker.getInventory();
+        if (countItem(inventory, Items.WATER_BUCKET) > 0) return true;
+        if (countItem(inventory, Items.BUCKET) < 1 || !canTransformOneBucket(inventory)) return false;
+        if (removeItem(inventory, Items.BUCKET, 1) != 1) return false;
+        if (!level.setBlock(source, Blocks.AIR.defaultBlockState(), 3)) {
+            addOrDrop(worker, level, Items.BUCKET, worker.blockPosition());
+            return false;
+        }
+        ItemStack remainder = inventory.addItem(new ItemStack(Items.WATER_BUCKET, 1));
+        if (!remainder.isEmpty()) {
+            level.setBlock(source, Blocks.WATER.defaultBlockState(), 3);
+            ItemStack returned = inventory.addItem(new ItemStack(Items.BUCKET, 1));
+            if (!returned.isEmpty()) Block.popResource(level, worker.blockPosition(), returned);
+            inventory.setChanged();
+            return false;
+        }
+        inventory.setChanged();
+        return true;
+    }
+
+    private static boolean canTransformOneBucket(Container inventory) {
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack.isEmpty() || (stack.is(Items.BUCKET) && stack.getCount() == 1)) return true;
+        }
+        return false;
+    }
+
     /** Starts a project only if its complete material bill exists in physical storage. */
     public static boolean startFarmProject(ServerLevel level, BlockPos center, BlockPos site,
                                            Item seedItem, Block cropBlock) {
@@ -138,6 +250,7 @@ public final class VillageFarmBuilder {
         candidates.sort(Comparator.comparingDouble(v -> v.distanceToSqr(Vec3.atCenterOf(center))));
         Villager worker = null;
         Item hoeItem = Items.AIR;
+        Item waterItem = Items.AIR;
         BlockPos storageOrigin = null;
         for (Villager candidate : candidates) {
             BlockPos candidateOrigin = VillagerRoles.getHome(candidate);
@@ -147,21 +260,25 @@ public final class VillageFarmBuilder {
             Item candidateHoe = requiredHoe == Items.AIR
                 ? firstHoeInStorage(candidateStorages)
                 : containsItem(candidateStorages, requiredHoe) ? requiredHoe : Items.AIR;
-            if (candidateHoe == Items.AIR || !canFitRequiredItems(candidate.getInventory(), seedItem, candidateHoe)) continue;
+            Item candidateWater = selectWaterSupplyItem(candidateStorages);
+            if (candidateHoe == Items.AIR || candidateWater == Items.AIR
+                || (candidateWater == Items.BUCKET && !hasRenewableWaterSource(level, candidateOrigin))
+                || !canFitRequiredItems(candidate.getInventory(), seedItem, candidateHoe)) continue;
 
             java.util.Map<Item, Integer> materialBill = java.util.Map.of(
-                seedItem, CROP_COUNT, Items.WATER_BUCKET, 1, Items.COMPOSTER, 1, candidateHoe, 1);
+                seedItem, CROP_COUNT, candidateWater, 1, Items.COMPOSTER, 1, candidateHoe, 1);
             if (!VillageReservations.reserveStoragesForItems(level, candidateOrigin, candidate, "farm",
                 materialBill, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) continue;
 
             worker = candidate;
             hoeItem = candidateHoe;
+            waterItem = candidateWater;
             storageOrigin = candidateOrigin;
             break;
         }
         if (worker == null || hoeItem == Items.AIR || storageOrigin == null) return false;
         java.util.Map<Item, Integer> materialBill = java.util.Map.of(
-            seedItem, CROP_COUNT, Items.WATER_BUCKET, 1, Items.COMPOSTER, 1, hoeItem, 1);
+            seedItem, CROP_COUNT, waterItem, 1, Items.COMPOSTER, 1, hoeItem, 1);
         if (!VillageWorkOrders.startProject(level, center, "farm", site, worker, materialBill)) {
             VillageReservations.release(worker.getPersistentData(), "farm");
             return false;
@@ -174,6 +291,7 @@ public final class VillageFarmBuilder {
         String cropKey = BuiltInRegistries.BLOCK.getKey(cropBlock).toString();
         data.putString(SEED_ITEM, seedKey);
         data.putString(CROP_BLOCK, cropKey);
+        data.putString(WATER_ITEM, BuiltInRegistries.ITEM.getKey(waterItem).toString());
         data.putInt(SITE_X, site.getX()); data.putInt(SITE_Y, site.getY()); data.putInt(SITE_Z, site.getZ());
         data.putInt(STEP_INDEX, 0);
         data.putLong(NEXT_ACTION, 0L);
@@ -232,6 +350,24 @@ public final class VillageFarmBuilder {
         CompoundTag data = replacement.getPersistentData();
         data.putBoolean(ACTIVE_KEY, true);
         data.putInt(PHASE, FETCH_SEEDS);
+        Item resumedWaterItem = Items.WATER_BUCKET;
+        String resumedOrderId = data.getString(VillageWorkOrders.ORDER_ID_KEY);
+        try {
+            var resumedOrder = VillageWorkOrders.find(level, center, UUID.fromString(resumedOrderId), level.getGameTime());
+            if (resumedOrder != null) {
+                for (VillageWorkOrderModel.Requirement requirement : resumedOrder.requirements()) {
+                    if (requirement == null) continue;
+                    Item required = parseItem(requirement.itemId());
+                    if (required == Items.BUCKET || required == Items.WATER_BUCKET) {
+                        resumedWaterItem = required;
+                        break;
+                    }
+                }
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Older checkpoints without a work-order ID retain the legacy filled-bucket behavior.
+        }
+        data.putString(WATER_ITEM, BuiltInRegistries.ITEM.getKey(resumedWaterItem).toString());
         data.putString(SEED_ITEM, checkpoint.primaryMaterialId());
         data.putString(CROP_BLOCK, checkpoint.secondaryMaterialId());
         data.putInt(SITE_X, checkpoint.siteX());
@@ -284,7 +420,13 @@ public final class VillageFarmBuilder {
         long now = level.getGameTime();
         switch (data.getInt(PHASE)) {
             case FETCH_SEEDS -> fetchItem(worker, level, data, parseItem(data.getString(SEED_ITEM)), CROP_COUNT, FETCH_WATER, now);
-            case FETCH_WATER -> fetchItem(worker, level, data, Items.WATER_BUCKET, 1, FETCH_COMPOSTER, now);
+            case FETCH_WATER -> {
+                Item waterItem = parseItem(data.getString(WATER_ITEM));
+                if (waterItem != Items.BUCKET && waterItem != Items.WATER_BUCKET) waterItem = Items.WATER_BUCKET;
+                int nextPhase = waterItem == Items.BUCKET ? FILL_WATER : FETCH_COMPOSTER;
+                fetchItem(worker, level, data, waterItem, 1, nextPhase, now);
+            }
+            case FILL_WATER -> fillWaterBucket(worker, level, data, now);
             case FETCH_COMPOSTER -> fetchItem(worker, level, data, Items.COMPOSTER, 1, FETCH_HOE, now);
             case FETCH_HOE -> fetchHoe(worker, level, data, now);
             case BUILDING -> buildNextStep(worker, level, data, site, now);
@@ -516,6 +658,74 @@ public final class VillageFarmBuilder {
         }
     }
 
+    private static void fillWaterBucket(Villager worker, ServerLevel level, CompoundTag data, long now) {
+        SimpleContainer inventory = worker.getInventory();
+        if (countItem(inventory, Items.WATER_BUCKET) > 0) {
+            clearOwnedRoute(worker, data);
+            data.remove(WATER_ROUTE_STARTED);
+            data.putInt(PHASE, FETCH_COMPOSTER);
+            data.putLong(NEXT_ACTION, now + 5L);
+            return;
+        }
+        if (countItem(inventory, Items.BUCKET) < 1) {
+            clearOwnedRoute(worker, data);
+            data.putInt(PHASE, FETCH_WATER);
+            data.putLong(NEXT_ACTION, now + RETRY_TICKS);
+            return;
+        }
+        if (now < data.getLong(NEXT_ACTION)) return;
+
+        if (data.getBoolean(ROUTE_ACTIVE) && data.getInt(ROUTE_KIND) == ROUTE_TO_WATER_SOURCE) {
+            BlockPos source = routeStorage(data);
+            BlockPos stand = routeStand(data);
+            if (now - data.getLong(WATER_ROUTE_STARTED) > WATER_ROUTE_TIMEOUT_TICKS
+                || !level.hasChunkAt(source) || !isRenewableWaterSource(level, source)) {
+                clearOwnedRoute(worker, data);
+                data.remove(WATER_ROUTE_STARTED);
+                recordWaterRouteFailure(data, now);
+                return;
+            }
+            if (!atRouteTarget(worker, stand, data, now)) return;
+            if (!withinReach(worker, source) || !canSeeTarget(level, worker.getEyePosition(), source, worker)
+                || !collectWaterFromSource(level, worker, source)) {
+                clearOwnedRoute(worker, data);
+                data.remove(WATER_ROUTE_STARTED);
+                recordWaterRouteFailure(data, now);
+                return;
+            }
+            data.remove(WATER_ROUTE_STARTED);
+            data.putInt(WATER_SEARCH_FAILURES, 0);
+            data.putInt(PHASE, FETCH_COMPOSTER);
+            data.putLong(NEXT_ACTION, now + 5L);
+            return;
+        }
+
+        if (data.getBoolean(ROUTE_ACTIVE)) clearOwnedRoute(worker, data);
+        BlockPos source = findNearestRenewableWaterSource(level, worker, 16);
+        if (source == null) {
+            recordWaterRouteFailure(data, now);
+            return;
+        }
+        BlockPos stand = findReachableStand(level, worker, source);
+        if (stand == null) {
+            recordWaterRouteFailure(data, now);
+            return;
+        }
+        setRoute(worker, data, stand, source, ROUTE_TO_WATER_SOURCE, now, Items.BUCKET);
+        data.putLong(WATER_ROUTE_STARTED, now);
+    }
+
+    private static void recordWaterRouteFailure(CompoundTag data, long now) {
+        int failures = data.getInt(WATER_SEARCH_FAILURES) + 1;
+        if (failures >= MAX_WATER_ROUTE_FAILURES) {
+            data.putInt(WATER_SEARCH_FAILURES, 0);
+            data.putLong(NEXT_ACTION, now + WATER_SOURCE_RETRY_TICKS);
+        } else {
+            data.putInt(WATER_SEARCH_FAILURES, failures);
+            data.putLong(NEXT_ACTION, now + RETRY_TICKS);
+        }
+    }
+
     private static void returnEmptyBucket(Villager worker, ServerLevel level, CompoundTag data, long now) {
         if (countItem(worker.getInventory(), Items.BUCKET) == 0) {
             clearProject(worker, data, false);
@@ -720,7 +930,8 @@ public final class VillageFarmBuilder {
         clearOwnedRoute(worker, data);
         VillageReservations.release(data, "farm");
         data.putBoolean(ACTIVE_KEY, false);
-        data.remove(PHASE); data.remove(SEED_ITEM); data.remove(CROP_BLOCK);
+        data.remove(PHASE); data.remove(SEED_ITEM); data.remove(CROP_BLOCK); data.remove(WATER_ITEM);
+        data.remove(WATER_ROUTE_STARTED); data.remove(WATER_SEARCH_FAILURES);
         data.remove(SITE_X); data.remove(SITE_Y); data.remove(SITE_Z);
         data.remove(STEP_INDEX); data.remove(NEXT_ACTION);
     }
