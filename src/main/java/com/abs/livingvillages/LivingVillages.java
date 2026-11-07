@@ -617,7 +617,8 @@ public final class LivingVillages {
         BlockPos max = center.offset(radius, 8, radius);
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
             // Never force-load terrain, and do not count a neighbor settlement's farmland.
-            if (!level.hasChunkAt(pos) || !level.getBlockState(pos).is(Blocks.FARMLAND)) continue;
+            if (!level.hasChunkAt(pos)) continue;
+            if (!level.getBlockState(pos).is(Blocks.FARMLAND)) continue;
             if (VillageArea.isBlockInResidentGroup(level, center, pos)) count++;
         }
         return count;
