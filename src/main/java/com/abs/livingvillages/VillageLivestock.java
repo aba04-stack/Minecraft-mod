@@ -559,7 +559,7 @@ public final class VillageLivestock {
 
         ItemStack shears = firstShears(herder.getInventory());
         UUID villageId = VillageRegistry.villageId(level, center);
-        boolean sheared = shears != null && shearManagedSheep(level, target, shears, villageId);
+        boolean sheared = shears != null && shearManagedSheep(level, target, shears, center);
         if (sheared) {
             collectNearbyWool(herder, level, target);
             VillageRegistry.recordDiagnostic(level, center, "Животновод",
@@ -640,22 +640,13 @@ public final class VillageLivestock {
         }
     }
 
-    static boolean shearManagedSheep(ServerLevel level, Sheep sheep, ItemStack shears, UUID villageId) {
+    static boolean shearManagedSheep(ServerLevel level, Sheep sheep, ItemStack shears, BlockPos center) {
+        UUID villageId = level == null || center == null ? null : VillageRegistry.villageId(level, center);
         if (level == null || sheep == null || shears == null || villageId == null
             || !sheep.isAlive() || !shears.is(Items.SHEARS) || shears.isEmpty()
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
-            || !sheep.getPersistentData().getString(SHEEP_OWNER_KEY).equals(villageId.toString())
-            || !sheep.readyForShearing()) return false;
-        boolean insideAnyVillagePen = false;
-        for (BlockPos anchor : VillageRegistry.knownLoadedVillageAnchors(level)) {
-            if (VillageRegistry.villageId(level, anchor) != null
-                && VillageRegistry.villageId(level, anchor).equals(villageId)
-                && isInsideVillagePen(level, anchor, sheep)) {
-                insideAnyVillagePen = true;
-                break;
-            }
-        }
-        if (!insideAnyVillagePen) return false;
+            || !villageId.toString().equals(sheep.getPersistentData().getString(SHEEP_OWNER_KEY))
+            || !isInsideVillagePen(level, center, sheep) || !sheep.readyForShearing()) return false;
         sheep.shear(level, SoundSource.NEUTRAL, shears);
         return sheep.isSheared();
     }
@@ -965,10 +956,10 @@ public final class VillageLivestock {
         if (kind == ROUTE_FETCH_WHEAT) {
             int amount = Math.min(WHEAT_WITHDRAWAL, Math.min(countItem(storage, Items.WHEAT),
                 inventoryCapacityFor(worker.getInventory(), Items.WHEAT)));
-            transferFromStorage(storage, worker.getInventory(), Items.WHEAT, amount);
+            transferFromStorage(worker, storage, Items.WHEAT, amount);
         } else if (kind == ROUTE_FETCH_SHEARS) {
             if (countItem(worker.getInventory(), Items.SHEARS) == 0) {
-                transferFromStorage(storage, worker.getInventory(), Items.SHEARS, 1);
+                transferFromStorage(worker, storage, Items.SHEARS, 1);
             }
         } else if (kind == ROUTE_DELIVER_WOOL) {
             depositWool(worker.getInventory(), storage);
@@ -1003,24 +994,6 @@ public final class VillageLivestock {
                 worker.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
             }
         });
-    }
-
-    private static void orderEntityRoute(Villager villager, Sheep sheep, CompoundTag data, long now) {
-        boolean wrongTarget = villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET)
-            .map(walk -> !walk.getTarget().currentBlockPosition().equals(sheep.blockPosition())).orElse(true);
-        if (wrongTarget || now - data.getLong(LAST_ORDER) >= ROUTE_REISSUE_TICKS) {
-            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(sheep, WALK_SPEED, 2));
-            data.putLong(LAST_ORDER, now);
-        }
-    }
-
-    private static void orderBlockRoute(Villager villager, BlockPos target, CompoundTag data, long now) {
-        boolean wrongTarget = villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET)
-            .map(walk -> !walk.getTarget().currentBlockPosition().equals(target)).orElse(true);
-        if (wrongTarget || now - data.getLong(LAST_ORDER) >= ROUTE_REISSUE_TICKS) {
-            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target, WALK_SPEED, 1));
-            data.putLong(LAST_ORDER, now);
-        }
     }
 
     private static StorageTarget findNearestStorageWithItem(Villager worker, ServerLevel level, Item item) {
@@ -1094,18 +1067,20 @@ public final class VillageLivestock {
         }
     }
 
-    private static void transferFromStorage(Container storage, Container inventory, Item item, int amount) {
-        if (amount <= 0) return;
+    private static void transferFromStorage(Villager worker, Container storage, Item item, int amount) {
+        if (worker == null || storage == null || amount <= 0) return;
         int removed = removeItem(storage, item, amount);
         if (removed <= 0) return;
-        ItemStack remainder = inventory.addItem(new ItemStack(item, removed));
+        ItemStack remainder = worker.getInventory().addItem(new ItemStack(item, removed));
         if (!remainder.isEmpty()) {
             ItemStack returned = remainder.copy();
             int inserted = insert(storage, returned);
             if (inserted < remainder.getCount()) {
-                Block.popResource((net.minecraft.world.level.Level) ((Container) storage), BlockPos.ZERO, remainder);
+                worker.spawnAtLocation(new ItemStack(item, remainder.getCount() - inserted));
             }
         }
+        storage.setChanged();
+        worker.getInventory().setChanged();
     }
 
     private static void finishTask(Villager villager, CompoundTag data, long retryAt) {
@@ -1129,31 +1104,6 @@ public final class VillageLivestock {
             data.putInt("livingvillages_livestock_failures", failures);
             data.putLong(NEXT_ACTION, now + RETRY_TICKS);
         }
-    }
-
-    private static void clearOwnedWalkTarget(Villager worker, BlockPos target) {
-        if (target == null) return;
-        worker.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
-            if (walk.getTarget().currentBlockPosition().equals(target)) {
-                worker.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
-            }
-        });
-    }
-
-    private static boolean hasWoolInInventory(Villager villager) {
-        for (int slot = 0; slot < villager.getInventory().getContainerSize(); slot++) {
-            ItemStack stack = villager.getInventory().getItem(slot);
-            if (!stack.isEmpty() && isWool(stack.getItem())) return true;
-        }
-        return false;
-    }
-
-    private static ItemStack firstShears(Container inventory) {
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-            ItemStack stack = inventory.getItem(slot);
-            if (stack.is(Items.SHEARS) && !stack.isEmpty()) return stack;
-        }
-        return null;
     }
 
     private static ItemStack removeOne(Container storage, Item item) {
@@ -1231,15 +1181,6 @@ public final class VillageLivestock {
         return before - offered.getCount();
     }
 
-    private static void clearStorageRoute(Villager worker, CompoundTag data) {
-        if (data.getBoolean(ROUTE_ACTIVE)) {
-            clearOwnedWalkTarget(worker, routeStand(data));
-        }
-        data.putBoolean(ROUTE_ACTIVE, false);
-        data.remove(ROUTE_KIND); data.remove(ROUTE_STORAGE_X); data.remove(ROUTE_STORAGE_Y); data.remove(ROUTE_STORAGE_Z);
-        data.remove(ROUTE_STAND_X); data.remove(ROUTE_STAND_Y); data.remove(ROUTE_STARTED);
-    }
-
     private static BlockPos routeStorage(CompoundTag data) {
         return new BlockPos(data.getInt(ROUTE_STORAGE_X), data.getInt(ROUTE_STORAGE_Y), data.getInt(ROUTE_STORAGE_Z));
     }
@@ -1250,16 +1191,6 @@ public final class VillageLivestock {
 
     private static boolean isStorage(BlockState state) {
         return state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.BARREL);
-    }
-
-    private static BlockPos ownershipCenter(Villager villager) {
-        BlockPos home = VillagerRoles.getHome(villager);
-        return home == null ? villager.blockPosition() : home;
-    }
-
-    private static boolean isNightOrSleeping(ServerLevel level, Villager villager) {
-        long day = Math.floorMod(level.getDayTime(), 24000L);
-        return villager.isSleeping() || day < 1000L || day >= 12000L;
     }
 
     private record StorageRef(BlockPos pos, Container container) {}
