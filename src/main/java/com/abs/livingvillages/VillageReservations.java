@@ -174,6 +174,9 @@ public final class VillageReservations {
     public static boolean isStorageAvailable(ServerLevel level, BlockPos storage, Villager owner) {
         if (storage == null) return false;
         if (owner != null) {
+            // Verify the physical chest resolves to the same nearest resident cluster as this
+            // exact worker. A stored HOME anchor alone can be stale or ambiguous after relocation.
+            if (!VillageArea.isStorageInResidentGroup(level, owner, storage)) return false;
             BlockPos groupCenter = VillagerRoles.getHome(owner);
             if (groupCenter == null) {
                 groupCenter = owner.getBrain().getMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.HOME)
