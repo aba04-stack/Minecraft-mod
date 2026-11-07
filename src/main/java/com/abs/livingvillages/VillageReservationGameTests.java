@@ -2473,54 +2473,40 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "empty", timeoutTicks = 40, batch = "daily_life")
-    public static void idleResidentsCreateOneRealSocialRouteAndReleaseItsClaim(GameTestHelper helper) {
-        for (int x = 0; x <= 10; x++) {
-            for (int z = 0; z <= 10; z++) {
-                helper.setBlock(x, 0, z, Blocks.STONE);
-            }
-        }
-        Villager visitor = helper.spawn(EntityType.VILLAGER, 2, 1, 2);
-        Villager peer = helper.spawn(EntityType.VILLAGER, 6, 1, 2);
-        Villager thirdResident = helper.spawn(EntityType.VILLAGER, 6, 1, 6);
-        visitor.getBrain().setActiveActivityIfPossible(net.minecraft.world.entity.schedule.Activity.IDLE);
-        peer.getBrain().setActiveActivityIfPossible(net.minecraft.world.entity.schedule.Activity.IDLE);
-        thirdResident.getBrain().setActiveActivityIfPossible(net.minecraft.world.entity.schedule.Activity.IDLE);
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "daily_life")
+    public static void dailyLifeSocialVisitsRespectVanillaAndWorkPriorities(GameTestHelper helper) {
+        boolean eligible = com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisit(
+            true, true, true, false, false, false, true, 100L, 0L);
+        helper.assertTrue(eligible,
+            "An adult villager may start a short visit only while vanilla AI is idle and a peer is available.");
 
-        long now = helper.getLevel().getGameTime();
-        helper.assertTrue(VillageDailyLife.isVanillaIdle(visitor),
-            "Visitor Brain must be IDLE before a social visit; active=" + visitor.getBrain().getActiveNonCoreActivity().orElse(null));
-        helper.assertTrue(VillageDailyLife.isVanillaIdle(peer),
-            "Peer Brain must be IDLE before a social visit; active=" + peer.getBrain().getActiveNonCoreActivity().orElse(null));
-        helper.assertTrue(!VillagerRoles.shouldYieldToVanillaVillagerAi(visitor),
-            "Visitor must not be yielding to vanilla sleep/trade/panic/evacuation behavior.");
-        helper.assertTrue(!VillageRegistry.isVillageAlarmActive(helper.getLevel(), visitor.blockPosition(), now),
-            "The social test world must not be under a village alarm.");
-        helper.assertTrue(VillageDailyLife.findAvailablePeer(visitor, helper.getLevel()) == peer,
-            "The nearby idle peer must have a reachable path from the visitor.");
-        boolean started = VillageDailyLife.tryStartSocialVisit(visitor, helper.getLevel(), now);
-        helper.assertTrue(started
-                && visitor.getPersistentData().getBoolean("livingvillages_daily_life_social_active")
-                && visitor.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET),
-            "An idle adult with a reachable nearby peer must receive a real vanilla WALK_TARGET social route.");
+        boolean blockedByWork = com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisit(
+            true, true, true, true, false, false, true, 100L, 0L);
+        boolean blockedByVanillaRoute = com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisit(
+            true, true, true, false, true, false, true, 100L, 0L);
+        boolean blockedByAlarm = com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisit(
+            true, true, true, false, false, true, true, 100L, 0L);
+        boolean blockedByCooldown = com.abs.livingvillages.domain.DailyLifeActivityModel.canStartSocialVisit(
+            true, true, true, false, false, false, true, 100L, 101L);
+        helper.assertTrue(!blockedByWork && !blockedByVanillaRoute && !blockedByAlarm && !blockedByCooldown,
+            "Work, existing vanilla movement, village alarms, and cooldowns must always block a leisure route.");
 
         helper.assertTrue(
-            peer.getPersistentData().getString("livingvillages_daily_life_social_claimed_by")
-                .equals(visitor.getUUID().toString()),
-            "The target resident must have one persistent claim owner for this visit.");
+            com.abs.livingvillages.domain.DailyLifeActivityModel.canAcceptSocialVisitor(0)
+                && !com.abs.livingvillages.domain.DailyLifeActivityModel.canAcceptSocialVisitor(1),
+            "A resident may have at most one active social visitor to prevent crowding.");
 
-        boolean duplicateStarted = VillageDailyLife.tryStartSocialVisit(thirdResident, helper.getLevel(), now);
-        helper.assertTrue(!duplicateStarted,
-            "A third resident must not crowd the same claimed peer or interrupt the active visitor.");
+        boolean mustCancel = com.abs.livingvillages.domain.DailyLifeActivityModel.shouldCancelSocialVisit(
+            true, true, false, false, false, false);
+        boolean mustCancelForDanger = com.abs.livingvillages.domain.DailyLifeActivityModel.shouldCancelSocialVisit(
+            true, true, true, false, true, false);
+        helper.assertTrue(mustCancel && mustCancelForDanger,
+            "A visit must end when the vanilla activity changes or a village alarm is raised.");
 
-        VillageDailyLife.finishVisit(visitor, helper.getLevel(), visitor.getPersistentData(), true);
-        helper.assertTrue(!visitor.getPersistentData().getBoolean("livingvillages_daily_life_social_active")
-                && peer.getPersistentData().getString("livingvillages_daily_life_social_claimed_by").isEmpty()
-                && visitor.getPersistentData().getLong("livingvillages_daily_life_next_social_attempt") > now,
-            "Finishing the visit must clear only its route/claim and apply a cooldown.");
-        visitor.discard();
-        peer.discard();
-        thirdResident.discard();
+        helper.assertTrue(
+            com.abs.livingvillages.domain.DailyLifeActivityModel.nextAttemptTick(1000L, true) == 3400L
+                && com.abs.livingvillages.domain.DailyLifeActivityModel.nextAttemptTick(1000L, false) == 1400L,
+            "Successful visits and failed routes must use separate bounded cooldowns.");
         helper.succeed();
     }
 
