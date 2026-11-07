@@ -219,17 +219,9 @@ public final class VillageLivestock {
 
     /** True when housing needs a bed and there are wild adult sheep close enough to lead into a new pen. */
     public static boolean needsPen(ServerLevel level, BlockPos center) {
-        if (level == null || center == null
-            || !LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
-            || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
-            || hasCompletePen(level, center)) return false;
+        if (level == null || center == null || hasCompletePen(level, center)) return false;
         List<Villager> residents = VillageArea.findVillagers(level, center);
-        if (residents.size() < 2) return false;
-        boolean housingDemand = VillageBuilder.housingNeeded(level, center, residents.size())
-            || VillageElder.hasHouseRequest(residents);
-        if (!housingDemand || hasAvailableBed(level, center, residents)) return false;
-        if (countVillageWool(level, center, residents).values().stream().anyMatch(count -> count >= 3)) return false;
-        return findHerdableSheep(level, center).size() > 0;
+        return hasHousingWoolDemand(level, center, residents) && !findHerdableSheep(level, center).isEmpty();
     }
 
     /** Ensures one idempotent material order exists before the builder/crafter tries to work. */
@@ -332,8 +324,10 @@ public final class VillageLivestock {
     }
 
     public static boolean needsHerding(ServerLevel level, BlockPos center) {
-        if (!LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get() || !hasCompletePen(level, center)) return false;
-        return countOwnedSheepInsidePen(level, center) < TARGET_SHEEP_COUNT
+        if (level == null || center == null || !hasCompletePen(level, center)) return false;
+        List<Villager> residents = VillageArea.findVillagers(level, center);
+        return hasHousingWoolDemand(level, center, residents)
+            && countOwnedSheepInsidePen(level, center) < TARGET_SHEEP_COUNT
             && !findHerdableSheep(level, center).isEmpty();
     }
 
@@ -358,17 +352,28 @@ public final class VillageLivestock {
     }
 
     public static boolean needsWoolForHousing(ServerLevel level, BlockPos center) {
-        if (level == null || center == null
+        if (level == null || center == null || !hasCompletePen(level, center)) return false;
+        List<Villager> residents = VillageArea.findVillagers(level, center);
+        return hasHousingWoolDemand(level, center, residents) && countOwnedSheepInsidePen(level, center) > 0;
+    }
+
+    /** Shared prerequisite for both the builder's pen and the herder's sheep/wool work. */
+    private static boolean hasHousingWoolDemand(ServerLevel level, BlockPos center, List<Villager> residents) {
+        if (level == null || center == null || residents == null || residents.size() < 2
             || !LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
             || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
-            || !hasCompletePen(level, center)) return false;
-        List<Villager> residents = VillageArea.findVillagers(level, center);
-        if (residents.size() < 2) return false;
+            || !LivingVillagesConfig.ENABLE_HOUSING_PROJECTS.get()) return false;
         boolean housingDemand = VillageBuilder.housingNeeded(level, center, residents.size())
-            || VillageElder.hasHouseRequest(residents);
+            || VillageElder.hasHouseRequest(residents)
+            || VillageWorkOrders.list(level, center, level.getGameTime()).stream().anyMatch(order ->
+                "house".equals(order.kind())
+                    && (order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.OPEN
+                        || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.WAITING_FOR_RESOURCES
+                        || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.READY
+                        || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.CLAIMED
+                        || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.IN_PROGRESS));
         if (!housingDemand || hasAvailableBed(level, center, residents)) return false;
-        if (countVillageWool(level, center, residents).values().stream().anyMatch(count -> count >= 3)) return false;
-        return countOwnedSheepInsidePen(level, center) > 0;
+        return countVillageWool(level, center, residents).values().stream().noneMatch(count -> count >= 3);
     }
 
     public static boolean hasShearsAvailable(ServerLevel level, BlockPos center) {
@@ -676,7 +681,8 @@ public final class VillageLivestock {
             || animalAction == com.abs.livingvillages.domain.TrustAndAnimalModel.ANIMAL_ACTION_FLEE_THREAT
             || animalAction == com.abs.livingvillages.domain.TrustAndAnimalModel.ANIMAL_ACTION_PROTECT_OFFSPRING
             || animalAction == com.abs.livingvillages.domain.TrustAndAnimalModel.ANIMAL_ACTION_SEEK_SHELTER) return;
-        if (villageId == null || (!owner.isBlank() && !owner.equals(villageId.toString()))
+        if (villageId == null || sheep.isLeashed() || sheep.hasCustomName()
+            || (!owner.isBlank() && !owner.equals(villageId.toString()))
             || (!lureOwner.isBlank() && !lureOwner.equals(villageId.toString()) && now - lastLure < HERD_TIMEOUT_TICKS)
             || isInsideVillagePen(level, center, sheep) || isInsideExistingFencePen(level, sheep)
             || sheep.distanceToSqr(herder) > SHEEP_LURE_RADIUS_SQR
@@ -805,7 +811,8 @@ public final class VillageLivestock {
             long lastLure = sheepData.getLong(SHEEP_LAST_LURE_TICK);
             boolean heldByOtherVillage = !lureOwner.isBlank() && villageId != null
                 && !lureOwner.equals(villageId.toString()) && now - lastLure < HERD_TIMEOUT_TICKS;
-            return villageId == null || (!owner.isBlank() && !owner.equals(villageId.toString()))
+            return villageId == null || sheep.isLeashed() || sheep.hasCustomName()
+                || (!owner.isBlank() && !owner.equals(villageId.toString()))
                 || heldByOtherVillage;
         });
         candidates.sort(Comparator.comparingDouble(sheep -> sheep.distanceToSqr(Vec3.atCenterOf(center))));
