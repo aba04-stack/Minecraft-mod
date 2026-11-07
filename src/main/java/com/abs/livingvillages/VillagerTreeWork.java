@@ -74,7 +74,9 @@ public final class VillagerTreeWork {
     private static final int ROUTE_RETRY_TICKS = 30;
     private static final int TASK_TIMEOUT_TICKS = 2400;
     private static final long REPLANT_RETRY_TICKS = 40L;
-    private static final long REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS = 100L;
+    // Five seconds was too short for ordinary vanilla leaf decay and sapling drops.
+    // Two minutes is still bounded, but gives the worker a realistic chance to find a real item.
+    private static final long REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS = 2400L;
     private static final double BREAK_REACH_SQR = 4.0D * 4.0D;
     private static final float WALK_SPEED = 0.90F;
 
@@ -639,6 +641,9 @@ public final class VillagerTreeWork {
         data.putLong(REPLANT_NEXT_ATTEMPT, 0L);
         data.putBoolean(REPLANT_SITE_SET, false);
         data.putBoolean(REPLANT_FETCH_ACTIVE, false);
+        BlockPos home = VillagerRoles.getHome(villager);
+        VillageRegistry.recordDiagnostic(level, home == null ? treeBase : home, "Лес",
+            "Дерево срублено. Лесоруб ищет настоящий саженец среди дропов и на общем складе.");
     }
 
     private static void continueReplantTask(Villager villager, ServerLevel level, CompoundTag data, long now) {
@@ -675,6 +680,9 @@ public final class VillagerTreeWork {
             }
             if (tryFetchSaplingFromStorage(villager, level, data, source, expectedSapling, allowAnySpecies, now)) return;
             if (now - started >= REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS) {
+                BlockPos home = VillagerRoles.getHome(villager);
+                VillageRegistry.recordDiagnostic(level, home == null ? source : home, "Лес",
+                    "За 2 минуты не найден настоящий саженец. Рабочий ждёт новый саженец или взрослое дерево; бесплатные саженцы не создаются.");
                 cancelReplantTask(villager, data);
                 data.putLong(NEXT_SEARCH, now + SUCCESS_RETRY_TICKS);
                 return;
@@ -740,6 +748,9 @@ public final class VillagerTreeWork {
             inventory.setChanged();
             level.sendParticles(ParticleTypes.HAPPY_VILLAGER, site.getX() + 0.5D, site.getY() + 0.6D,
                 site.getZ() + 0.5D, 4, 0.2D, 0.2D, 0.2D, 0.01D);
+            BlockPos home = VillagerRoles.getHome(villager);
+            VillageRegistry.recordDiagnostic(level, home == null ? source : home, "Лес",
+                "Посажен настоящий саженец. Лесоруб продолжит работу после появления взрослого дерева.");
             cancelReplantTask(villager, data);
             data.putLong(NEXT_SEARCH, now + SUCCESS_RETRY_TICKS);
         }
@@ -868,7 +879,7 @@ public final class VillagerTreeWork {
 
     private static ItemEntity findNearbySaplingDrop(ServerLevel level, BlockPos source, Block preferred,
                                                      boolean allowAnySpecies) {
-        AABB area = new AABB(source).inflate(8.0D, 4.0D, 8.0D);
+        AABB area = new AABB(source).inflate(12.0D, 6.0D, 12.0D);
         List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, area,
             entity -> entity.isAlive() && isSaplingStack(entity.getItem()));
         drops.sort(Comparator.comparingDouble(entity -> entity.distanceToSqr(Vec3.atCenterOf(source))));
