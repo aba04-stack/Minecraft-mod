@@ -215,7 +215,7 @@ public final class VillageCraftingJobs {
 
         // A village-built sheep pen is a prerequisite for wool production when housing is blocked.
         // Craft only the missing real fence/gate items, using the exact wood species pinned to its order.
-        if (VillageLivestock.hasPendingPenOrder(level, center)) {
+        if (VillageLivestock.hasCraftablePenOrder(level, center)) {
             Item fence = VillageLivestock.pendingPenFenceItem(level, center);
             Item gate = VillageLivestock.pendingPenGateItem(level, center);
             Item penPlanks = VillageLivestock.pendingPenPlankItem(level, center);
