@@ -2197,13 +2197,22 @@ public final class VillageReservationGameTests {
 
         var desert = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
-                2, 32, 0, 0, 16, 0, 0, 24, false, 1));
+                2, 32, 0, 0, 16, 0, 0, 24, false, 1, true));
         helper.assertTrue(desert.targetStoneUnits() == 96 && desert.needsStone()
                 && desert.desiredMiners() == 1 && desert.needsWood() && desert.desiredLumberjacks() == 0,
             "A treeless desert village must remember its wood deficit without assigning a lumberjack, while keeping one miner until it can quarry the 96 sandstone blocks needed for one house.");
         var desertHouseReady = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
-                2, 32, 96, 4, 16, 0, 0, 24, false, 1));
+                2, 32, 96, 4, 16, 0, 0, 24, false, 1, true));
+        var desertWithOneTree = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                2, 32, 0, 0, 16, 0, 0, 24, true, 1, true));
+        helper.assertTrue(desertWithOneTree.treesAvailable()
+                && desertWithOneTree.targetStoneUnits() == 96
+                && desertWithOneTree.needsStone()
+                && VillageIndustry.needsDesertStarterKit(desertWithOneTree),
+            "A single planted tree must not disable the desert bootstrap or lower the first-house sandstone target.");
+
         helper.assertTrue(desertHouseReady.targetStoneUnits() == 96
                 && !desertHouseReady.needsStone() && desertHouseReady.desiredMiners() == 0,
             "The desert miner must be released after the full starter house bill is physically secured.");
