@@ -2647,6 +2647,26 @@ public final class VillageReservationGameTests {
     }
 
     @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void herderFindsAlternateReachableGateApproachWhenNorthSideIsBlocked(GameTestHelper helper) {
+        BlockPos gate = helper.absolutePos(new BlockPos(5, 1, 3));
+        BlockPos north = gate.north();
+        BlockPos alternate = north.east();
+
+        helper.getLevel().setBlock(north, Blocks.STONE.defaultBlockState(), 3);
+        helper.getLevel().setBlock(north.above(), Blocks.AIR.defaultBlockState(), 3);
+        helper.getLevel().setBlock(alternate.below(), Blocks.STONE.defaultBlockState(), 3);
+        helper.getLevel().setBlock(alternate, Blocks.AIR.defaultBlockState(), 3);
+        helper.getLevel().setBlock(alternate.above(), Blocks.AIR.defaultBlockState(), 3);
+
+        Villager herder = helper.spawn(EntityType.VILLAGER, 6, 1, 2);
+        herder.setNoAi(true);
+        BlockPos chosen = VillageLivestock.findPenGateApproachStand(helper.getLevel(), herder, gate);
+        helper.assertTrue(alternate.equals(chosen),
+            "When the direct north approach is obstructed, the herder must choose the nearby safe, reachable exterior stand.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
     public static void herderDoesNotLureSheepOutOfAnExistingPlayerPen(GameTestHelper helper) {
         BlockPos site = helper.absolutePos(new BlockPos(3, 1, 3));
         for (int dx = 0; dx < 5; dx++) {

@@ -59,6 +59,9 @@ public final class VillageLivestock {
     private static final String NEXT_ACTION = "livingvillages_livestock_next_action";
     private static final String LAST_ORDER = "livingvillages_livestock_last_order";
     private static final String HERD_DEADLINE = "livingvillages_livestock_herd_deadline";
+    private static final String GATE_APPROACH_X = "livingvillages_livestock_gate_approach_x";
+    private static final String GATE_APPROACH_Y = "livingvillages_livestock_gate_approach_y";
+    private static final String GATE_APPROACH_Z = "livingvillages_livestock_gate_approach_z";
 
     public static final String RESERVATION_ACTIVE_KEY = "livingvillages_livestock_route_active";
     private static final String ROUTE_ACTIVE = RESERVATION_ACTIVE_KEY;
@@ -660,25 +663,42 @@ public final class VillageLivestock {
                 orderEntityRoute(herder, target, data, now);
                 return;
             }
-            BlockPos outside = penGatePosition(level, center).north();
-            if (!isSafeStand(level, outside) || !canReach(herder, outside)) {
+            BlockPos gate = penGatePosition(level, center);
+            BlockPos outside = findPenGateApproachStand(level, herder, gate);
+            if (outside == null) {
+                clearHerdMovement(herder, level, center, data);
                 data.remove(TARGET_SHEEP);
                 data.putInt(STATE, STATE_IDLE);
                 recordFailure(data, now);
                 return;
             }
+            rememberPenGateApproach(data, outside);
             data.putInt(STATE, STATE_HERD_TO_GATE);
             data.putLong(LAST_ORDER, 0L);
             state = STATE_HERD_TO_GATE;
         }
 
         if (state == STATE_HERD_TO_GATE) {
-            BlockPos outside = penGatePosition(level, center).north();
+            BlockPos outside = storedPenGateApproach(data);
+            if (outside == null || !isSafeStand(level, outside) || !canReach(herder, outside)) {
+                outside = findPenGateApproachStand(level, herder, penGatePosition(level, center));
+                if (outside == null) {
+                    requestPenGateClose(level, center, data);
+                    clearHerdMovement(herder, level, center, data);
+                    data.remove(TARGET_SHEEP);
+                    data.putInt(STATE, STATE_IDLE);
+                    recordFailure(data, now);
+                    return;
+                }
+                rememberPenGateApproach(data, outside);
+                data.putLong(LAST_ORDER, 0L);
+            }
             if (herder.distanceToSqr(Vec3.atCenterOf(outside)) > 2.4D * 2.4D) {
                 orderBlockRoute(herder, outside, data, now);
                 return;
             }
             if (!openPenGate(level, center)) {
+                clearHerdMovement(herder, level, center, data);
                 data.remove(TARGET_SHEEP);
                 data.putInt(STATE, STATE_IDLE);
                 data.putLong(NEXT_ACTION, now + RETRY_TICKS);
@@ -706,6 +726,7 @@ public final class VillageLivestock {
                         "Овца приведена в загон на настоящую пшеницу.");
                 }
                 requestPenGateClose(level, center, data);
+                clearHerdMovement(herder, level, center, data);
                 data.remove(TARGET_SHEEP);
                 data.putInt(STATE, STATE_IDLE);
                 data.putLong(NEXT_ACTION, now + 20L);
@@ -713,6 +734,7 @@ public final class VillageLivestock {
             }
             if (!hasWheatInHand(herder)) {
                 requestPenGateClose(level, center, data);
+                clearHerdMovement(herder, level, center, data);
                 data.remove(TARGET_SHEEP);
                 data.putInt(STATE, STATE_IDLE);
                 return;
@@ -1229,6 +1251,50 @@ public final class VillageLivestock {
         return path != null && path.canReach();
     }
 
+    /**
+     * Finds a safe, directly reachable stand on the outside of the registered north gate.
+     * The bounded 5x3 search never routes through the pen boundary or chooses an interior point.
+     */
+    static BlockPos findPenGateApproachStand(ServerLevel level, Villager herder, BlockPos gatePos) {
+        if (level == null || herder == null || gatePos == null || !level.hasChunkAt(gatePos)) return null;
+        List<BlockPos> candidates = new ArrayList<>(15);
+        for (int depth = 1; depth <= 3; depth++) {
+            for (int lateral = -2; lateral <= 2; lateral++) {
+                BlockPos stand = gatePos.offset(lateral, 0, -depth);
+                if (!isSafeStand(level, stand) || !canReach(herder, stand)) continue;
+                candidates.add(stand.immutable());
+            }
+        }
+        candidates.sort(Comparator
+            .comparingDouble((BlockPos pos) -> herder.distanceToSqr(Vec3.atCenterOf(pos)))
+            .thenComparingInt(BlockPos::getZ)
+            .thenComparingInt(BlockPos::getX));
+        return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    private static BlockPos storedPenGateApproach(CompoundTag data) {
+        if (!data.contains(GATE_APPROACH_X) || !data.contains(GATE_APPROACH_Y)
+            || !data.contains(GATE_APPROACH_Z)) return null;
+        return new BlockPos(data.getInt(GATE_APPROACH_X),
+            data.getInt(GATE_APPROACH_Y), data.getInt(GATE_APPROACH_Z));
+    }
+
+    private static void rememberPenGateApproach(CompoundTag data, BlockPos stand) {
+        if (stand == null) {
+            clearPenGateApproach(data);
+            return;
+        }
+        data.putInt(GATE_APPROACH_X, stand.getX());
+        data.putInt(GATE_APPROACH_Y, stand.getY());
+        data.putInt(GATE_APPROACH_Z, stand.getZ());
+    }
+
+    private static void clearPenGateApproach(CompoundTag data) {
+        data.remove(GATE_APPROACH_X);
+        data.remove(GATE_APPROACH_Y);
+        data.remove(GATE_APPROACH_Z);
+    }
+
     private static boolean canSeeSheep(ServerLevel level, net.minecraft.world.entity.LivingEntity observer, Sheep sheep) {
         HitResult hit = level.clip(new ClipContext(
             observer.getEyePosition(), sheep.getEyePosition(),
@@ -1402,8 +1468,11 @@ public final class VillageLivestock {
             Sheep target = findTargetSheep(level, worker, data.getString(TARGET_SHEEP));
             if (target != null) clearOwnedWalkTarget(worker, target.blockPosition());
         }
+        BlockPos approach = storedPenGateApproach(data);
+        if (approach != null) clearOwnedWalkTarget(worker, approach);
         BlockPos gate = penGatePosition(level, center);
-        if (gate != null) clearOwnedWalkTarget(worker, gate.north());
+        if (gate != null) clearOwnedWalkTarget(worker, gate.north()); // clean legacy pre-approach saves
+        clearPenGateApproach(data);
         clearOwnedWalkTarget(worker, penCenter(level, center));
     }
 
@@ -1557,6 +1626,7 @@ public final class VillageLivestock {
         data.remove(TARGET_SHEEP);
         data.remove(TASK_STARTED);
         data.remove(HERD_DEADLINE);
+        clearPenGateApproach(data);
         data.putLong(NEXT_ACTION, retryAt);
     }
 
