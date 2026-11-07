@@ -83,6 +83,7 @@ public final class VillageDailyLife {
             || villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
             || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)
             || VillagerRoles.isGuard(villager)
+            || hasSpecialistAssignment(villager)
             || hasHigherPriorityTask(data)
             || !data.getString(CLAIMED_BY).isBlank()
             || isVillageAlarmActive(villager, level, now)
@@ -133,7 +134,8 @@ public final class VillageDailyLife {
             villager.isAlive(),
             peer != null && peer.isAlive(),
             isVanillaIdle(villager) && peer != null && isVanillaIdle(peer),
-            hasHigherPriorityTask(data) || (peer != null && hasHigherPriorityTask(peer.getPersistentData())),
+            hasSpecialistAssignment(villager) || hasHigherPriorityTask(data)
+                || (peer != null && (hasSpecialistAssignment(peer) || hasHigherPriorityTask(peer.getPersistentData()))),
             alarm,
             timedOut
         );
@@ -187,6 +189,7 @@ public final class VillageDailyLife {
                 && candidate.distanceToSqr(villager) <= MAX_SOCIAL_DISTANCE_SQR
                 && !candidate.getPersistentData().getBoolean(ACTIVE)
                 && !VillagerRoles.isGuard(candidate)
+                && !hasSpecialistAssignment(candidate)
                 && isSameVillageIfKnown(villager, candidate, level)
                 && isVanillaIdle(candidate)
                 && !candidate.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
@@ -255,6 +258,16 @@ public final class VillageDailyLife {
 
     static boolean isVanillaIdle(Villager villager) {
         return villager.getBrain().getActiveNonCoreActivity().orElse(null) == Activity.IDLE;
+    }
+
+    /** True while the villager is currently following a low-priority social-visit route. */
+    public static boolean isOnSocialVisit(Villager villager) {
+        return villager != null && villager.getPersistentData().getBoolean(ACTIVE);
+    }
+
+    private static boolean hasSpecialistAssignment(Villager villager) {
+        return villager != null
+            && !villager.getPersistentData().getString(VillagerRoles.ROLE_KEY).isBlank();
     }
 
     private static boolean isVillageAlarmActive(Villager villager, ServerLevel level, long now) {

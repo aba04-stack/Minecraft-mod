@@ -73,7 +73,7 @@ public final class VillagerCaveSupport {
     private static final int WAYPOINT_SPACING_SQUARED = 36;
     private static final int TORCH_SPACING_SQUARED = 49;
     private static final long TORCH_COOLDOWN_TICKS = 80L;
-    private static final long ROUTE_REISSUE_TICKS = 40L;
+    private static final long ROUTE_REISSUE_TICKS = 30L;
     private static final long WAYPOINT_STALL_TICKS = 400L;
     private static final long HOME_RETRY_BASE_TICKS = 200L;
     private static final long SCOUT_INTERVAL_TICKS = 200L;
@@ -88,7 +88,7 @@ public final class VillagerCaveSupport {
     private static final double VISITED_SCOUT_DISTANCE_SQUARED = 16.0D;
     private static final double VISITED_TRAIL_DISTANCE_SQUARED = 64.0D;
     private static final double ARRIVAL_DISTANCE_SQUARED = 6.25D;
-    private static final float WALK_SPEED = 0.80F;
+    private static final float WALK_SPEED = 0.90F;
 
     private VillagerCaveSupport() {
     }

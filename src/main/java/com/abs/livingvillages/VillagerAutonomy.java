@@ -76,7 +76,7 @@ public final class VillagerAutonomy {
     private static final int FAILED_TRIP_TIMEOUT_TICKS = 1200;
     private static final int FOOD_RESERVE_POINTS = 12;
     private static final int MIN_FOOD_POINTS_TO_START = 16;
-    private static final float WALK_SPEED = 0.80F;
+    private static final float WALK_SPEED = 0.90F;
 
     private static final Direction[] HORIZONTAL_DIRECTIONS = {
         Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST

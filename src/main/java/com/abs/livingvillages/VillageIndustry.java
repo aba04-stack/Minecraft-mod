@@ -15,6 +15,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -41,7 +42,7 @@ public final class VillageIndustry {
     private static final String LAST_ROUTE = P + "last_route";
     private static final int BUILD_SCAN_RADIUS = 16;
     private static final int LOCAL_STORAGE_RADIUS = 16;
-    private static final float WALK_SPEED = 0.80F;
+    private static final float WALK_SPEED = 0.90F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
     private static final List<Item> RAW_METALS = List.of(Items.RAW_IRON, Items.RAW_COPPER, Items.RAW_GOLD);
     private static final List<Item> FUELS = List.of(Items.COAL, Items.CHARCOAL, Items.OAK_PLANKS, Items.SPRUCE_PLANKS,
@@ -283,6 +284,7 @@ public final class VillageIndustry {
     }
 
     private static void bootstrapStorage(ServerLevel level, BlockPos center, List<Villager> villagers) {
+        if (!level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return;
         for (Villager villager : villagers) {
             if (!isIdle(villager) || hasHigherPriorityTask(villager)) continue;
             var inventory = villager.getInventory();
@@ -323,6 +325,7 @@ public final class VillageIndustry {
 
     private static boolean buildCraftingTable(ServerLevel level, BlockPos center, List<StorageRef> storages,
                                               List<Villager> villagers) {
+        if (!level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
         for (StorageRef ref : storages) {
             if (!hasWorkerNear(villagers, ref.pos(), 5.0D)) continue;
             Container container = ref.container();
@@ -490,6 +493,7 @@ public final class VillageIndustry {
 
     private static boolean buildFurnace(ServerLevel level, BlockPos center, List<StorageRef> storages,
                                         List<Villager> villagers) {
+        if (!level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) return false;
         for (StorageRef ref : storages) {
             if (!hasWorkerNear(villagers, ref.pos(), 5.0D)) continue;
             Container container = ref.container();
@@ -598,7 +602,11 @@ public final class VillageIndustry {
     }
 
     private static boolean isIdle(Villager villager) {
-        if (villager.isBaby() || villager.isSleeping() || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)) return false;
+        if (villager.isBaby() || villager.isSleeping()
+            || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)
+            || VillageDailyLife.isOnSocialVisit(villager)
+            || (villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
+                && !VillageDailyLife.isVanillaIdle(villager))) return false;
         return !hasHigherPriorityTask(villager);
     }
 

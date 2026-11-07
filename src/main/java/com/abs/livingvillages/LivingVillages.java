@@ -39,7 +39,7 @@ import java.util.function.Predicate;
 import com.abs.livingvillages.domain.VillageWorkOrderModel;
 
 /**
- * Living Villages 0.15.0 for Minecraft Java 1.21.1 + NeoForge.
+ * Living Villages 0.16.0 for Minecraft Java 1.21.1 + NeoForge.
  *
  * Autonomous development uses physical resources and bounded vanilla-like recipes: logs become planks,
  * tools need ingredients, workstations consume building materials, and furnaces use real ore and fuel.
@@ -103,15 +103,16 @@ public final class LivingVillages {
         MinecraftServer server = event.getServer();
 
         // Specialist assignment is lightweight and runs independently from the slower build planner.
-        if (tickCounter % 100L == 0L) {
+        if (tickCounter % 20L == 0L) {
             // Reconcile disabled/stale roles even when autonomous development is paused.
             assignRolesInActiveAreas(server);
         }
-        if (LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get() && tickCounter % 200L == 0L) {
+        if (LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get() && tickCounter % 100L == 0L) {
             runIndustryInActiveAreas(server);
         }
 
-        long intervalTicks = LivingVillagesConfig.SCAN_INTERVAL_SECONDS.get() * 20L;
+        // Cap legacy 60-second configurations so newly available work is planned promptly.
+        long intervalTicks = Math.min(LivingVillagesConfig.SCAN_INTERVAL_SECONDS.get(), 10) * 20L;
         boolean queuedElderOrder = tickCounter % 20L == 0L && hasPendingElderOrder(server);
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || (!queuedElderOrder && tickCounter % intervalTicks != 0L)) {

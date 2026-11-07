@@ -47,11 +47,11 @@ public final class VillageLogistics {
     private static final String STAND_X = P + "stand_x", STAND_Y = P + "stand_y", STAND_Z = P + "stand_z";
     private static final String STARTED = P + "started", LAST_ORDER = P + "last_order", NEXT_SCAN = P + "next_scan";
     private static final int TICK_STEP = 20;
-    private static final int SEARCH_RETRY_TICKS = 60;
-    private static final int SUCCESS_RETRY_TICKS = 80;
+    private static final int SEARCH_RETRY_TICKS = 40;
+    private static final int SUCCESS_RETRY_TICKS = 40;
     private static final int TRIP_TIMEOUT_TICKS = 2400;
     private static final int PICKUP_RADIUS = 4;
-    private static final float WALK_SPEED = 0.80F;
+    private static final float WALK_SPEED = 0.90F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
 
     private VillageLogistics() {}
@@ -79,6 +79,9 @@ public final class VillageLogistics {
         }
 
         if (hasHigherPriorityTask(data) || villager.isSleeping() || isNight(level)
+            || VillageDailyLife.isOnSocialVisit(villager)
+            || (villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
+                && !VillageDailyLife.isVanillaIdle(villager))
             || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)
             || level.getGameTime() < data.getLong(NEXT_SCAN)) return;
 

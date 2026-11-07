@@ -69,14 +69,14 @@ public final class VillagerTreeWork {
     private static final int TICK_STEP = 5;
     private static final int LOG_CHOP_STEPS = 12; // roughly 3 seconds
     private static final int LEAF_CLEAR_STEPS = 4; // roughly 1 second
-    private static final int SEARCH_RETRY_TICKS = 120;
+    private static final int SEARCH_RETRY_TICKS = 40;
     private static final int SUCCESS_RETRY_TICKS = 40;
-    private static final int ROUTE_RETRY_TICKS = 60;
+    private static final int ROUTE_RETRY_TICKS = 30;
     private static final int TASK_TIMEOUT_TICKS = 2400;
     private static final long REPLANT_RETRY_TICKS = 40L;
     private static final long REPLANT_MAX_WAIT_WITHOUT_SAPLING_TICKS = 100L;
     private static final double BREAK_REACH_SQR = 4.0D * 4.0D;
-    private static final float WALK_SPEED = 0.80F;
+    private static final float WALK_SPEED = 0.90F;
 
     private VillagerTreeWork() {}
 
@@ -134,6 +134,12 @@ public final class VillagerTreeWork {
             return;
         }
         if (now < data.getLong(NEXT_SEARCH) || !isAvailableWorker(villager)) return;
+        // Preserve an active vanilla work/POI route, but replace an ordinary idle stroll with useful work.
+        if (villager.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)
+            && !VillageDailyLife.isVanillaIdle(villager)) {
+            data.putLong(NEXT_SEARCH, now + 20L);
+            return;
+        }
 
         // Do not interrupt active farmer storage trips or emergency vanilla states (sleeping/trading/panic).
         if (data.getBoolean("livingvillages_autonomy_target_active")

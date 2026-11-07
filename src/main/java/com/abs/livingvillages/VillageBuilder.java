@@ -78,13 +78,13 @@ public final class VillageBuilder {
     private static final int ROUTE_TO_STORAGE = 1;
     private static final int ROUTE_TO_BUILD_STEP = 2;
     private static final int PLANKS_REQUIRED = 96;
-    private static final long WORK_RETRY_TICKS = 100L;
+    private static final long WORK_RETRY_TICKS = 40L;
     private static final long ROUTE_REISSUE_TICKS = 30L;
     private static final long BUILD_STEP_INTERVAL_TICKS = 12L;
     private static final long NIGHT_START = 12000L;
     private static final long DAY_START = 1000L;
     private static final double PLACE_REACH = 4.5D;
-    private static final float WALK_SPEED = 0.80F;
+    private static final float WALK_SPEED = 0.90F;
     private static final Direction[] HORIZONTAL = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
 
     public static final List<Item> ALL_BED_ITEMS = List.of(

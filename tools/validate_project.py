@@ -302,7 +302,7 @@ def main() -> int:
     print("- persistent storage reservations are conflict-checked and released on completion")
     print("- Minecraft GameTests cover competing claims and removed-chest cleanup")
     print("- resource-ledger feature markers present")
-    print("- all autonomous worker routes use the tested 0.80 walk-speed baseline")
+    print("- all ten autonomous work routes use the tested 0.90 walk-speed baseline")
     print("- shell scripts pass sh -n")
     print("NOTE: This does not compile the Minecraft/NeoForge source or test behavior in game.")
     return 0
