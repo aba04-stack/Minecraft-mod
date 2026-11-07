@@ -231,7 +231,7 @@ public final class LivingVillagesConfig {
         ENABLE_DAILY_LIFE = builder
             .comment("Короткие социальные визиты взрослых жителей в свободное время. Не заменяет ванильное расписание и рабочие задачи.")
             .translation("livingvillages.config.enable_daily_life")
-            .define("enable_daily_life", true);
+            .define("enable_daily_life", false);
 
         ENABLE_VILLAGE_LIVESTOCK = builder
             .comment("Строитель возводит загон из реальных материалов, животновод приводит овец на настоящую пшеницу и собирает шерсть настоящими ножницами.")
