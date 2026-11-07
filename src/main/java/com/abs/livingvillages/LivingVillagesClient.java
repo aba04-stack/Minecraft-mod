@@ -122,21 +122,21 @@ public final class LivingVillagesClient {
                 Component.translatable(data.autonomous()
                     ? "livingvillages.elder.pause_auto" : "livingvillages.elder.resume_auto"),
                 button -> send(0))
-                .bounds(left, panelTop + 97, BUTTON_WIDTH, 20).build());
+                .bounds(left, panelTop + 122, BUTTON_WIDTH, 18).build());
             addRenderableWidget(Button.builder(
                 Component.translatable("livingvillages.elder.priority", priorityLabel(data.priority())),
                 button -> send(1))
-                .bounds(left, panelTop + 120, BUTTON_WIDTH, 20).build());
+                .bounds(left, panelTop + 141, BUTTON_WIDTH, 18).build());
             addRenderableWidget(Button.builder(Component.translatable("livingvillages.elder.order_house"),
-                button -> send(2)).bounds(left, panelTop + 143, 146, 20).build());
+                button -> send(2)).bounds(left, panelTop + 160, 146, 18).build());
             addRenderableWidget(Button.builder(Component.translatable("livingvillages.elder.order_farm"),
-                button -> send(3)).bounds(left + 154, panelTop + 143, 146, 20).build());
+                button -> send(3)).bounds(left + 154, panelTop + 160, 146, 18).build());
             addRenderableWidget(Button.builder(Component.translatable("livingvillages.elder.defense_priority"),
-                button -> send(4)).bounds(left, panelTop + 166, 146, 20).build());
+                button -> send(4)).bounds(left, panelTop + 179, 146, 18).build());
             addRenderableWidget(Button.builder(Component.translatable("livingvillages.elder.balanced_priority"),
-                button -> send(5)).bounds(left + 154, panelTop + 166, 146, 20).build());
+                button -> send(5)).bounds(left + 154, panelTop + 179, 146, 18).build());
             addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> onClose())
-                .bounds(left, panelTop + 191, BUTTON_WIDTH, 20).build());
+                .bounds(left, panelTop + 198, BUTTON_WIDTH, 18).build());
         }
 
         private void send(int action) {
@@ -159,10 +159,10 @@ public final class LivingVillagesClient {
                 if (!(child instanceof Button button)) {
                     return "elder panel contains a non-button interactive widget";
                 }
-                if (button.getX() < 0 || button.getY() < 0
-                    || button.getX() + button.getWidth() > width
-                    || button.getY() + button.getHeight() > height) {
-                    return "a button extends outside the viewport: " + button.getMessage().getString();
+                if (button.getX() < panelLeft || button.getY() < panelTop + 120
+                    || button.getX() + button.getWidth() > panelLeft + PANEL_WIDTH
+                    || button.getY() + button.getHeight() > panelTop + PANEL_HEIGHT - 2) {
+                    return "a control is outside the lower action area: " + button.getMessage().getString();
                 }
             }
             return null;
@@ -181,12 +181,18 @@ public final class LivingVillagesClient {
                 panelLeft + 20, panelTop + 43, 0xFFFFFFFF);
             graphics.drawString(font, Component.translatable("livingvillages.elder.food", data.foodPoints()),
                 panelLeft + 20, panelTop + 58, 0xFFFFFFFF);
+            graphics.drawString(font, Component.translatable("livingvillages.elder.status_heading"),
+                panelLeft + 20, panelTop + 72, 0xFFFFD16D);
             Component notice = Component.literal(data.notice() == null ? "" : data.notice());
             var noticeLines = font.split(notice, PANEL_WIDTH - 40);
             for (int line = 0; line < Math.min(2, noticeLines.size()); line++) {
                 graphics.drawString(font, noticeLines.get(line), panelLeft + 20,
-                    panelTop + 74 + line * 10, 0xFFB8D7C8);
+                    panelTop + 84 + line * 10, 0xFFB8D7C8);
             }
+            graphics.fill(panelLeft + 16, panelTop + 117, panelLeft + PANEL_WIDTH - 16,
+                panelTop + 118, 0x668CA3B5);
+            graphics.drawString(font, Component.translatable("livingvillages.elder.actions_heading"),
+                panelLeft + 20, panelTop + 108, 0xFFFFD16D);
             super.render(graphics, mouseX, mouseY, partialTick);
         }
 
