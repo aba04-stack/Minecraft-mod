@@ -15,8 +15,17 @@ public final class VillageResourceDemandModel {
         int plantableFarmland,
         int availableSeeds,
         boolean treesAvailable,
-        int availablePickaxes
-    ) {}
+        int availablePickaxes,
+        boolean desertBiome
+    ) {
+        /** Backwards-compatible constructor for non-desert/domain-only callers. */
+        public Stock(int adultPopulation, int woodUnits, int stoneUnits, int oreUnits,
+                     int foodPoints, int matureCrops, int plantableFarmland, int availableSeeds,
+                     boolean treesAvailable, int availablePickaxes) {
+            this(adultPopulation, woodUnits, stoneUnits, oreUnits, foodPoints, matureCrops,
+                plantableFarmland, availableSeeds, treesAvailable, availablePickaxes, false);
+        }
+    }
 
     public record Plan(
         int targetWoodUnits,
@@ -63,9 +72,9 @@ public final class VillageResourceDemandModel {
         int targetWood = clamp(48 + adults * 8, 96, 256);
         // Treeless settlements must be able to quarry the complete 96-block sandstone bill
         // for their first house before the miner is released.
-        int targetStone = treesAvailable
-            ? clamp(24 + adults * 4, 48, 160)
-            : clamp(Math.max(96, 24 + adults * 4), 96, 160);
+        int targetStone = stock.desertBiome() || !treesAvailable
+            ? clamp(Math.max(96, 24 + adults * 4), 96, 160)
+            : clamp(24 + adults * 4, 48, 160);
         int targetOre = clamp(adults * 2, 4, 32);
         int targetFood = clamp(adults * 8, 32, 256);
 
