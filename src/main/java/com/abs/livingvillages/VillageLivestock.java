@@ -52,8 +52,8 @@ public final class VillageLivestock {
     public static final String PENDING_GATE_CLOSE_KEY = "livingvillages_livestock_gate_close_pending";
     public static final String SHEEP_OWNER_KEY = "livingvillages_livestock_owner";
 
-    private static final String STATE = "livingvillages_livestock_state";
-    private static final String TARGET_SHEEP = "livingvillages_livestock_target_sheep";
+    static final String STATE = "livingvillages_livestock_state";
+    static final String TARGET_SHEEP = "livingvillages_livestock_target_sheep";
     private static final String TASK_STARTED = "livingvillages_livestock_task_started";
     private static final String NEXT_ACTION = "livingvillages_livestock_next_action";
     private static final String LAST_ORDER = "livingvillages_livestock_last_order";
@@ -73,9 +73,9 @@ public final class VillageLivestock {
     private static final String SHEEP_LURE_OWNER = "livingvillages_livestock_lure_owner";
 
     private static final int STATE_IDLE = 0;
-    private static final int STATE_HERD_APPROACH = 1;
-    private static final int STATE_HERD_TO_GATE = 2;
-    private static final int STATE_HERD_ENTER_PEN = 3;
+    static final int STATE_HERD_APPROACH = 1;
+    static final int STATE_HERD_TO_GATE = 2;
+    static final int STATE_HERD_ENTER_PEN = 3;
     private static final int STATE_SHEAR = 4;
 
     private static final int ROUTE_FETCH_WHEAT = 1;
@@ -657,13 +657,11 @@ public final class VillageLivestock {
 
         AABB area = sheep.getBoundingBox().inflate(10.0D, 4.0D, 10.0D);
         List<Villager> herders = level.getEntitiesOfClass(Villager.class, area,
-            villager -> villager.isAlive() && !villager.isBaby()
-                && VillagerRoles.isHerder(villager)
-                && villager.getPersistentData().getBoolean(ACTIVE_KEY)
-                && villager.getMainHandItem().is(Items.WHEAT));
+            villager -> isCurrentHerdTarget(villager, sheep));
         herders.sort(Comparator.comparingDouble(sheep::distanceToSqr));
         if (herders.isEmpty()) return;
         Villager herder = herders.get(0);
+        if (!isCurrentHerdTarget(herder, sheep)) return;
         BlockPos center = ownershipCenter(herder);
         UUID villageId = VillageRegistry.villageId(level, center);
         String owner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
@@ -688,6 +686,21 @@ public final class VillageLivestock {
         sheep.getNavigation().moveTo(herder, SHEEP_FOLLOW_SPEED);
         sheep.getPersistentData().putLong(SHEEP_LAST_LURE_TICK, now);
         sheep.getPersistentData().putString(SHEEP_LURE_OWNER, villageId.toString());
+    }
+
+    /** True only for the one sheep this active specialist is currently leading into the pen. */
+    static boolean isCurrentHerdTarget(Villager herder, Sheep sheep) {
+        if (herder == null || sheep == null || !herder.isAlive() || !sheep.isAlive()
+            || !VillagerRoles.isHerder(herder)
+            || !herder.getPersistentData().getBoolean(ACTIVE_KEY)
+            || !herder.getMainHandItem().is(Items.WHEAT)) return false;
+        int state = herder.getPersistentData().getInt(STATE);
+        if (state != STATE_HERD_APPROACH && state != STATE_HERD_TO_GATE && state != STATE_HERD_ENTER_PEN) return false;
+        try {
+            return sheep.getUUID().equals(UUID.fromString(herder.getPersistentData().getString(TARGET_SHEEP)));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     /** Only sheep parents owned by the same village pass ownership to a baby born inside its own pen. */
