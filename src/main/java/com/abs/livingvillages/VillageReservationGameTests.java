@@ -2581,6 +2581,39 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void herderDoesNotLureSheepOutOfAnExistingPlayerPen(GameTestHelper helper) {
+        BlockPos site = helper.absolutePos(new BlockPos(3, 1, 3));
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                BlockPos floor = site.offset(dx, -1, dz);
+                helper.getLevel().setBlock(floor, Blocks.STONE.defaultBlockState(), 3);
+                if (dx == 0 || dx == 4 || dz == 0 || dz == 4) {
+                    BlockPos boundary = site.offset(dx, 0, dz);
+                    if (dx == 2 && dz == 0) {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE_GATE.defaultBlockState()
+                            .setValue(net.minecraft.world.level.block.FenceGateBlock.OPEN, true), 3);
+                    } else {
+                        helper.getLevel().setBlock(boundary, Blocks.OAK_FENCE.defaultBlockState(), 3);
+                    }
+                } else {
+                    helper.getLevel().setBlock(site.offset(dx, 0, dz), Blocks.AIR.defaultBlockState(), 3);
+                }
+                helper.getLevel().setBlock(site.offset(dx, 1, dz), Blocks.AIR.defaultBlockState(), 3);
+            }
+        }
+
+        net.minecraft.world.entity.animal.Sheep penned = helper.spawn(EntityType.SHEEP, 5, 1, 5);
+        net.minecraft.world.entity.animal.Sheep wild = helper.spawn(EntityType.SHEEP, 10, 1, 5);
+        penned.setNoAi(true);
+        wild.setNoAi(true);
+        helper.assertTrue(VillageLivestock.isInsideExistingFencePen(helper.getLevel(), penned),
+            "An animal already inside a fenced pen must not be lured away even if its gate is open.");
+        helper.assertTrue(!VillageLivestock.isInsideExistingFencePen(helper.getLevel(), wild),
+            "An unpenned sheep outside the enclosure must remain eligible for herding.");
+        helper.succeed();
+    }
+
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;
