@@ -59,7 +59,8 @@ public final class VillageLivestock {
     private static final String LAST_ORDER = "livingvillages_livestock_last_order";
     private static final String HERD_DEADLINE = "livingvillages_livestock_herd_deadline";
 
-    private static final String ROUTE_ACTIVE = "livingvillages_livestock_route_active";
+    public static final String RESERVATION_ACTIVE_KEY = "livingvillages_livestock_route_active";
+    private static final String ROUTE_ACTIVE = RESERVATION_ACTIVE_KEY;
     private static final String ROUTE_KIND = "livingvillages_livestock_route_kind";
     private static final String ROUTE_STORAGE_X = "livingvillages_livestock_route_storage_x";
     private static final String ROUTE_STORAGE_Y = "livingvillages_livestock_route_storage_y";
