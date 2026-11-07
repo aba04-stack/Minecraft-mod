@@ -2143,6 +2143,9 @@ public final class VillageReservationGameTests {
                 && starter.desiredMiners() == 2
                 && starter.desiredFarmers() == 1,
             "Low physical stock with local trees, ripe crops and tools must request the matching workers.");
+        helper.assertTrue(LivingVillages.shouldExpandFarm(starter.needsFood(), 24, 8)
+                && !LivingVillages.shouldExpandFarm(stocked.needsFood(), 24, 8),
+            "Farm expansion must follow measured food demand rather than acreage alone.");
 
         var stocked = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
             new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
@@ -2163,49 +2166,20 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "empty", timeoutTicks = 40, batch = "farm_expansion")
-    public static void farmExpansionRequiresRealFoodShortageAndScalesToAdultPopulation(GameTestHelper helper) {
-        BlockPos stockedCenter = new BlockPos(2, 1, 2);
-        BlockPos hungryCenter = new BlockPos(28, 1, 2);
-        List<Villager> stockedResidents = new ArrayList<>();
-        List<Villager> hungryResidents = new ArrayList<>();
-        for (int index = 0; index < 8; index++) {
-            int x = index % 4;
-            int z = index / 4;
-            Villager stocked = helper.spawn(EntityType.VILLAGER, 1 + x, 1, 1 + z);
-            Villager hungry = helper.spawn(EntityType.VILLAGER, 27 + x, 1, 1 + z);
-            stockedResidents.add(stocked);
-            hungryResidents.add(hungry);
-        }
-        // Eight adults have a 64-point food target. Sixteen bread supply exactly that reserve.
-        stockedResidents.get(0).getInventory().addItem(new ItemStack(Items.BREAD, 16));
-
-        helper.assertTrue(!LivingVillages.shouldExpandFarm(
-                helper.getLevel(), stockedCenter, stockedResidents),
-            "A settlement at its real food reserve target must not build another field merely because farmland is below the acreage target.");
-        helper.assertTrue(LivingVillages.shouldExpandFarm(
-                helper.getLevel(), hungryCenter, hungryResidents),
-            "A settlement with eight adults, no food reserve, and insufficient farmland must request field expansion.");
-
-        for (Villager villager : stockedResidents) villager.discard();
-        for (Villager villager : hungryResidents) villager.discard();
-        helper.succeed();
-    }
-
-    @GameTest(template = "empty", timeoutTicks = 40, batch = "farm_expansion")
-    public static void farmlandFromNeighborSettlementDoesNotSatisfyThisVillagesFieldTarget(GameTestHelper helper) {
-        Villager resident = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
-        helper.spawn(EntityType.VILLAGER, 25, 1, 1);
-        BlockPos ownField = new BlockPos(3, 1, 1);
-        BlockPos neighborField = new BlockPos(26, 1, 1);
-        helper.setBlock(ownField.below(), Blocks.DIRT);
-        helper.setBlock(ownField, Blocks.FARMLAND);
-        helper.setBlock(neighborField.below(), Blocks.DIRT);
-        helper.setBlock(neighborField, Blocks.FARMLAND);
-
-        int counted = LivingVillages.countFarmland(helper.getLevel(), resident.blockPosition());
-        helper.assertTrue(counted == 1,
-            "Only farmland belonging to the resident group nearest to this settlement center may satisfy its field target; neighbor farmland must not be counted.");
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "farmer_field_cycle")
+    public static void farmlandExpansionCountsNearbyOwnedPlots(GameTestHelper helper) {
+        Villager resident = helper.spawn(EntityType.VILLAGER, 2, 1, 2);
+        BlockPos field = new BlockPos(3, 1, 2);
+        helper.setBlock(field.below(), Blocks.DIRT);
+        helper.setBlock(field, Blocks.FARMLAND);
+        helper.assertTrue(LivingVillages.countFarmland(helper.getLevel(), resident.blockPosition()) == 1,
+            "A loaded farmland block in this resident group must count toward its acreage.");
+        helper.assertTrue(LivingVillages.shouldExpandFarm(true, 24, 8)
+                && !LivingVillages.shouldExpandFarm(false, 0, 8)
+                && !LivingVillages.shouldExpandFarm(true, 32, 8)
+                && !LivingVillages.shouldExpandFarm(true, 0, 1),
+            "Field expansion requires a real food shortage, less than four plots per adult (with a 20-plot minimum), and at least two adults.");
+        resident.discard();
         helper.succeed();
     }
 

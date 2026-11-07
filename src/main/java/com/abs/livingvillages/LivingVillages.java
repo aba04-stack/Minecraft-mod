@@ -594,8 +594,15 @@ public final class LivingVillages {
         if (level == null || center == null || residents == null) return false;
         int adults = (int) residents.stream().filter(v -> v != null && v.isAlive() && !v.isBaby()).count();
         if (adults <= 1) return false;
-        return VillageResourcePlanner.getPlan(level, center, residents).needsFood()
-            && !hasEnoughFarmland(level, center, adults);
+        boolean foodShortage = VillageResourcePlanner.getPlan(level, center, residents).needsFood();
+        return shouldExpandFarm(foodShortage, countFarmland(level, center), adults);
+    }
+
+    /** Pure decision rule kept separate so the shortage/acreage thresholds can be tested directly. */
+    static boolean shouldExpandFarm(boolean foodShortage, int farmlandCount, int adultPopulation) {
+        if (!foodShortage || adultPopulation <= 1) return false;
+        int requiredFarmland = Math.max(FARM_PRESENT_THRESHOLD, adultPopulation * 4);
+        return farmlandCount < requiredFarmland;
     }
 
     /**
