@@ -2174,6 +2174,11 @@ public final class VillageReservationGameTests {
                 && stocked.desiredMiners() == 0
                 && stocked.desiredFarmers() == 0,
             "Workers must not keep extracting resources after stock reaches its targets.");
+        helper.assertTrue(
+            VillagerRoles.desiredLumberjackSlots(true, false, 0, true) == 0
+                && VillagerRoles.desiredLumberjackSlots(true, true, 0, true) == 1
+                && VillagerRoles.desiredLumberjackSlots(false, true, 2, true) == 0,
+            "A queued house log order only assigns a lumberjack when an adult tree really exists and tree work is enabled.");
         helper.assertTrue(LivingVillages.shouldExpandFarm(starter.needsFood(), 24, 8)
                 && !LivingVillages.shouldExpandFarm(stocked.needsFood(), 24, 8),
             "Farm expansion must follow measured food demand rather than acreage alone.");
