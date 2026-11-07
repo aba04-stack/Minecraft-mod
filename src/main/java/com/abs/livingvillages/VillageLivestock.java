@@ -2,7 +2,6 @@ package com.abs.livingvillages;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.GlobalPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -17,21 +16,22 @@ import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.FenceBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
-import net.minecraft.world.level.block.WallBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,44 +39,57 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Bounded sheep-wool supply for pending village housing.
+ * Material-backed village sheep husbandry.
  *
- * <p>Only sheep inside a complete, closed 5x5 fence/wall pen are adopted.
- * Ownership is stored on the sheep entity itself, so another settlement cannot
- * silently shear the same animal. Workers use real shears, collect the actual
- * wool item entities produced by Minecraft, and deliver wool to owned storage
- * using normal navigation.</p>
+ * The builder constructs and checkpoints the village's own pen. A herder takes real wheat
+ * from village storage, lures reachable sheep through the gate, and only then marks them as
+ * village livestock. It later uses real shears and delivers actual wool drops to owned storage.
+ * A nearby player-built pen is never treated as a village-owned pen.
  */
 public final class VillageLivestock {
     public static final String ACTIVE_KEY = "livingvillages_livestock_active";
     public static final String SHEEP_OWNER_KEY = "livingvillages_livestock_owner";
 
+    private static final String STATE = "livingvillages_livestock_state";
+    private static final String TARGET_SHEEP = "livingvillages_livestock_target_sheep";
+    private static final String TASK_STARTED = "livingvillages_livestock_task_started";
+    private static final String NEXT_ACTION = "livingvillages_livestock_next_action";
+    private static final String LAST_ORDER = "livingvillages_livestock_last_order";
+    private static final String HERD_DEADLINE = "livingvillages_livestock_herd_deadline";
+
     private static final String ROUTE_ACTIVE = "livingvillages_livestock_route_active";
     private static final String ROUTE_KIND = "livingvillages_livestock_route_kind";
-    private static final String ROUTE_X = "livingvillages_livestock_route_x";
-    private static final String ROUTE_Y = "livingvillages_livestock_route_y";
-    private static final String ROUTE_Z = "livingvillages_livestock_route_z";
-    private static final String STAND_X = "livingvillages_livestock_stand_x";
-    private static final String STAND_Y = "livingvillages_livestock_stand_y";
-    private static final String STAND_Z = "livingvillages_livestock_stand_z";
-    private static final String TARGET_SHEEP = "livingvillages_livestock_target_sheep";
+    private static final String ROUTE_STORAGE_X = "livingvillages_livestock_route_storage_x";
+    private static final String ROUTE_STORAGE_Y = "livingvillages_livestock_route_storage_y";
+    private static final String ROUTE_STORAGE_Z = "livingvillages_livestock_route_storage_z";
+    private static final String ROUTE_STAND_X = "livingvillages_livestock_route_stand_x";
+    private static final String ROUTE_STAND_Y = "livingvillages_livestock_route_stand_y";
     private static final String ROUTE_STARTED = "livingvillages_livestock_route_started";
-    private static final String LAST_ROUTE_ORDER = "livingvillages_livestock_last_route_order";
-    private static final String STARTED = "livingvillages_livestock_started";
-    private static final String NEXT_ACTION = "livingvillages_livestock_next_action";
-    private static final String FAILURES = "livingvillages_livestock_failures";
 
-    private static final int ROUTE_TO_TOOL = 1;
-    private static final int ROUTE_TO_SHEEP = 2;
-    private static final int ROUTE_TO_WOOL_STORAGE = 3;
+    private static final String SHEEP_LAST_LURE_TICK = "livingvillages_livestock_last_lure_tick";
+    private static final String SHEEP_LURE_OWNER = "livingvillages_livestock_lure_owner";
+
+    private static final int STATE_IDLE = 0;
+    private static final int STATE_HERD_APPROACH = 1;
+    private static final int STATE_HERD_TO_GATE = 2;
+    private static final int STATE_HERD_ENTER_PEN = 3;
+    private static final int STATE_SHEAR = 4;
+
+    private static final int ROUTE_FETCH_WHEAT = 1;
+    private static final int ROUTE_FETCH_SHEARS = 2;
+    private static final int ROUTE_DELIVER_WOOL = 3;
+
+    private static final int TARGET_SHEEP_COUNT = 2;
+    private static final int WHEAT_WITHDRAWAL = 8;
+    private static final int MAX_SHEEP_SCAN = 32;
     private static final long RETRY_TICKS = 100L;
     private static final long FAILURE_BACKOFF_TICKS = 1200L;
     private static final long ROUTE_TIMEOUT_TICKS = 600L;
     private static final long ROUTE_REISSUE_TICKS = 40L;
-    private static final int MAX_ROUTE_FAILURES = 3;
-    private static final int MAX_SHEEP_CANDIDATES = 16;
-    private static final double INTERACTION_DISTANCE_SQR = 4.5D * 4.5D;
-    private static final float WALK_SPEED = 0.9F;
+    private static final long HERD_TIMEOUT_TICKS = 500L;
+    private static final double SHEEP_LURE_RADIUS_SQR = 10.0D * 10.0D;
+    private static final double SHEEP_FOLLOW_SPEED = 1.05D;
+    private static final double WALK_SPEED = 0.92D;
 
     private static final List<Item> WOOL_ITEMS = List.of(
         Items.WHITE_WOOL, Items.ORANGE_WOOL, Items.MAGENTA_WOOL, Items.LIGHT_BLUE_WOOL,
@@ -85,52 +98,258 @@ public final class VillageLivestock {
         Items.BROWN_WOOL, Items.GREEN_WOOL, Items.RED_WOOL, Items.BLACK_WOOL
     );
 
+    private static final List<Item> PLANK_ITEMS = List.of(
+        Items.OAK_PLANKS, Items.SPRUCE_PLANKS, Items.BIRCH_PLANKS, Items.JUNGLE_PLANKS,
+        Items.ACACIA_PLANKS, Items.DARK_OAK_PLANKS, Items.MANGROVE_PLANKS, Items.CHERRY_PLANKS,
+        Items.BAMBOO_PLANKS, Items.CRIMSON_PLANKS, Items.WARPED_PLANKS
+    );
+
     private VillageLivestock() {}
 
-    /** True only when a housing request lacks a bed and three matching wool are not already available. */
-    public static boolean needsWoolForHousing(ServerLevel level, BlockPos center) {
+    public record PenMaterials(Item fenceItem, Item gateItem, Item plankItem) {}
+
+    /** A completed pen is recognized only from the persisted project marker and its real blocks. */
+    public static boolean hasCompletePen(ServerLevel level, BlockPos center) {
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        if (checkpoint == null || !"animal_pen".equals(checkpoint.projectKind())
+            || checkpoint.stepIndex() < checkpoint.totalSteps() || checkpoint.totalSteps() != 16) return false;
+        BlockPos site = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        ResourceLocation fenceKey = ResourceLocation.tryParse(checkpoint.primaryMaterialId());
+        ResourceLocation gateKey = ResourceLocation.tryParse(checkpoint.secondaryMaterialId());
+        if (fenceKey == null || gateKey == null) return false;
+        Item fenceItem = BuiltInRegistries.ITEM.get(fenceKey);
+        Item gateItem = BuiltInRegistries.ITEM.get(gateKey);
+        Block fence = Block.byItem(fenceItem);
+        Block gate = Block.byItem(gateItem);
+        if (!(fence instanceof FenceBlock) || !(gate instanceof FenceGateBlock)) return false;
+
+        BlockPos gatePos = site.offset(2, 0, 0);
+        int fences = 0;
+        for (int dx = 0; dx < 5; dx++) {
+            for (int dz = 0; dz < 5; dz++) {
+                if (dx != 0 && dx != 4 && dz != 0 && dz != 4) continue;
+                BlockPos pos = site.offset(dx, 0, dz);
+                if (!level.hasChunkAt(pos)) return false;
+                Block placed = level.getBlockState(pos).getBlock();
+                if (pos.equals(gatePos)) {
+                    if (placed != gate) return false;
+                } else {
+                    if (placed != fence) return false;
+                    fences++;
+                }
+            }
+        }
+        return fences == 15;
+    }
+
+    /** The inside pen bounds, not a generic nearby fence enclosure. */
+    public static boolean isInsideVillagePen(ServerLevel level, BlockPos center, Sheep sheep) {
+        if (sheep == null || !sheep.isAlive() || !hasCompletePen(level, center)) return false;
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        BlockPos site = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        BlockPos pos = sheep.blockPosition();
+        return pos.getX() > site.getX() && pos.getX() < site.getX() + 4
+            && pos.getZ() > site.getZ() && pos.getZ() < site.getZ() + 4
+            && Math.abs(pos.getY() - site.getY()) <= 1;
+    }
+
+    public static BlockPos penCenter(ServerLevel level, BlockPos center) {
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        return checkpoint == null ? null : new BlockPos(checkpoint.siteX() + 2, checkpoint.siteY(), checkpoint.siteZ() + 2);
+    }
+
+    public static BlockPos penGatePosition(ServerLevel level, BlockPos center) {
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        return checkpoint == null ? null : new BlockPos(checkpoint.siteX() + 2, checkpoint.siteY(), checkpoint.siteZ());
+    }
+
+    /** Selects a fence/gate pair from actual village materials; matching wood species are mandatory. */
+    public static PenMaterials selectPenMaterials(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return null;
+        Set<String> wanted = new java.util.HashSet<>();
+        for (Item planks : PLANK_ITEMS) {
+            String path = BuiltInRegistries.ITEM.getKey(planks).getPath();
+            if (!path.endsWith("_planks")) continue;
+            String base = path.substring(0, path.length() - "_planks".length());
+            wanted.add("minecraft:" + path);
+            wanted.add("minecraft:" + base + "_log");
+            wanted.add("minecraft:" + base + "_wood");
+            wanted.add("minecraft:stripped_" + base + "_log");
+            wanted.add("minecraft:" + base + "_fence");
+            wanted.add("minecraft:" + base + "_fence_gate");
+        }
+        Map<String, Integer> storage = VillageRegistry.countAvailableOwnedStorageItems(level, center, wanted);
+        List<Villager> residents = VillageArea.findVillagers(level, center);
+        PenMaterials best = null;
+        int bestScore = 0;
+        for (Item planks : PLANK_ITEMS) {
+            ResourceLocation key = BuiltInRegistries.ITEM.getKey(planks);
+            String base = key.getPath().substring(0, key.getPath().length() - "_planks".length());
+            Item fence = itemForPath(key.getNamespace(), base + "_fence");
+            Item gate = itemForPath(key.getNamespace(), base + "_fence_gate");
+            if (!(Block.byItem(fence) instanceof FenceBlock) || !(Block.byItem(gate) instanceof FenceGateBlock)) continue;
+
+            Item log = VillageIndustry.logItemForPlanks(planks);
+            int planksCount = storage.getOrDefault(key.toString(), 0);
+            int logCount = storage.getOrDefault(BuiltInRegistries.ITEM.getKey(log).toString(), 0);
+            int fenceCount = storage.getOrDefault(BuiltInRegistries.ITEM.getKey(fence).toString(), 0);
+            int gateCount = storage.getOrDefault(BuiltInRegistries.ITEM.getKey(gate).toString(), 0);
+            for (Villager resident : residents) {
+                planksCount += countItem(resident.getInventory(), planks);
+                logCount += countItem(resident.getInventory(), log);
+                fenceCount += countItem(resident.getInventory(), fence);
+                gateCount += countItem(resident.getInventory(), gate);
+            }
+            int score = planksCount + logCount * 4 + fenceCount * 6 + gateCount * 6;
+            if (score > bestScore) {
+                bestScore = score;
+                best = new PenMaterials(fence, gate, planks);
+            }
+        }
+        return best;
+    }
+
+    private static Item itemForPath(String namespace, String path) {
+        ResourceLocation id = ResourceLocation.tryParse(namespace + ":" + path);
+        return id == null ? Items.AIR : BuiltInRegistries.ITEM.get(id);
+    }
+
+    /** True when housing needs a bed and there are wild adult sheep close enough to lead into a new pen. */
+    public static boolean needsPen(ServerLevel level, BlockPos center) {
         if (level == null || center == null
             || !LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
-            || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()) return false;
+            || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
+            || hasCompletePen(level, center)) return false;
         List<Villager> residents = VillageArea.findVillagers(level, center);
         if (residents.size() < 2) return false;
         boolean housingDemand = VillageBuilder.housingNeeded(level, center, residents.size())
-            || hasPendingHouseOrder(level, center);
+            || VillageElder.hasHouseRequest(residents);
         if (!housingDemand || hasAvailableBed(level, center, residents)) return false;
-        return countVillageWool(level, center, residents).values().stream().noneMatch(count -> count >= 3)
-            && hasManagedSheep(level, center);
+        if (countVillageWool(level, center, residents).values().stream().anyMatch(count -> count >= 3)) return false;
+        return findHerdableSheep(level, center).size() > 0;
     }
 
-    public static boolean hasManagedSheep(ServerLevel level, BlockPos center) {
-        return !findManagedSheep(level, center).isEmpty();
+    /** Ensures one idempotent material order exists before the builder/crafter tries to work. */
+    public static boolean ensurePenWorkOrder(ServerLevel level, BlockPos center) {
+        if (!needsPen(level, center)) return false;
+        PenMaterials materials = selectPenMaterials(level, center);
+        if (materials == null) {
+            VillageRegistry.recordDiagnostic(level, center, "Загон",
+                "Нужны брёвна или доски одного вида дерева, чтобы изготовить ограду и калитку.");
+            return false;
+        }
+        long now = level.getGameTime();
+        String fenceId = BuiltInRegistries.ITEM.getKey(materials.fenceItem()).toString();
+        String gateId = BuiltInRegistries.ITEM.getKey(materials.gateItem()).toString();
+        VillageWorkOrders.enqueue(level, center, "animal_pen", "animal_pen", 80, now, 30L * 24000L,
+            List.of(
+                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement(fenceId, 15),
+                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement(gateId, 1)
+            ));
+        return true;
     }
 
-    /** Shears are considered available only when physically carried or in owned village storage. */
+    public static boolean hasPendingPenOrder(ServerLevel level, BlockPos center) {
+        return VillageWorkOrders.list(level, center, level.getGameTime()).stream().anyMatch(order ->
+            "animal_pen".equals(order.kind())
+                && (order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.OPEN
+                    || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.WAITING_FOR_RESOURCES
+                    || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.READY
+                    || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.CLAIMED
+                    || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.IN_PROGRESS));
+    }
+
+    public static Item pendingPenFenceItem(ServerLevel level, BlockPos center) {
+        return pendingPenRequirement(level, center, true);
+    }
+
+    public static Item pendingPenGateItem(ServerLevel level, BlockPos center) {
+        return pendingPenRequirement(level, center, false);
+    }
+
+    private static Item pendingPenRequirement(ServerLevel level, BlockPos center, boolean fence) {
+        for (var order : VillageWorkOrders.list(level, center, level.getGameTime())) {
+            if (!"animal_pen".equals(order.kind()) || order.isTerminal()) continue;
+            String id = order.requirements().stream()
+                .filter(req -> req != null && (fence ? req.itemId().endsWith("_fence") && !req.itemId().endsWith("_fence_gate")
+                    : req.itemId().endsWith("_fence_gate")))
+                .map(com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement::itemId)
+                .findFirst().orElse("");
+            ResourceLocation key = ResourceLocation.tryParse(id);
+            if (key != null) {
+                Item item = BuiltInRegistries.ITEM.get(key);
+                if (item != Items.AIR) return item;
+            }
+        }
+        return Items.AIR;
+    }
+
+    /** Starts construction only after all 15 fence pieces and the matching gate physically exist in owned storage. */
+    public static boolean tryStartPenProject(ServerLevel level, BlockPos center) {
+        if (!ensurePenWorkOrder(level, center) || hasCompletePen(level, center)) return false;
+        if (VillageBuilder.hasActiveProjectNear(level, center)) return false;
+        Item fence = pendingPenFenceItem(level, center);
+        Item gate = pendingPenGateItem(level, center);
+        if (fence == Items.AIR || gate == Items.AIR) return false;
+        Set<String> required = Set.of(
+            BuiltInRegistries.ITEM.getKey(fence).toString(),
+            BuiltInRegistries.ITEM.getKey(gate).toString());
+        Map<String, Integer> stock = VillageRegistry.countAvailableOwnedStorageItems(level, center, required);
+        if (stock.getOrDefault(BuiltInRegistries.ITEM.getKey(fence).toString(), 0) < 15
+            || stock.getOrDefault(BuiltInRegistries.ITEM.getKey(gate).toString(), 0) < 1) return false;
+        BlockPos site = VillageBuilder.findLivestockPenSite(level, center);
+        if (site == null) {
+            VillageRegistry.recordDiagnostic(level, center, "Загон", "Нет ровной свободной площадки 5×5 для загона.");
+            return false;
+        }
+        return VillageBuilder.startLivestockPenProject(level, center, site, fence, gate);
+    }
+
+    public static boolean needsHerding(ServerLevel level, BlockPos center) {
+        if (!LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get() || !hasCompletePen(level, center)) return false;
+        return countOwnedSheepInsidePen(level, center) < TARGET_SHEEP_COUNT
+            && !findHerdableSheep(level, center).isEmpty();
+    }
+
+    /** A herder is useful before shearing too: first it fills the village-built pen with sheep. */
+    public static boolean canAssignHerder(ServerLevel level, BlockPos center, Villager candidate) {
+        return candidate != null && candidate.isAlive() && !candidate.isBaby()
+            && (needsHerding(level, center) || needsWoolForHousing(level, center));
+    }
+
+    public static boolean needsWoolForHousing(ServerLevel level, BlockPos center) {
+        if (level == null || center == null
+            || !LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+            || !LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
+            || !hasCompletePen(level, center)) return false;
+        List<Villager> residents = VillageArea.findVillagers(level, center);
+        if (residents.size() < 2) return false;
+        boolean housingDemand = VillageBuilder.housingNeeded(level, center, residents.size())
+            || VillageElder.hasHouseRequest(residents);
+        if (!housingDemand || hasAvailableBed(level, center, residents)) return false;
+        if (countVillageWool(level, center, residents).values().stream().anyMatch(count -> count >= 3)) return false;
+        return countOwnedSheepInsidePen(level, center) > 0;
+    }
+
     public static boolean hasShearsAvailable(ServerLevel level, BlockPos center) {
         if (level == null || center == null) return false;
         for (Villager resident : VillageArea.findVillagers(level, center)) {
             if (countItem(resident.getInventory(), Items.SHEARS) > 0) return true;
         }
-        return hasShearsInOwnedStorage(level, center);
+        return findStorages(level, center, null).stream()
+            .anyMatch(ref -> countItem(ref.container(), Items.SHEARS) > 0);
     }
 
-    public static boolean canAssignHerder(ServerLevel level, BlockPos center, Villager candidate) {
-        return candidate != null && candidate.isAlive() && needsWoolForHousing(level, center)
-            && (countItem(candidate.getInventory(), Items.SHEARS) > 0 || hasShearsInOwnedStorage(level, center));
-    }
-
-    /** The crafter makes shears only for a real housing/wool deficit and a real penned sheep. */
     public static boolean hasShearsRecipe(ServerLevel level, BlockPos center) {
         return needsWoolForHousing(level, center) && !hasShearsAvailable(level, center);
     }
 
+    /** Runs the assigned herder. Every item and every animal is real; all routes have timeouts. */
     public static void onVillagerTick(EntityTickEvent.Post event) {
         if (!(event.getEntity() instanceof Villager villager)
             || villager.level().isClientSide() || !villager.isAlive() || villager.isBaby()
-            || villager.tickCount % 5 != 0
+            || villager.tickCount % 5 != 0 || !VillagerRoles.isHerder(villager)
             || !(villager.level() instanceof ServerLevel level)) return;
-        if (!VillagerRoles.isHerder(villager)
-            && !villager.getPersistentData().getBoolean(ACTIVE_KEY)) return;
 
         CompoundTag data = villager.getPersistentData();
         BlockPos center = ownershipCenter(villager);
@@ -147,271 +366,361 @@ public final class VillageLivestock {
         }
 
         if (!data.getBoolean(ACTIVE_KEY)) {
-            if (!needsWoolForHousing(level, center)) return;
+            if (!hasCompletePen(level, center)) return;
             data.putBoolean(ACTIVE_KEY, true);
-            data.putLong(STARTED, now);
+            data.putInt(STATE, STATE_IDLE);
+            data.putLong(TASK_STARTED, now);
             data.putLong(NEXT_ACTION, 0L);
         }
         if (now < data.getLong(NEXT_ACTION)) return;
 
-        // Carrying wool takes priority over shearing another animal. Never discard cargo
-        // just because the housing demand changed while the worker was walking.
+        if (data.getBoolean(ROUTE_ACTIVE)) {
+            continueStorageRoute(villager, level, data, now);
+            return;
+        }
+
+        claimSheepAlreadyInsidePen(level, center);
         if (hasWoolInInventory(villager)) {
-            if (data.getBoolean(ROUTE_ACTIVE) && data.getInt(ROUTE_KIND) == ROUTE_TO_WOOL_STORAGE) {
-                continueRoute(villager, level, data, now);
-                return;
-            }
-            StorageTarget target = findNearestStorageWithWoolRoom(villager, level);
-            if (target == null) {
+            StorageTarget output = findNearestStorageWithWoolRoom(villager, level);
+            if (output == null) {
                 data.putLong(NEXT_ACTION, now + RETRY_TICKS);
                 VillageRegistry.recordDiagnostic(level, center, "Животновод",
-                    "Шерсть собрана, но у принадлежащих деревне хранилищ нет свободного места.");
+                    "Шерсть есть у животновода, но в складе поселения нет свободного места.");
                 return;
             }
-            setRoute(villager, data, target.stand(), target.storage(), ROUTE_TO_WOOL_STORAGE, now);
+            setStorageRoute(villager, data, output, ROUTE_DELIVER_WOOL, now);
             return;
         }
 
-        if (!needsWoolForHousing(level, center)) {
-            finishTask(villager, data, 0L);
+        if (needsWoolForHousing(level, center)) {
+            runShearing(villager, level, center, data, now);
             return;
         }
 
-        if (data.getBoolean(ROUTE_ACTIVE)) {
-            continueRoute(villager, level, data, now);
+        if (needsHerding(level, center)) {
+            runHerding(villager, level, center, data, now);
             return;
         }
 
-        if (countItem(villager.getInventory(), Items.SHEARS) > 0) {
-            Sheep target = findReadySheep(villager, level);
+        returnWheatToInventory(villager);
+        finishTask(villager, data, now + FAILURE_BACKOFF_TICKS);
+    }
+
+    private static void runHerding(Villager herder, ServerLevel level, BlockPos center, CompoundTag data, long now) {
+        if (!hasWheatInHand(herder)) {
+            if (!equipWheatFromInventory(herder)) {
+                StorageTarget source = findNearestStorageWithItem(herder, level, Items.WHEAT);
+                if (source == null) {
+                    data.putLong(NEXT_ACTION, now + FAILURE_BACKOFF_TICKS);
+                    VillageRegistry.recordDiagnostic(level, center, "Животновод",
+                        "Для приманивания овец нужна настоящая пшеница в инвентаре или на складе.");
+                    return;
+                }
+                setStorageRoute(herder, data, source, ROUTE_FETCH_WHEAT, now);
+                return;
+            }
+        }
+
+        int state = data.getInt(STATE);
+        Sheep target = findTargetSheep(level, herder, data.getString(TARGET_SHEEP));
+        if (state == STATE_IDLE || target == null) {
+            target = findNearestHerdableSheep(herder, level, center);
             if (target == null) {
                 data.putLong(NEXT_ACTION, now + RETRY_TICKS);
-                return;
-            }
-            BlockPos stand = findSheepStand(villager, target);
-            if (stand == null) {
-                recordRouteFailure(data, now);
                 return;
             }
             data.putString(TARGET_SHEEP, target.getUUID().toString());
-            setRoute(villager, data, stand, target.blockPosition(), ROUTE_TO_SHEEP, now);
-            return;
+            data.putInt(STATE, STATE_HERD_APPROACH);
+            data.putLong(TASK_STARTED, now);
+            data.putLong(HERD_DEADLINE, now + HERD_TIMEOUT_TICKS);
+            data.putLong(LAST_ORDER, 0L);
+            state = STATE_HERD_APPROACH;
         }
 
-        StorageTarget tool = findNearestStorageWithItem(villager, level, Items.SHEARS);
-        if (tool == null) {
-            data.putLong(NEXT_ACTION, now + FAILURE_BACKOFF_TICKS);
-            VillageRegistry.recordDiagnostic(level, center, "Животновод",
-                "Для сбора шерсти нужны настоящие ножницы в инвентаре или принадлежащем деревне складе.");
-            return;
-        }
-        setRoute(villager, data, tool.stand(), tool.storage(), ROUTE_TO_TOOL, now);
-    }
-
-    private static void continueRoute(Villager villager, ServerLevel level, CompoundTag data, long now) {
-        int kind = data.getInt(ROUTE_KIND);
-        BlockPos storagePos = routeTarget(data);
-        BlockPos stand = routeStand(data);
-        if (now - data.getLong(ROUTE_STARTED) > ROUTE_TIMEOUT_TICKS) {
-            clearRoute(villager, data);
-            VillageReservations.release(data, "livestock");
+        if (now > data.getLong(HERD_DEADLINE)) {
+            closePenGate(level, center);
+            clearOwnedWalkTarget(herder, penCenter(level, center));
             data.remove(TARGET_SHEEP);
-            recordRouteFailure(data, now);
+            data.putInt(STATE, STATE_IDLE);
+            data.putLong(NEXT_ACTION, now + FAILURE_BACKOFF_TICKS);
             return;
         }
 
-        if (kind == ROUTE_TO_SHEEP) {
-            Sheep sheep = findTargetSheep(level, villager, data.getString(TARGET_SHEEP));
-            if (sheep == null || !isManagedByVillage(level, ownershipCenter(villager), sheep)) {
-                clearRoute(villager, data);
-                data.remove(TARGET_SHEEP);
-                recordRouteFailure(data, now);
+        if (state == STATE_HERD_APPROACH) {
+            if (herder.distanceToSqr(target) > 8.0D * 8.0D) {
+                orderEntityRoute(herder, target, data, now);
                 return;
             }
-            if (villager.distanceToSqr(sheep) <= INTERACTION_DISTANCE_SQR && canSeeTarget(level, villager, sheep)) {
-                ItemStack shears = firstShears(villager.getInventory());
-                UUID villageId = VillageRegistry.villageId(level, ownershipCenter(villager));
-                boolean sheared = shears != null && shearManagedSheep(level, sheep, shears, villageId);
-                if (sheared) {
-                    collectNearbyWool(villager, level, sheep);
-                    data.putInt(FAILURES, 0);
-                    VillageRegistry.recordDiagnostic(level, ownershipCenter(villager), "Животновод",
-                        "Собрана настоящая шерсть с овцы в загоне.");
-                } else {
-                    recordRouteFailure(data, now);
-                }
-                clearRoute(villager, data);
+            BlockPos outside = penGatePosition(level, center).north();
+            if (!isSafeStand(level, outside) || !canReach(herder, outside)) {
                 data.remove(TARGET_SHEEP);
+                data.putInt(STATE, STATE_IDLE);
+                recordFailure(data, now);
+                return;
+            }
+            data.putInt(STATE, STATE_HERD_TO_GATE);
+            data.putLong(LAST_ORDER, 0L);
+            state = STATE_HERD_TO_GATE;
+        }
+
+        if (state == STATE_HERD_TO_GATE) {
+            BlockPos outside = penGatePosition(level, center).north();
+            if (herder.distanceToSqr(Vec3.atCenterOf(outside)) > 2.4D * 2.4D) {
+                orderBlockRoute(herder, outside, data, now);
+                return;
+            }
+            if (!openPenGate(level, center)) {
+                data.remove(TARGET_SHEEP);
+                data.putInt(STATE, STATE_IDLE);
+                data.putLong(NEXT_ACTION, now + RETRY_TICKS);
+                return;
+            }
+            data.putInt(STATE, STATE_HERD_ENTER_PEN);
+            data.putLong(LAST_ORDER, 0L);
+            state = STATE_HERD_ENTER_PEN;
+        }
+
+        if (state == STATE_HERD_ENTER_PEN) {
+            BlockPos inside = penCenter(level, center);
+            if (inside == null) {
+                closePenGate(level, center);
+                finishTask(herder, data, now + RETRY_TICKS);
+                return;
+            }
+            if (herder.distanceToSqr(Vec3.atCenterOf(inside)) > 2.0D * 2.0D) {
+                orderBlockRoute(herder, inside, data, now);
+                return;
+            }
+            if (isInsideVillagePen(level, center, target)) {
+                String owner = target.getPersistentData().getString(SHEEP_OWNER_KEY);
+                UUID villageId = VillageRegistry.villageId(level, center);
+                if (villageId != null && (owner.isBlank() || owner.equals(villageId.toString()))) {
+                    target.getPersistentData().putString(SHEEP_OWNER_KEY, villageId.toString());
+                    VillageRegistry.recordDiagnostic(level, center, "Животновод",
+                        "Овца приведена в загон на настоящую пшеницу.");
+                }
+                closePenGate(level, center);
+                data.remove(TARGET_SHEEP);
+                data.putInt(STATE, STATE_IDLE);
                 data.putLong(NEXT_ACTION, now + 20L);
                 return;
             }
-            reissueRoute(villager, data, stand, now);
+            if (!hasWheatInHand(herder)) {
+                closePenGate(level, center);
+                data.remove(TARGET_SHEEP);
+                data.putInt(STATE, STATE_IDLE);
+                return;
+            }
+            orderBlockRoute(herder, inside, data, now);
+        }
+    }
+
+    private static void runShearing(Villager herder, ServerLevel level, BlockPos center, CompoundTag data, long now) {
+        if (countItem(herder.getInventory(), Items.SHEARS) <= 0) {
+            StorageTarget source = findNearestStorageWithItem(herder, level, Items.SHEARS);
+            if (source == null) {
+                data.putLong(NEXT_ACTION, now + FAILURE_BACKOFF_TICKS);
+                VillageRegistry.recordDiagnostic(level, center, "Животновод",
+                    "Нужны настоящие ножницы в инвентаре или на складе поселения.");
+                return;
+            }
+            setStorageRoute(herder, data, source, ROUTE_FETCH_SHEARS, now);
             return;
         }
 
-        if (!level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
-            || !VillageRegistry.isStorageForVillage(level, ownershipCenter(villager), storagePos)
-            || !VillageReservations.isStorageAvailable(level, storagePos, villager)
-            || !(level.getBlockEntity(storagePos) instanceof Container storage)) {
-            clearRoute(villager, data);
-            VillageReservations.release(data, "livestock");
-            data.putLong(NEXT_ACTION, now + RETRY_TICKS);
+        Sheep target = findTargetSheep(level, herder, data.getString(TARGET_SHEEP));
+        if (target == null || !isOwnedSheepInsidePen(level, center, target)
+            || !target.readyForShearing()) {
+            target = findReadySheep(herder, level, center);
+            if (target == null) {
+                data.remove(TARGET_SHEEP);
+                data.putInt(STATE, STATE_IDLE);
+                data.putLong(NEXT_ACTION, now + RETRY_TICKS);
+                return;
+            }
+            data.putString(TARGET_SHEEP, target.getUUID().toString());
+            data.putInt(STATE, STATE_SHEAR);
+            data.putLong(TASK_STARTED, now);
+            data.putLong(HERD_DEADLINE, now + ROUTE_TIMEOUT_TICKS);
+            data.putLong(LAST_ORDER, 0L);
+        }
+
+        if (now > data.getLong(HERD_DEADLINE)) {
+            clearOwnedWalkTarget(herder, target.blockPosition());
+            data.remove(TARGET_SHEEP);
+            data.putInt(STATE, STATE_IDLE);
+            recordFailure(data, now);
             return;
         }
-        if (!atRouteTarget(villager, stand, data, now)) return;
+        if (herder.distanceToSqr(target) > 4.2D * 4.2D || !canSeeSheep(level, herder, target)) {
+            orderEntityRoute(herder, target, data, now);
+            return;
+        }
 
-        if (kind == ROUTE_TO_TOOL) fetchShears(villager, storage);
-        else if (kind == ROUTE_TO_WOOL_STORAGE) depositWool(villager, storage);
-
-        storage.setChanged();
-        villager.getInventory().setChanged();
-        VillageReservations.release(data, "livestock");
-        clearRoute(villager, data);
+        ItemStack shears = firstShears(herder.getInventory());
+        UUID villageId = VillageRegistry.villageId(level, center);
+        boolean sheared = shears != null && shearManagedSheep(level, target, shears, villageId);
+        if (sheared) {
+            collectNearbyWool(herder, level, target);
+            VillageRegistry.recordDiagnostic(level, center, "Животновод",
+                "Овца острижена настоящими ножницами; шерсть собрана.");
+            data.putInt("livingvillages_livestock_failures", 0);
+        } else {
+            recordFailure(data, now);
+        }
+        clearOwnedWalkTarget(herder, target.blockPosition());
+        data.remove(TARGET_SHEEP);
+        data.putInt(STATE, STATE_IDLE);
         data.putLong(NEXT_ACTION, now + 20L);
     }
 
-    /** A pen must be a complete 5x5 fence/wall boundary with at least one closed gate. */
-    static boolean isInsideClosedPen(ServerLevel level, BlockPos animalPos) {
-        if (level == null || animalPos == null || !level.hasChunkAt(animalPos)
-            || !level.getBlockState(animalPos.below()).blocksMotion()) return false;
-        for (int offsetX = -1; offsetX <= 1; offsetX++) {
-            for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
-                BlockPos penCenter = animalPos.offset(offsetX, 0, offsetZ);
-                int gates = 0;
-                boolean closed = true;
-                for (int dx = -2; dx <= 2 && closed; dx++) {
-                    for (int dz = -2; dz <= 2; dz++) {
-                        if (Math.abs(dx) != 2 && Math.abs(dz) != 2) continue;
-                        BlockPos boundary = penCenter.offset(dx, 0, dz);
-                        if (!level.hasChunkAt(boundary)) { closed = false; break; }
-                        BlockState state = level.getBlockState(boundary);
-                        if (state.getBlock() instanceof FenceBlock || state.getBlock() instanceof WallBlock) continue;
-                        if (state.getBlock() instanceof FenceGateBlock && !state.getValue(FenceGateBlock.OPEN)) {
-                            gates++;
-                            continue;
-                        }
-                        closed = false;
-                        break;
-                    }
-                }
-                if (closed && gates >= 1) return true;
+    /** Sheep are only claimed after the player-controlled settlement's own pen is complete. */
+    private static void claimSheepAlreadyInsidePen(ServerLevel level, BlockPos center) {
+        UUID villageId = VillageRegistry.villageId(level, center);
+        if (villageId == null || !hasCompletePen(level, center)) return;
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        BlockPos site = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        AABB inside = new AABB(site.offset(1, 0, 1), site.offset(4, 2, 4));
+        for (Sheep sheep : level.getEntitiesOfClass(Sheep.class, inside, Sheep::isAlive)) {
+            if (!isInsideVillagePen(level, center, sheep)) continue;
+            String owner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
+            if (owner.isBlank() || owner.equals(villageId.toString())) {
+                sheep.getPersistentData().putString(SHEEP_OWNER_KEY, villageId.toString());
             }
         }
-        return false;
     }
 
-    /**
-     * Explicitly adopts a sheep into the only unambiguous nearby village. A player must
-     * crouch-right-click an unowned sheep while it is inside a closed pen. We never claim
-     * nearby livestock automatically: this prevents stealing a player's or neighbor's sheep.
-     */
-    public static UUID adoptSheepForNearestVillage(ServerLevel level, Sheep sheep) {
-        if (level == null || sheep == null || !sheep.isAlive()
-            || !isInsideClosedPen(level, sheep.blockPosition())) return null;
+    /** Sheep follow only a herder carrying actual wheat; no remote/global attraction is used. */
+    public static void onAnimalTick(EntityTickEvent.Post event) {
+        if (!(event.getEntity() instanceof Sheep sheep) || sheep.level().isClientSide()
+            || !sheep.isAlive() || sheep.tickCount % 10 != 0
+            || !(sheep.level() instanceof ServerLevel level)) return;
+        if (!LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()) return;
 
-        String existingOwner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
-        int radius = Math.max(16, Math.min(64, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()));
-        AABB area = new AABB(sheep.blockPosition()).inflate(radius, 12.0D, radius);
-        List<Villager> nearby = level.getEntitiesOfClass(Villager.class, area,
+        AABB area = sheep.getBoundingBox().inflate(10.0D, 4.0D, 10.0D);
+        List<Villager> herders = level.getEntitiesOfClass(Villager.class, area,
             villager -> villager.isAlive() && !villager.isBaby()
-                && villager.distanceToSqr(sheep) <= (double) radius * radius);
-        Map<UUID, VillageCandidate> villages = new HashMap<>();
+                && VillagerRoles.isHerder(villager)
+                && villager.getPersistentData().getBoolean(ACTIVE_KEY)
+                && villager.getMainHandItem().is(Items.WHEAT));
+        herders.sort(Comparator.comparingDouble(sheep::distanceToSqr));
+        if (herders.isEmpty()) return;
+        Villager herder = herders.get(0);
+        BlockPos center = ownershipCenter(herder);
+        UUID villageId = VillageRegistry.villageId(level, center);
+        String owner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
+        if (villageId == null || (!owner.isBlank() && !owner.equals(villageId.toString()))
+            || isInsideVillagePen(level, center, sheep) || sheep.distanceToSqr(herder) > SHEEP_LURE_RADIUS_SQR
+            || !canSeeSheep(level, sheep, herder)) return;
 
-        for (Villager resident : nearby) {
-            BlockPos center = VillagerRoles.getHome(resident);
-            if (center == null) {
-                GlobalPos home = resident.getBrain().getMemory(MemoryModuleType.HOME).orElse(null);
-                if (home != null && home.dimension().equals(level.dimension())) center = home.pos();
-            }
-            if (center == null) center = resident.blockPosition();
-            long distance = center.distSqr(sheep.blockPosition());
-            if (distance > (long) radius * radius) continue;
-
-            UUID villageId = VillageRegistry.villageId(level, center);
-            if (villageId == null) continue;
-            VillageCandidate previous = villages.get(villageId);
-            if (previous == null || distance < previous.distanceSquared()) {
-                villages.put(villageId, new VillageCandidate(center.immutable(), distance));
-            }
-        }
-
-        // Do not guess when two different settlements are close enough to both claim the pen.
-        if (villages.size() != 1) return null;
-        UUID villageId = villages.keySet().iterator().next();
-        VillageCandidate candidate = villages.get(villageId);
-        List<Villager> residents = VillageArea.findVillagers(level, candidate.center());
-        long adults = residents.stream().filter(v -> v.isAlive() && !v.isBaby()).count();
-        if (adults < 2) return null;
-        if (!existingOwner.isBlank() && !existingOwner.equals(villageId.toString())) return null;
-
-        sheep.getPersistentData().putString(SHEEP_OWNER_KEY, villageId.toString());
-        return villageId;
+        long now = level.getGameTime();
+        if (now - sheep.getPersistentData().getLong(SHEEP_LAST_LURE_TICK) < 20L) return;
+        sheep.getNavigation().moveTo(herder, SHEEP_FOLLOW_SPEED);
+        sheep.getPersistentData().putLong(SHEEP_LAST_LURE_TICK, now);
+        sheep.getPersistentData().putString(SHEEP_LURE_OWNER, villageId.toString());
     }
 
-    /** Only offspring of two sheep already owned by the same village inherit livestock ownership. */
+    /** Only sheep parents owned by the same village pass ownership to a baby born inside its own pen. */
     static void inheritSheepOwnership(net.minecraft.world.entity.animal.Animal parentA,
-                                      net.minecraft.world.entity.animal.Animal parentB,
-                                      net.minecraft.world.entity.AgeableMob child) {
+                                     net.minecraft.world.entity.animal.Animal parentB,
+                                     net.minecraft.world.entity.AgeableMob child) {
         if (!(parentA instanceof Sheep first) || !(parentB instanceof Sheep second)
             || !(child instanceof Sheep baby) || first.level().isClientSide()
-            || !isInsideClosedPen((ServerLevel) first.level(), baby.blockPosition())) return;
+            || !(first.level() instanceof ServerLevel level)) return;
         String firstOwner = first.getPersistentData().getString(SHEEP_OWNER_KEY);
         String secondOwner = second.getPersistentData().getString(SHEEP_OWNER_KEY);
-        if (!firstOwner.isBlank() && firstOwner.equals(secondOwner)) {
-            baby.getPersistentData().putString(SHEEP_OWNER_KEY, firstOwner);
+        if (firstOwner.isBlank() || !firstOwner.equals(secondOwner)) return;
+        for (BlockPos anchor : VillageRegistry.knownLoadedVillageAnchors(level)) {
+            UUID id = VillageRegistry.villageId(level, anchor);
+            if (id != null && id.toString().equals(firstOwner)
+                && isInsideVillagePen(level, anchor, baby)) {
+                baby.getPersistentData().putString(SHEEP_OWNER_KEY, firstOwner);
+                return;
+            }
         }
-    }
-
-    static boolean tryClaimSheepForVillage(ServerLevel level, Sheep sheep, UUID villageId) {
-        return level != null && sheep != null && villageId != null && sheep.isAlive()
-            && isInsideClosedPen(level, sheep.blockPosition())
-            && sheep.getPersistentData().getString(SHEEP_OWNER_KEY).equals(villageId.toString());
     }
 
     static boolean shearManagedSheep(ServerLevel level, Sheep sheep, ItemStack shears, UUID villageId) {
         if (level == null || sheep == null || shears == null || villageId == null
             || !sheep.isAlive() || !shears.is(Items.SHEARS) || shears.isEmpty()
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
-            || !tryClaimSheepForVillage(level, sheep, villageId)
             || !sheep.getPersistentData().getString(SHEEP_OWNER_KEY).equals(villageId.toString())
             || !sheep.readyForShearing()) return false;
+        boolean insideAnyVillagePen = false;
+        for (BlockPos anchor : VillageRegistry.knownLoadedVillageAnchors(level)) {
+            if (VillageRegistry.villageId(level, anchor) != null
+                && VillageRegistry.villageId(level, anchor).equals(villageId)
+                && isInsideVillagePen(level, anchor, sheep)) {
+                insideAnyVillagePen = true;
+                break;
+            }
+        }
+        if (!insideAnyVillagePen) return false;
         sheep.shear(level, SoundSource.NEUTRAL, shears);
         return sheep.isSheared();
     }
 
-    private static List<Sheep> findManagedSheep(ServerLevel level, BlockPos center) {
+    private static List<Sheep> findHerdableSheep(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return List.of();
         UUID villageId = VillageRegistry.villageId(level, center);
-        if (villageId == null) return List.of();
-        int radius = Math.max(8, Math.min(24, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()));
-        AABB area = new AABB(center).inflate(radius, 6.0D, radius);
+        int radius = Math.max(12, Math.min(28, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()));
+        AABB area = new AABB(center).inflate(radius, 8.0D, radius);
         List<Sheep> candidates = level.getEntitiesOfClass(Sheep.class, area,
             sheep -> sheep.isAlive() && !sheep.isBaby()
                 && sheep.distanceToSqr(Vec3.atCenterOf(center)) <= (double) radius * radius);
+        candidates.removeIf(sheep -> {
+            String owner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
+            return villageId == null || (!owner.isBlank() && !owner.equals(villageId.toString()));
+        });
         candidates.sort(Comparator.comparingDouble(sheep -> sheep.distanceToSqr(Vec3.atCenterOf(center))));
-        List<Sheep> managed = new ArrayList<>();
-        for (Sheep sheep : candidates) {
-            if (managed.size() >= MAX_SHEEP_CANDIDATES) break;
-            if (tryClaimSheepForVillage(level, sheep, villageId)) managed.add(sheep);
-        }
-        return managed;
+        return candidates.size() > MAX_SHEEP_SCAN ? List.copyOf(candidates.subList(0, MAX_SHEEP_SCAN)) : List.copyOf(candidates);
     }
 
-    private static Sheep findReadySheep(Villager worker, ServerLevel level) {
-        BlockPos center = ownershipCenter(worker);
+    private static Sheep findNearestHerdableSheep(Villager herder, ServerLevel level, BlockPos center) {
+        return findHerdableSheep(level, center).stream()
+            .filter(sheep -> !isInsideVillagePen(level, center, sheep))
+            .filter(sheep -> canReach(herder, sheep))
+            .min(Comparator.comparingDouble(herder::distanceToSqr))
+            .orElse(null);
+    }
+
+    private static Sheep findReadySheep(Villager worker, ServerLevel level, BlockPos center) {
+        UUID villageId = VillageRegistry.villageId(level, center);
+        if (villageId == null) return null;
         List<Villager> residents = VillageArea.findVillagers(level, center);
         Map<Item, Integer> woolCounts = countVillageWool(level, center, residents);
-        return findManagedSheep(level, center).stream()
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        BlockPos site = checkpoint == null ? null : new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        if (site == null) return null;
+        AABB inside = new AABB(site.offset(1, 0, 1), site.offset(4, 2, 4));
+        return level.getEntitiesOfClass(Sheep.class, inside,
+                sheep -> sheep.isAlive() && !sheep.isBaby()
+                    && villageId.toString().equals(sheep.getPersistentData().getString(SHEEP_OWNER_KEY))
+                    && isInsideVillagePen(level, center, sheep))
+            .stream()
             .filter(Sheep::readyForShearing)
             .filter(sheep -> woolCounts.getOrDefault(woolItem(sheep), 0) < 3)
-            .filter(sheep -> findSheepStand(worker, sheep) != null)
+            .filter(sheep -> canReach(worker, sheep))
             .min(Comparator.comparingDouble(worker::distanceToSqr))
             .orElse(null);
     }
 
-    private static boolean isManagedByVillage(ServerLevel level, BlockPos center, Sheep sheep) {
+    private static boolean isOwnedSheepInsidePen(ServerLevel level, BlockPos center, Sheep sheep) {
         UUID owner = VillageRegistry.villageId(level, center);
-        return owner != null && tryClaimSheepForVillage(level, sheep, owner)
-            && sheep.getPersistentData().getString(SHEEP_OWNER_KEY).equals(owner.toString());
+        return owner != null && owner.toString().equals(sheep.getPersistentData().getString(SHEEP_OWNER_KEY))
+            && isInsideVillagePen(level, center, sheep);
+    }
+
+    private static int countOwnedSheepInsidePen(ServerLevel level, BlockPos center) {
+        UUID owner = VillageRegistry.villageId(level, center);
+        var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
+        if (owner == null || checkpoint == null || !hasCompletePen(level, center)) return 0;
+        BlockPos site = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
+        AABB inside = new AABB(site.offset(1, 0, 1), site.offset(4, 2, 4));
+        return level.getEntitiesOfClass(Sheep.class, inside,
+            sheep -> sheep.isAlive() && !sheep.isBaby()
+                && owner.toString().equals(sheep.getPersistentData().getString(SHEEP_OWNER_KEY))
+                && isInsideVillagePen(level, center, sheep)).size();
     }
 
     private static boolean hasAvailableBed(ServerLevel level, BlockPos center, List<Villager> residents) {
@@ -447,17 +756,48 @@ public final class VillageLivestock {
                     || order.state() == com.abs.livingvillages.domain.VillageWorkOrderModel.READY));
     }
 
-    private static boolean hasShearsInOwnedStorage(ServerLevel level, BlockPos center) {
-        return findStorages(level, center, null).stream()
-            .anyMatch(ref -> countItem(ref.container(), Items.SHEARS) > 0);
-    }
-
     private static boolean hasWoolInInventory(Villager villager) {
         for (int slot = 0; slot < villager.getInventory().getContainerSize(); slot++) {
             ItemStack stack = villager.getInventory().getItem(slot);
             if (!stack.isEmpty() && isWool(stack.getItem())) return true;
         }
         return false;
+    }
+
+    private static boolean hasWheatInHand(Villager villager) {
+        return villager.getMainHandItem().is(Items.WHEAT);
+    }
+
+    private static boolean equipWheatFromInventory(Villager villager) {
+        if (hasWheatInHand(villager)) return true;
+        if (!villager.getMainHandItem().isEmpty()) return false;
+        ItemStack wheat = removeOne(villager.getInventory(), Items.WHEAT);
+        if (wheat.isEmpty()) return false;
+        villager.setItemInHand(InteractionHand.MAIN_HAND, wheat);
+        villager.getInventory().setChanged();
+        return true;
+    }
+
+    private static void returnWheatToInventory(Villager villager) {
+        ItemStack held = villager.getMainHandItem();
+        if (!held.is(Items.WHEAT)) return;
+        ItemStack copy = held.copy();
+        villager.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        ItemStack remaining = villager.getInventory().addItem(copy);
+        if (!remaining.isEmpty()) villager.spawnAtLocation(remaining);
+        villager.getInventory().setChanged();
+    }
+
+    private static void collectNearbyWool(Villager worker, ServerLevel level, Sheep sheep) {
+        AABB area = sheep.getBoundingBox().inflate(1.8D, 1.3D, 1.8D);
+        List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, area,
+            item -> item.isAlive() && !item.getItem().isEmpty() && isWool(item.getItem().getItem()));
+        for (ItemEntity drop : drops) {
+            ItemStack remainder = worker.getInventory().addItem(drop.getItem().copy());
+            if (remainder.isEmpty()) drop.discard();
+            else drop.setItem(remainder);
+        }
+        worker.getInventory().setChanged();
     }
 
     private static Item woolItem(Sheep sheep) {
@@ -476,63 +816,211 @@ public final class VillageLivestock {
         UUID targetId;
         try { targetId = UUID.fromString(uuidText); }
         catch (RuntimeException ignored) { return null; }
-        AABB area = worker.getBoundingBox().inflate(24.0D, 8.0D, 24.0D);
+        AABB area = worker.getBoundingBox().inflate(36.0D, 10.0D, 36.0D);
         return level.getEntitiesOfClass(Sheep.class, area,
             candidate -> candidate.isAlive() && candidate.getUUID().equals(targetId)).stream()
             .findFirst().orElse(null);
     }
 
-    private static BlockPos findSheepStand(Villager worker, Sheep sheep) {
-        ServerLevel level = (ServerLevel) worker.level();
-        List<BlockPos> stands = new ArrayList<>();
-        BlockPos origin = sheep.blockPosition();
-        for (int dx = -4; dx <= 4; dx++) {
-            for (int dz = -4; dz <= 4; dz++) {
-                for (int dy = -1; dy <= 1; dy++) {
-                    BlockPos stand = origin.offset(dx, dy, dz);
-                    if (!isSafeStand(level, stand)
-                        || worker.distanceToSqr(Vec3.atCenterOf(stand)) >= 24.0D * 24.0D
-                        || Vec3.atCenterOf(stand).distanceToSqr(sheep.position()) > INTERACTION_DISTANCE_SQR) continue;
-                    var path = worker.getNavigation().createPath(stand, 0);
-                    if (path != null && path.canReach()) stands.add(stand.immutable());
-                }
-            }
+    private static void orderEntityRoute(Villager villager, Sheep sheep, CompoundTag data, long now) {
+        boolean wrongTarget = villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET)
+            .map(walk -> !walk.getTarget().currentBlockPosition().equals(sheep.blockPosition())).orElse(true);
+        if (wrongTarget || now - data.getLong(LAST_ORDER) >= ROUTE_REISSUE_TICKS) {
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(sheep, WALK_SPEED, 2));
+            data.putLong(LAST_ORDER, now);
         }
-        stands.sort(Comparator.comparingDouble(pos -> worker.distanceToSqr(Vec3.atCenterOf(pos))));
-        return stands.isEmpty() ? null : stands.get(0);
     }
 
-    private static void collectNearbyWool(Villager worker, ServerLevel level, Sheep sheep) {
-        AABB area = sheep.getBoundingBox().inflate(1.5D, 1.0D, 1.5D);
-        List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, area,
-            entity -> entity.isAlive() && !entity.getItem().isEmpty() && isWool(entity.getItem().getItem()));
-        for (ItemEntity drop : drops) {
-            ItemStack remainder = worker.getInventory().addItem(drop.getItem().copy());
-            if (remainder.isEmpty()) drop.discard();
-            else drop.setItem(remainder);
+    private static void orderBlockRoute(Villager villager, BlockPos target, CompoundTag data, long now) {
+        boolean wrongTarget = villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET)
+            .map(walk -> !walk.getTarget().currentBlockPosition().equals(target)).orElse(true);
+        if (wrongTarget || now - data.getLong(LAST_ORDER) >= ROUTE_REISSUE_TICKS) {
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target, WALK_SPEED, 1));
+            data.putLong(LAST_ORDER, now);
         }
-        worker.getInventory().setChanged();
     }
 
-    private static void fetchShears(Villager worker, Container storage) {
-        if (countItem(worker.getInventory(), Items.SHEARS) > 0) return;
-        if (countItem(storage, Items.SHEARS) < 1 || inventoryCapacityFor(worker.getInventory(), Items.SHEARS) < 1) return;
-        ItemStack removed = removeOne(storage, Items.SHEARS);
-        if (removed.isEmpty()) return;
-        ItemStack remainder = worker.getInventory().addItem(removed);
-        if (!remainder.isEmpty()) insert(storage, remainder);
-        worker.getInventory().setChanged();
+    private static boolean canReach(Villager villager, Sheep sheep) {
+        var path = villager.getNavigation().createPath(sheep, 2);
+        return path != null && path.canReach();
     }
 
-    private static void depositWool(Villager worker, Container storage) {
-        Container inventory = worker.getInventory();
+    private static boolean canReach(Villager villager, BlockPos pos) {
+        var path = villager.getNavigation().createPath(pos, 0);
+        return path != null && path.canReach();
+    }
+
+    private static boolean canSeeSheep(ServerLevel level, net.minecraft.world.entity.LivingEntity observer, Sheep sheep) {
+        HitResult hit = level.clip(new ClipContext(
+            observer.getEyePosition(), sheep.getEyePosition(),
+            ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, observer));
+        return hit.getType() == HitResult.Type.MISS
+            || (hit instanceof net.minecraft.world.phys.BlockHitResult blockHit
+                && blockHit.getBlockPos().distSqr(sheep.blockPosition()) <= 1);
+    }
+
+    private static boolean canSeeSheep(ServerLevel level, Sheep sheep, Villager herder) {
+        return canSeeSheep(level, herder, sheep);
+    }
+
+    private static boolean openPenGate(ServerLevel level, BlockPos center) {
+        BlockPos gatePos = penGatePosition(level, center);
+        if (gatePos == null || !level.hasChunkAt(gatePos)) return false;
+        BlockState gate = level.getBlockState(gatePos);
+        if (!(gate.getBlock() instanceof FenceGateBlock)) return false;
+        if (!gate.getValue(FenceGateBlock.OPEN)) {
+            level.setBlock(gatePos, gate.setValue(FenceGateBlock.OPEN, true), 3);
+        }
+        return true;
+    }
+
+    private static void closePenGate(ServerLevel level, BlockPos center) {
+        BlockPos gatePos = penGatePosition(level, center);
+        if (gatePos == null || !level.hasChunkAt(gatePos)) return;
+        BlockState gate = level.getBlockState(gatePos);
+        if (gate.getBlock() instanceof FenceGateBlock && gate.getValue(FenceGateBlock.OPEN)) {
+            level.setBlock(gatePos, gate.setValue(FenceGateBlock.OPEN, false), 3);
+        }
+    }
+
+    private static boolean isSafeStand(ServerLevel level, BlockPos pos) {
+        return level.hasChunkAt(pos) && level.hasChunkAt(pos.above()) && level.hasChunkAt(pos.below())
+            && (level.getBlockState(pos).isAir() || level.getBlockState(pos).canBeReplaced())
+            && (level.getBlockState(pos.above()).isAir() || level.getBlockState(pos.above()).canBeReplaced())
+            && level.getBlockState(pos.below()).blocksMotion();
+    }
+
+    private static boolean hasHigherPriorityTask(CompoundTag data) {
+        return data.getBoolean("livingvillages_treework_active")
+            || data.getBoolean("livingvillages_treework_replant_active")
+            || data.getBoolean("livingvillages_mining_active")
+            || data.getBoolean("livingvillages_defense_has_route")
+            || data.getBoolean("livingvillages_logistics_active")
+            || data.getBoolean("livingvillages_industry_route_active")
+            || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
+            || data.getBoolean(VillageBuilder.ACTIVE_KEY)
+            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
+            || data.getBoolean(VillagePopulation.ACTIVE_KEY)
+            || data.getBoolean("livingvillages_autonomy_target_active");
+    }
+
+    private static boolean isNightOrSleeping(ServerLevel level, Villager villager) {
+        long day = Math.floorMod(level.getDayTime(), 24000L);
+        return villager.isSleeping() || day < 1000L || day >= 12000L;
+    }
+
+    private static BlockPos ownershipCenter(Villager villager) {
+        BlockPos home = VillagerRoles.getHome(villager);
+        return home == null ? villager.blockPosition() : home;
+    }
+
+    private static boolean hasShearsInOwnedStorage(ServerLevel level, BlockPos center) {
+        return findStorages(level, center, null).stream()
+            .anyMatch(ref -> countItem(ref.container(), Items.SHEARS) > 0);
+    }
+
+    private static ItemStack firstShears(Container inventory) {
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.getItem(slot);
-            if (stack.isEmpty() || !isWool(stack.getItem())) continue;
-            int moved = insert(storage, stack.copy());
-            if (moved > 0) stack.shrink(moved);
+            if (stack.is(Items.SHEARS) && !stack.isEmpty()) return stack;
         }
-        inventory.setChanged();
+        return null;
+    }
+
+    private static void setStorageRoute(Villager worker, CompoundTag data, StorageTarget target, int kind, long now) {
+        clearStorageRoute(worker, data);
+        if (!VillageReservations.tryAddStorageReservation((ServerLevel) worker.level(), worker, target.storage(), "livestock")) return;
+        data.putBoolean(ROUTE_ACTIVE, true);
+        data.putInt(ROUTE_KIND, kind);
+        data.putInt(ROUTE_STORAGE_X, target.storage().getX());
+        data.putInt(ROUTE_STORAGE_Y, target.storage().getY());
+        data.putInt(ROUTE_STORAGE_Z, target.storage().getZ());
+        data.putInt(ROUTE_STAND_X, target.stand().getX());
+        data.putInt(ROUTE_STAND_Y, target.stand().getY());
+        data.putLong(ROUTE_STARTED, now);
+        data.putLong(LAST_ORDER, now);
+        worker.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target.stand(), WALK_SPEED, 1));
+    }
+
+    private static void continueStorageRoute(Villager worker, ServerLevel level, CompoundTag data, long now) {
+        BlockPos storagePos = routeStorage(data);
+        BlockPos stand = routeStand(data);
+        if (now - data.getLong(ROUTE_STARTED) > ROUTE_TIMEOUT_TICKS
+            || !level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
+            || !VillageRegistry.isStorageForVillage(level, ownershipCenter(worker), storagePos)
+            || !VillageReservations.isStorageAvailable(level, storagePos, worker)
+            || !(level.getBlockEntity(storagePos) instanceof Container storage)) {
+            clearStorageRoute(worker, data);
+            VillageReservations.release(data, "livestock");
+            recordFailure(data, now);
+            return;
+        }
+
+        if (worker.distanceToSqr(Vec3.atCenterOf(stand)) > 2.8D * 2.8D) {
+            orderBlockRoute(worker, stand, data, now);
+            return;
+        }
+
+        int kind = data.getInt(ROUTE_KIND);
+        if (kind == ROUTE_FETCH_WHEAT) {
+            int amount = Math.min(WHEAT_WITHDRAWAL, Math.min(countItem(storage, Items.WHEAT),
+                inventoryCapacityFor(worker.getInventory(), Items.WHEAT)));
+            transferFromStorage(storage, worker.getInventory(), Items.WHEAT, amount);
+        } else if (kind == ROUTE_FETCH_SHEARS) {
+            if (countItem(worker.getInventory(), Items.SHEARS) == 0) {
+                transferFromStorage(storage, worker.getInventory(), Items.SHEARS, 1);
+            }
+        } else if (kind == ROUTE_DELIVER_WOOL) {
+            depositWool(worker.getInventory(), storage);
+        }
+        storage.setChanged();
+        worker.getInventory().setChanged();
+        VillageReservations.release(data, "livestock");
+        clearStorageRoute(worker, data);
+        data.putLong(NEXT_ACTION, now + 20L);
+    }
+
+    private static void clearStorageRoute(Villager worker, CompoundTag data) {
+        if (data.getBoolean(ROUTE_ACTIVE)) {
+            BlockPos stand = routeStand(data);
+            clearOwnedWalkTarget(worker, stand);
+        }
+        data.putBoolean(ROUTE_ACTIVE, false);
+        data.remove(ROUTE_KIND); data.remove(ROUTE_STORAGE_X); data.remove(ROUTE_STORAGE_Y); data.remove(ROUTE_STORAGE_Z);
+        data.remove(ROUTE_STAND_X); data.remove(ROUTE_STAND_Y); data.remove(ROUTE_STARTED);
+    }
+
+    private static void pauseOwnedRoute(Villager worker, CompoundTag data) {
+        if (data.getBoolean(ROUTE_ACTIVE)) clearOwnedWalkTarget(worker, routeStand(data));
+        if (VillagerRoles.isHerder(worker) && hasWheatInHand(worker)) return;
+        // A pause does not delete or consume the physical bait/tool/cargo.
+    }
+
+    private static void clearOwnedWalkTarget(Villager worker, BlockPos target) {
+        if (target == null) return;
+        worker.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
+            if (walk.getTarget().currentBlockPosition().equals(target)) {
+                worker.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+            }
+        });
+    }
+
+    private static void orderEntityRoute(Villager villager, Sheep sheep, CompoundTag data, long now) {
+        boolean wrongTarget = villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET)
+            .map(walk -> !walk.getTarget().currentBlockPosition().equals(sheep.blockPosition())).orElse(true);
+        if (wrongTarget || now - data.getLong(LAST_ORDER) >= ROUTE_REISSUE_TICKS) {
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(sheep, WALK_SPEED, 2));
+            data.putLong(LAST_ORDER, now);
+        }
+    }
+
+    private static void orderBlockRoute(Villager villager, BlockPos target, CompoundTag data, long now) {
+        boolean wrongTarget = villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET)
+            .map(walk -> !walk.getTarget().currentBlockPosition().equals(target)).orElse(true);
+        if (wrongTarget || now - data.getLong(LAST_ORDER) >= ROUTE_REISSUE_TICKS) {
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target, WALK_SPEED, 1));
+            data.putLong(LAST_ORDER, now);
+        }
     }
 
     private static StorageTarget findNearestStorageWithItem(Villager worker, ServerLevel level, Item item) {
@@ -541,9 +1029,7 @@ public final class VillageLivestock {
         for (StorageRef ref : refs) {
             if (countItem(ref.container(), item) <= 0) continue;
             BlockPos stand = findSafeStand(level, worker, ref.pos());
-            if (stand != null && VillageReservations.tryAddStorageReservation(level, worker, ref.pos(), "livestock")) {
-                return new StorageTarget(ref.pos(), stand);
-            }
+            if (stand != null) return new StorageTarget(ref.pos(), stand);
         }
         return null;
     }
@@ -562,9 +1048,7 @@ public final class VillageLivestock {
             }
             if (!room) continue;
             BlockPos stand = findSafeStand(level, worker, ref.pos());
-            if (stand != null && VillageReservations.tryAddStorageReservation(level, worker, ref.pos(), "livestock")) {
-                return new StorageTarget(ref.pos(), stand);
-            }
+            if (stand != null) return new StorageTarget(ref.pos(), stand);
         }
         return null;
     }
@@ -600,116 +1084,68 @@ public final class VillageLivestock {
         return stands.isEmpty() ? null : stands.get(0);
     }
 
-    private static boolean isSafeStand(ServerLevel level, BlockPos pos) {
-        return level.hasChunkAt(pos) && level.hasChunkAt(pos.above()) && level.hasChunkAt(pos.below())
-            && (level.getBlockState(pos).isAir() || level.getBlockState(pos).canBeReplaced())
-            && (level.getBlockState(pos.above()).isAir() || level.getBlockState(pos.above()).canBeReplaced())
-            && level.getBlockState(pos.below()).blocksMotion();
-    }
-
-    private static void setRoute(Villager worker, CompoundTag data, BlockPos stand, BlockPos target,
-                                 int kind, long now) {
-        clearRoute(worker, data);
-        data.putBoolean(ROUTE_ACTIVE, true);
-        data.putInt(ROUTE_KIND, kind);
-        data.putInt(ROUTE_X, target.getX()); data.putInt(ROUTE_Y, target.getY()); data.putInt(ROUTE_Z, target.getZ());
-        data.putInt(STAND_X, stand.getX()); data.putInt(STAND_Y, stand.getY()); data.putInt(STAND_Z, stand.getZ());
-        data.putLong(ROUTE_STARTED, now);
-        data.putLong(LAST_ROUTE_ORDER, now);
-        worker.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(stand, WALK_SPEED, 1));
-    }
-
-    private static boolean atRouteTarget(Villager worker, BlockPos stand, CompoundTag data, long now) {
-        if (worker.distanceToSqr(Vec3.atCenterOf(stand)) <= 2.8D * 2.8D) {
-            clearOwnedWalkTarget(worker, stand);
-            return true;
-        }
-        reissueRoute(worker, data, stand, now);
-        return false;
-    }
-
-    private static void reissueRoute(Villager worker, CompoundTag data, BlockPos stand, long now) {
-        boolean wrongTarget = worker.getBrain().getMemory(MemoryModuleType.WALK_TARGET)
-            .map(walk -> !walk.getTarget().currentBlockPosition().equals(stand)).orElse(true);
-        if (wrongTarget || now - data.getLong(LAST_ROUTE_ORDER) >= ROUTE_REISSUE_TICKS) {
-            worker.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(stand, WALK_SPEED, 1));
-            data.putLong(LAST_ROUTE_ORDER, now);
+    private static void depositWool(Container inventory, Container storage) {
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack.isEmpty() || !isWool(stack.getItem())) continue;
+            ItemStack offered = stack.copy();
+            int moved = insert(storage, offered);
+            if (moved > 0) stack.shrink(moved);
         }
     }
 
-    private static boolean canSeeTarget(ServerLevel level, Villager worker, Sheep sheep) {
-        net.minecraft.world.phys.HitResult hit = level.clip(new net.minecraft.world.level.ClipContext(
-            worker.getEyePosition(), sheep.getEyePosition(),
-            net.minecraft.world.level.ClipContext.Block.COLLIDER,
-            net.minecraft.world.level.ClipContext.Fluid.NONE, worker));
-        return hit.getType() == net.minecraft.world.phys.HitResult.Type.MISS
-            || (hit instanceof net.minecraft.world.phys.BlockHitResult blockHit
-                && blockHit.getBlockPos().distSqr(sheep.blockPosition()) <= 1);
+    private static void transferFromStorage(Container storage, Container inventory, Item item, int amount) {
+        if (amount <= 0) return;
+        int removed = removeItem(storage, item, amount);
+        if (removed <= 0) return;
+        ItemStack remainder = inventory.addItem(new ItemStack(item, removed));
+        if (!remainder.isEmpty()) {
+            ItemStack returned = remainder.copy();
+            int inserted = insert(storage, returned);
+            if (inserted < remainder.getCount()) {
+                Block.popResource((net.minecraft.world.level.Level) ((Container) storage), BlockPos.ZERO, remainder);
+            }
+        }
     }
 
-    private static void recordRouteFailure(CompoundTag data, long now) {
-        int failures = data.getInt(FAILURES) + 1;
-        if (failures >= MAX_ROUTE_FAILURES) {
-            data.putInt(FAILURES, 0);
+    private static void finishTask(Villager villager, CompoundTag data, long retryAt) {
+        clearStorageRoute(villager, data);
+        VillageReservations.release(data, "livestock");
+        returnWheatToInventory(villager);
+        data.putBoolean(ACTIVE_KEY, false);
+        data.putInt(STATE, STATE_IDLE);
+        data.remove(TARGET_SHEEP);
+        data.remove(TASK_STARTED);
+        data.remove(HERD_DEADLINE);
+        data.putLong(NEXT_ACTION, retryAt);
+    }
+
+    private static void recordFailure(CompoundTag data, long now) {
+        int failures = data.getInt("livingvillages_livestock_failures") + 1;
+        if (failures >= 3) {
+            data.putInt("livingvillages_livestock_failures", 0);
             data.putLong(NEXT_ACTION, now + FAILURE_BACKOFF_TICKS);
         } else {
-            data.putInt(FAILURES, failures);
+            data.putInt("livingvillages_livestock_failures", failures);
             data.putLong(NEXT_ACTION, now + RETRY_TICKS);
         }
     }
 
-    private static void pauseOwnedRoute(Villager villager, CompoundTag data) {
-        if (data.getBoolean(ROUTE_ACTIVE)) clearOwnedWalkTarget(villager, routeStand(data));
-    }
-
-    private static void clearRoute(Villager villager, CompoundTag data) {
-        if (data.getBoolean(ROUTE_ACTIVE)) clearOwnedWalkTarget(villager, routeStand(data));
-        data.putBoolean(ROUTE_ACTIVE, false);
-        data.remove(ROUTE_KIND); data.remove(ROUTE_X); data.remove(ROUTE_Y); data.remove(ROUTE_Z);
-        data.remove(STAND_X); data.remove(STAND_Y); data.remove(STAND_Z);
-        data.remove(ROUTE_STARTED); data.remove(LAST_ROUTE_ORDER);
-    }
-
-    private static void clearOwnedWalkTarget(Villager villager, BlockPos stand) {
-        villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
-            if (walk.getTarget().currentBlockPosition().equals(stand)) {
-                villager.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+    private static void clearOwnedWalkTarget(Villager worker, BlockPos target) {
+        if (target == null) return;
+        worker.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
+            if (walk.getTarget().currentBlockPosition().equals(target)) {
+                worker.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
             }
         });
     }
 
-    private static void finishTask(Villager villager, CompoundTag data, long retryAt) {
-        clearRoute(villager, data);
-        VillageReservations.release(data, "livestock");
-        data.putBoolean(ACTIVE_KEY, false);
-        data.remove(TARGET_SHEEP);
-        data.remove(STARTED);
-        data.remove(FAILURES);
-        data.putLong(NEXT_ACTION, retryAt);
-    }
-
-    private static boolean hasHigherPriorityTask(CompoundTag data) {
-        return data.getBoolean("livingvillages_treework_active")
-            || data.getBoolean("livingvillages_treework_replant_active")
-            || data.getBoolean("livingvillages_mining_active")
-            || data.getBoolean("livingvillages_defense_has_route")
-            || data.getBoolean("livingvillages_logistics_active")
-            || data.getBoolean("livingvillages_industry_route_active")
-            || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
-            || data.getBoolean(VillageBuilder.ACTIVE_KEY)
-            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
-            || data.getBoolean(VillagePopulation.ACTIVE_KEY)
-            || data.getBoolean("livingvillages_autonomy_target_active");
-    }
-
-    private static boolean isNightOrSleeping(ServerLevel level, Villager villager) {
-        long day = Math.floorMod(level.getDayTime(), 24000L);
-        return villager.isSleeping() || day < 1000L || day >= 12000L;
-    }
-
-    private static BlockPos ownershipCenter(Villager villager) {
-        BlockPos home = VillagerRoles.getHome(villager);
-        return home == null ? villager.blockPosition() : home;
+    private static boolean hasWoolInInventory(Villager villager) {
+        for (int slot = 0; slot < villager.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = villager.getInventory().getItem(slot);
+            if (!stack.isEmpty() && isWool(stack.getItem())) return true;
+        }
+        return false;
     }
 
     private static ItemStack firstShears(Container inventory) {
@@ -728,12 +1164,26 @@ public final class VillageLivestock {
     }
 
     private static int countItem(Container container, Item item) {
+        if (container == null || item == null || item == Items.AIR) return 0;
         int total = 0;
         for (int slot = 0; slot < container.getContainerSize(); slot++) {
             ItemStack stack = container.getItem(slot);
             if (stack.is(item)) total += stack.getCount();
         }
         return total;
+    }
+
+    private static int removeItem(Container container, Item item, int amount) {
+        int remaining = amount;
+        for (int slot = 0; slot < container.getContainerSize() && remaining > 0; slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (!stack.is(item)) continue;
+            int take = Math.min(remaining, stack.getCount());
+            container.removeItem(slot, take);
+            remaining -= take;
+        }
+        if (remaining != amount) container.setChanged();
+        return amount - remaining;
     }
 
     private static int inventoryCapacityFor(Container inventory, Item item) {
@@ -781,24 +1231,37 @@ public final class VillageLivestock {
         return before - offered.getCount();
     }
 
-    private static boolean isWool(Item item) {
-        return item != null && item != Items.AIR
-            && Block.byItem(item).defaultBlockState().is(net.minecraft.tags.BlockTags.WOOL);
+    private static void clearStorageRoute(Villager worker, CompoundTag data) {
+        if (data.getBoolean(ROUTE_ACTIVE)) {
+            clearOwnedWalkTarget(worker, routeStand(data));
+        }
+        data.putBoolean(ROUTE_ACTIVE, false);
+        data.remove(ROUTE_KIND); data.remove(ROUTE_STORAGE_X); data.remove(ROUTE_STORAGE_Y); data.remove(ROUTE_STORAGE_Z);
+        data.remove(ROUTE_STAND_X); data.remove(ROUTE_STAND_Y); data.remove(ROUTE_STARTED);
     }
 
-    private static BlockPos routeTarget(CompoundTag data) {
-        return new BlockPos(data.getInt(ROUTE_X), data.getInt(ROUTE_Y), data.getInt(ROUTE_Z));
+    private static BlockPos routeStorage(CompoundTag data) {
+        return new BlockPos(data.getInt(ROUTE_STORAGE_X), data.getInt(ROUTE_STORAGE_Y), data.getInt(ROUTE_STORAGE_Z));
     }
 
     private static BlockPos routeStand(CompoundTag data) {
-        return new BlockPos(data.getInt(STAND_X), data.getInt(STAND_Y), data.getInt(STAND_Z));
+        return new BlockPos(data.getInt(ROUTE_STAND_X), data.getInt(ROUTE_STAND_Y), data.getInt(ROUTE_STAND_Z));
     }
 
     private static boolean isStorage(BlockState state) {
         return state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.BARREL);
     }
 
-    private record VillageCandidate(BlockPos center, long distanceSquared) {}
+    private static BlockPos ownershipCenter(Villager villager) {
+        BlockPos home = VillagerRoles.getHome(villager);
+        return home == null ? villager.blockPosition() : home;
+    }
+
+    private static boolean isNightOrSleeping(ServerLevel level, Villager villager) {
+        long day = Math.floorMod(level.getDayTime(), 24000L);
+        return villager.isSleeping() || day < 1000L || day >= 12000L;
+    }
+
     private record StorageRef(BlockPos pos, Container container) {}
     private record StorageTarget(BlockPos storage, BlockPos stand) {}
 }
