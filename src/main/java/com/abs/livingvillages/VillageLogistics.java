@@ -355,8 +355,8 @@ public final class VillageLogistics {
             || data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY)
             || data.getBoolean("livingvillages_industry_route_active")
             || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
+            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
             || data.getBoolean(VillageLivestock.ACTIVE_KEY);
-            || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY);
     }
 
     private static boolean isNight(ServerLevel level) {
