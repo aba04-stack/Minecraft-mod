@@ -18,8 +18,8 @@ for marker in (
     "button.getY() < panelTop + 120",
     "button.getY() + button.getHeight() > panelTop + PANEL_HEIGHT - 2",
     "children().size() != 7",
-    "button.getX() + button.getWidth() > width",
-    "button.getY() + button.getHeight() > height",
+    "button.getX() + button.getWidth() > panelLeft + PANEL_WIDTH",
+    "panelTop + PANEL_HEIGHT > height",
     "LIVING_VILLAGES_ELDER_SCREEN_SMOKE_PASS:",
     "LIVING_VILLAGES_ELDER_SCREEN_SMOKE_FAIL:",
 ):

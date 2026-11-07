@@ -25,7 +25,7 @@ for marker in (
     "Items.COMPOSTER, 1",
     "Items.BREAD, 4",
     "createDesertStarterKit()",
-    "canFitBundle(destination.container(), bundle)",
+    "canFitBundle(ref.container(), bundle)",
     "restoreContainer(destinationContainer, before)",
 ):
     assert marker in INDUSTRY or marker in CONFIG, f"missing desert starter marker: {marker}"
