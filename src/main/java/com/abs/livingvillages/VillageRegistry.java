@@ -61,6 +61,7 @@ public final class VillageRegistry extends SavedData {
     private final Map<Long, UUID> bedOwners = new HashMap<>();
     private final Map<Long, UUID> workBlockOwners = new HashMap<>();
     private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> houseCheckpoints = new HashMap<>();
+    private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> livestockPenCheckpoints = new HashMap<>();
     private final Map<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> farmCheckpoints = new HashMap<>();
     private final Map<UUID, Long> villageAlarms = new HashMap<>();
     private final Map<String, Integer> diplomaticStandings = new HashMap<>();
@@ -400,6 +401,18 @@ public final class VillageRegistry extends SavedData {
                 entry.getLong("updatedTick")
             ));
         }
+        ListTag livestockPenTags = tag.getList("livestockPenCheckpoints", Tag.TAG_COMPOUND);
+        for (int i = 0; i < livestockPenTags.size(); i++) {
+            CompoundTag entry = livestockPenTags.getCompound(i);
+            UUID id = parseUuid(entry.getString("village"));
+            if (id == null) continue;
+            data.livestockPenCheckpoints.put(id, new com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint(
+                "animal_pen", entry.getInt("siteX"), entry.getInt("siteY"), entry.getInt("siteZ"),
+                entry.getString("primaryMaterial"), entry.getString("secondaryMaterial"),
+                entry.getInt("stepIndex"), entry.getInt("totalSteps"),
+                entry.getString("ownerWorker"), entry.getLong("updatedTick")
+            ));
+        }
         ListTag farmCheckpointTags = tag.getList("farmCheckpoints", Tag.TAG_COMPOUND);
         for (int i = 0; i < farmCheckpointTags.size(); i++) {
             CompoundTag entry = farmCheckpointTags.getCompound(i);
@@ -510,6 +523,24 @@ public final class VillageRegistry extends SavedData {
             farmCheckpointTags.add(value);
         }
         tag.put("farmCheckpoints", farmCheckpointTags);
+        ListTag livestockPenTags = new ListTag();
+        for (Map.Entry<UUID, com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint> entry : livestockPenCheckpoints.entrySet()) {
+            var cp = entry.getValue();
+            if (cp == null) continue;
+            CompoundTag value = new CompoundTag();
+            value.putString("village", entry.getKey().toString());
+            value.putInt("siteX", cp.siteX());
+            value.putInt("siteY", cp.siteY());
+            value.putInt("siteZ", cp.siteZ());
+            value.putString("primaryMaterial", cp.primaryMaterialId());
+            value.putString("secondaryMaterial", cp.secondaryMaterialId());
+            value.putInt("stepIndex", cp.stepIndex());
+            value.putInt("totalSteps", cp.totalSteps());
+            value.putString("ownerWorker", cp.ownerWorkerId());
+            value.putLong("updatedTick", cp.updatedTick());
+            livestockPenTags.add(value);
+        }
+        tag.put("livestockPenCheckpoints", livestockPenTags);
         ListTag standingTags = new ListTag();
         for (Map.Entry<String, Integer> entry : diplomaticStandings.entrySet()) {
             CompoundTag value = new CompoundTag();
@@ -560,6 +591,38 @@ public final class VillageRegistry extends SavedData {
         UUID id = villageId(level, center);
         if (id == null) return null;
         return get(level).houseCheckpoints.get(id);
+    }
+
+    public static void recordLivestockPenCheckpoint(
+        ServerLevel level,
+        BlockPos center,
+        com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint checkpoint
+    ) {
+        if (level == null || center == null || checkpoint == null
+            || !"animal_pen".equals(checkpoint.projectKind())) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        VillageRegistry registry = get(level);
+        registry.livestockPenCheckpoints.put(id, checkpoint);
+        registry.setDirty();
+    }
+
+    public static void clearLivestockPenCheckpoint(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return;
+        UUID id = villageId(level, center);
+        if (id == null) return;
+        VillageRegistry registry = get(level);
+        if (registry.livestockPenCheckpoints.remove(id) != null) registry.setDirty();
+    }
+
+    public static com.abs.livingvillages.domain.SettlementSimulationModel.ProjectCheckpoint getLivestockPenCheckpoint(
+        ServerLevel level,
+        BlockPos center
+    ) {
+        if (level == null || center == null) return null;
+        UUID id = villageId(level, center);
+        if (id == null) return null;
+        return get(level).livestockPenCheckpoints.get(id);
     }
 
     public static void recordFarmCheckpoint(
