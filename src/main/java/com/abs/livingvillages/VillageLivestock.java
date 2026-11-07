@@ -338,7 +338,8 @@ public final class VillageLivestock {
         if (VillageRegistry.countAvailableOwnedStorageItems(level, center, Set.of("minecraft:wheat"))
             .getOrDefault("minecraft:wheat", 0) > 0) return true;
         return VillageArea.findVillagers(level, center).stream()
-            .anyMatch(resident -> countItem(resident.getInventory(), Items.WHEAT) > 0);
+            .anyMatch(resident -> isResidentAvailableForTransfer(resident)
+                && countItem(resident.getInventory(), Items.WHEAT) > 0);
     }
 
     public static boolean hasHerderWorkAvailable(ServerLevel level, BlockPos center) {
@@ -443,7 +444,14 @@ public final class VillageLivestock {
             return;
         }
 
-        // Do not let a missing bait supply block a real wool/bed shortage when usable shears exist.
+        // When real wheat is available, complete the minimum herd before repeatedly retrying
+        // a sheep that has already been sheared. If no usable bait exists, do not block wool
+        // collection from a sheep already inside the pen.
+        if (needsHerding(level, center) && hasWheatAvailable(level, center)) {
+            runHerding(villager, level, center, data, now);
+            return;
+        }
+
         if (needsWoolForHousing(level, center) && hasShearsAvailable(level, center)) {
             runShearing(villager, level, center, data, now);
             return;
@@ -921,11 +929,28 @@ public final class VillageLivestock {
 
     private static boolean equipWheatFromInventory(Villager villager) {
         if (hasWheatInHand(villager)) return true;
-        if (!villager.getMainHandItem().isEmpty()) return false;
-        ItemStack wheat = removeOne(villager.getInventory(), Items.WHEAT);
-        if (wheat.isEmpty()) return false;
+        Container inventory = villager.getInventory();
+        if (countItem(inventory, Items.WHEAT) <= 0) return false;
+
+        // A carried item may already occupy the hand. Move that exact stack into the
+        // inventory only if the whole stack fits; never overwrite or drop it to equip bait.
+        ItemStack held = villager.getMainHandItem();
+        if (!held.isEmpty()) {
+            ItemStack remainder = inventory.addItem(held.copy());
+            if (!remainder.isEmpty()) return false;
+            villager.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        }
+
+        ItemStack wheat = removeOne(inventory, Items.WHEAT);
+        if (wheat.isEmpty()) {
+            if (!held.isEmpty()) {
+                ItemStack restore = inventory.removeItem(inventory.getContainerSize() - 1, 0);
+                villager.setItemInHand(InteractionHand.MAIN_HAND, held);
+            }
+            return false;
+        }
         villager.setItemInHand(InteractionHand.MAIN_HAND, wheat);
-        villager.getInventory().setChanged();
+        inventory.setChanged();
         return true;
     }
 
