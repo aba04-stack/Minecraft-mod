@@ -86,6 +86,8 @@ public final class LivingVillages {
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalDamaged);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onBabySpawn);
         NeoForge.EVENT_BUS.addListener(VillageAnimalAI::onAnimalInteract);
+        // Low-priority leisure runs after survival, profession, logistics and animal controllers.
+        NeoForge.EVENT_BUS.addListener(VillageDailyLife::onVillagerTick);
     }
 
     private void onServerStarting(ServerStartingEvent event) {
