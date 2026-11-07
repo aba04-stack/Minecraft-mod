@@ -44,6 +44,10 @@ public final class VillageReservationGameTests {
         BlockPos feet = helper.absolutePos(new BlockPos(3, 2, 3));
         BlockPos roof = feet.above(5);
         helper.getLevel().setBlock(feet.below(), Blocks.STONE.defaultBlockState(), 3);
+        // The shared empty GameTest template contains barrier placeholders in some interior cells.
+        // Clear both body blocks explicitly so the safety predicate sees a real walkable air node.
+        helper.getLevel().setBlock(feet, Blocks.AIR.defaultBlockState(), 3);
+        helper.getLevel().setBlock(feet.above(), Blocks.AIR.defaultBlockState(), 3);
         helper.getLevel().setBlock(roof, Blocks.STONE.defaultBlockState(), 3);
         int measuredSurfaceY = helper.getLevel().getHeight(
             net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
@@ -1064,13 +1068,35 @@ public final class VillageReservationGameTests {
         chestOne.setItem(0, new ItemStack(Items.BREAD, 16));
         chestTwo.setItem(0, new ItemStack(Items.OAK_PLANKS, 32));
 
+        StringBuilder nearbyFoodChests = new StringBuilder();
+        BlockPos snapshotCenter = elderOne.blockPosition();
+        int foodRadius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
+        for (BlockPos scan : BlockPos.betweenClosed(
+            snapshotCenter.offset(-foodRadius, -8, -foodRadius),
+            snapshotCenter.offset(foodRadius, 8, foodRadius))) {
+            BlockState state = helper.getLevel().getBlockState(scan);
+            if (!(state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.BARREL))) continue;
+            if (!(helper.getLevel().getBlockEntity(scan) instanceof Container container)) continue;
+            int foodAtChest = 0;
+            for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                ItemStack stack = container.getItem(slot);
+                if (stack.is(Items.BREAD)) foodAtChest += stack.getCount() * 4;
+                else if (stack.is(Items.CARROT) || stack.is(Items.POTATO) || stack.is(Items.BEETROOT)) foodAtChest += stack.getCount();
+            }
+            if (foodAtChest > 0) {
+                boolean owned = VillageRegistry.isStorageForVillage(helper.getLevel(), snapshotCenter, scan);
+                nearbyFoodChests.append(scan).append("=").append(foodAtChest)
+                    .append("/owned=").append(owned).append("; ");
+            }
+        }
         var snapshotOne = VillageElder.createPanelSnapshot(helper.getLevel(), elderOne, null);
         helper.assertTrue(snapshotOne.population() == 4 && snapshotOne.foodPoints() == 64,
             "Elder panel snapshot expected population=4/food=64 but got population=" + snapshotOne.population()
                 + ", adults=" + snapshotOne.adults() + ", food=" + snapshotOne.foodPoints()
                 + ", elderPos=" + elderOne.blockPosition() + ", groupOne=" + groupOne.size()
-                + ", chestOwned=" + VillageRegistry.isStorageForVillage(helper.getLevel(), elderOne.blockPosition(), storageOne)
-                + ", chestHasEntity=" + (helper.getLevel().getBlockEntity(storageOne) instanceof Container));
+                + ", ownChest=" + storageOne + ", ownChestEntity=" + (helper.getLevel().getBlockEntity(storageOne) instanceof Container)
+                + ", otherVillageChestOwned=" + VillageRegistry.isStorageForVillage(helper.getLevel(), snapshotCenter, storageTwo)
+                + ", nearbyFoodChests=[" + nearbyFoodChests + "]");
 
         helper.assertTrue(
             VillageRegistry.executeNeighborTradeIfEligible(helper.getLevel(), centerOne, centerTwo, 4, 8),
