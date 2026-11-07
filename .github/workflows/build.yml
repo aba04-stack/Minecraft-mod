@@ -5,6 +5,12 @@ on:
     branches: [main, 'arena/**', 'feature/**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish the playable GitHub Release after a separately reviewed release build"
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: living-villages-${{ github.event.pull_request.number || github.ref }}
@@ -93,7 +99,9 @@ jobs:
           path: build/libs/livingvillages-0.15.0.jar
           if-no-files-found: error
       - name: Publish playable GitHub Release and JAR blob
-        if: startsWith(github.ref_name, 'arena/') || github.ref_name == 'main'
+        # Never publish/overwrite a release on a normal push or PR merge.
+        # A release must be an explicit manual action after a reviewed release build.
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
