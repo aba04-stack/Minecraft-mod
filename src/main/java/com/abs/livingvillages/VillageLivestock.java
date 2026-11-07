@@ -2,6 +2,7 @@ package com.abs.livingvillages;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -30,6 +31,7 @@ import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -298,16 +300,72 @@ public final class VillageLivestock {
         return false;
     }
 
-    static boolean tryClaimSheepForVillage(ServerLevel level, Sheep sheep, UUID villageId) {
-        if (level == null || sheep == null || villageId == null || !sheep.isAlive()
-            || !isInsideClosedPen(level, sheep.blockPosition())) return false;
-        CompoundTag data = sheep.getPersistentData();
-        String currentOwner = data.getString(SHEEP_OWNER_KEY);
-        if (currentOwner.isBlank()) {
-            data.putString(SHEEP_OWNER_KEY, villageId.toString());
-            return true;
+    /**
+     * Explicitly adopts a sheep into the only unambiguous nearby village. A player must
+     * crouch-right-click an unowned sheep while it is inside a closed pen. We never claim
+     * nearby livestock automatically: this prevents stealing a player's or neighbor's sheep.
+     */
+    public static UUID adoptSheepForNearestVillage(ServerLevel level, Sheep sheep) {
+        if (level == null || sheep == null || !sheep.isAlive()
+            || !isInsideClosedPen(level, sheep.blockPosition())) return null;
+
+        String existingOwner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
+        int radius = Math.max(16, Math.min(64, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()));
+        AABB area = new AABB(sheep.blockPosition()).inflate(radius, 12.0D, radius);
+        List<Villager> nearby = level.getEntitiesOfClass(Villager.class, area,
+            villager -> villager.isAlive() && !villager.isBaby()
+                && villager.distanceToSqr(sheep) <= (double) radius * radius);
+        Map<UUID, VillageCandidate> villages = new HashMap<>();
+
+        for (Villager resident : nearby) {
+            BlockPos center = VillagerRoles.getHome(resident);
+            if (center == null) {
+                GlobalPos home = resident.getBrain().getMemory(MemoryModuleType.HOME).orElse(null);
+                if (home != null && home.dimension().equals(level.dimension())) center = home.pos();
+            }
+            if (center == null) center = resident.blockPosition();
+            long distance = center.distSqr(sheep.blockPosition());
+            if (distance > (long) radius * radius) continue;
+
+            UUID villageId = VillageRegistry.villageId(level, center);
+            if (villageId == null) continue;
+            VillageCandidate previous = villages.get(villageId);
+            if (previous == null || distance < previous.distanceSquared()) {
+                villages.put(villageId, new VillageCandidate(center.immutable(), distance));
+            }
         }
-        return currentOwner.equals(villageId.toString());
+
+        // Do not guess when two different settlements are close enough to both claim the pen.
+        if (villages.size() != 1) return null;
+        UUID villageId = villages.keySet().iterator().next();
+        VillageCandidate candidate = villages.get(villageId);
+        List<Villager> residents = VillageArea.findVillagers(level, candidate.center());
+        long adults = residents.stream().filter(v -> v.isAlive() && !v.isBaby()).count();
+        if (adults < 2) return null;
+        if (!existingOwner.isBlank() && !existingOwner.equals(villageId.toString())) return null;
+
+        sheep.getPersistentData().putString(SHEEP_OWNER_KEY, villageId.toString());
+        return villageId;
+    }
+
+    /** Only offspring of two sheep already owned by the same village inherit livestock ownership. */
+    static void inheritSheepOwnership(net.minecraft.world.entity.animal.Animal parentA,
+                                      net.minecraft.world.entity.animal.Animal parentB,
+                                      net.minecraft.world.entity.AgeableMob child) {
+        if (!(parentA instanceof Sheep first) || !(parentB instanceof Sheep second)
+            || !(child instanceof Sheep baby) || first.level().isClientSide()
+            || !isInsideClosedPen((ServerLevel) first.level(), baby.blockPosition())) return;
+        String firstOwner = first.getPersistentData().getString(SHEEP_OWNER_KEY);
+        String secondOwner = second.getPersistentData().getString(SHEEP_OWNER_KEY);
+        if (!firstOwner.isBlank() && firstOwner.equals(secondOwner)) {
+            baby.getPersistentData().putString(SHEEP_OWNER_KEY, firstOwner);
+        }
+    }
+
+    static boolean tryClaimSheepForVillage(ServerLevel level, Sheep sheep, UUID villageId) {
+        return level != null && sheep != null && villageId != null && sheep.isAlive()
+            && isInsideClosedPen(level, sheep.blockPosition())
+            && sheep.getPersistentData().getString(SHEEP_OWNER_KEY).equals(villageId.toString());
     }
 
     static boolean shearManagedSheep(ServerLevel level, Sheep sheep, ItemStack shears, UUID villageId) {
@@ -414,25 +472,29 @@ public final class VillageLivestock {
             && Block.byItem(item).defaultBlockState().is(net.minecraft.tags.BlockTags.WOOL);
     }
 
-    private static List<Sheep> findTargetSheep(ServerLevel level, Villager worker, String uuidText) {
+    private static Sheep findTargetSheep(ServerLevel level, Villager worker, String uuidText) {
         UUID targetId;
         try { targetId = UUID.fromString(uuidText); }
-        catch (RuntimeException ignored) { return List.of(); }
+        catch (RuntimeException ignored) { return null; }
         AABB area = worker.getBoundingBox().inflate(24.0D, 8.0D, 24.0D);
         return level.getEntitiesOfClass(Sheep.class, area,
-            candidate -> candidate.isAlive() && candidate.getUUID().equals(targetId));
+            candidate -> candidate.isAlive() && candidate.getUUID().equals(targetId)).stream()
+            .findFirst().orElse(null);
     }
 
     private static BlockPos findSheepStand(Villager worker, Sheep sheep) {
+        ServerLevel level = (ServerLevel) worker.level();
         List<BlockPos> stands = new ArrayList<>();
-        for (int dy = -1; dy <= 1; dy++) {
-            for (Direction direction : Direction.Plane.HORIZONTAL) {
-                BlockPos stand = sheep.blockPosition().relative(direction).above(Math.max(0, dy));
-                if (!isSafeStand((ServerLevel) worker.level(), stand)) continue;
-                var path = worker.getNavigation().createPath(stand, 0);
-                if (path != null && path.canReach()
-                    && worker.distanceToSqr(Vec3.atCenterOf(stand)) < 24.0D * 24.0D) {
-                    stands.add(stand.immutable());
+        BlockPos origin = sheep.blockPosition();
+        for (int dx = -4; dx <= 4; dx++) {
+            for (int dz = -4; dz <= 4; dz++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    BlockPos stand = origin.offset(dx, dy, dz);
+                    if (!isSafeStand(level, stand)
+                        || worker.distanceToSqr(Vec3.atCenterOf(stand)) >= 24.0D * 24.0D
+                        || Vec3.atCenterOf(stand).distanceToSqr(sheep.position()) > INTERACTION_DISTANCE_SQR) continue;
+                    var path = worker.getNavigation().createPath(stand, 0);
+                    if (path != null && path.canReach()) stands.add(stand.immutable());
                 }
             }
         }
@@ -736,6 +798,7 @@ public final class VillageLivestock {
         return state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.BARREL);
     }
 
+    private record VillageCandidate(BlockPos center, long distanceSquared) {}
     private record StorageRef(BlockPos pos, Container container) {}
     private record StorageTarget(BlockPos storage, BlockPos stand) {}
 }
