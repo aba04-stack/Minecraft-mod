@@ -60,11 +60,13 @@ public final class VillagerCaveSupport {
     private static final String SCOUT_LAST_ORDER = P + "scout_last_order";
     private static final String FAILED_SCOUTS = P + "failed_scouts";
     private static final String FAILED_SCOUT_TICK = P + "failed_scout_tick";
+    private static final String SCOUT_VISITED = P + "scout_visited";
 
     private static final int TICK_STEP = 10;
     static final int MAX_WAYPOINTS = 48;
     private static final int MAX_HOME_RETURN_STALLS = 3;
     private static final int MAX_FAILED_SCOUTS = 12;
+    static final int MAX_VISITED_SCOUTS = 64;
     private static final int MAX_SCOUT_PATH_CHECKS = 3;
     private static final int MAX_SCOUT_PATH_NODES = 40;
     private static final int SCOUT_RADIUS_BLOCKS = 6;
@@ -83,6 +85,7 @@ public final class VillagerCaveSupport {
     private static final double SCOUT_MIN_DISTANCE_SQUARED = 36.0D;
     private static final double SCOUT_ARRIVAL_DISTANCE_SQUARED = 4.0D;
     private static final double FAILED_SCOUT_DISTANCE_SQUARED = 16.0D;
+    private static final double VISITED_SCOUT_DISTANCE_SQUARED = 16.0D;
     private static final double VISITED_TRAIL_DISTANCE_SQUARED = 64.0D;
     private static final double ARRIVAL_DISTANCE_SQUARED = 6.25D;
     private static final float WALK_SPEED = 0.62F;
@@ -217,6 +220,8 @@ public final class VillagerCaveSupport {
             return;
         }
         if (villager.blockPosition().distSqr(target) <= SCOUT_ARRIVAL_DISTANCE_SQUARED) {
+            data.putLongArray(SCOUT_VISITED,
+                appendVisitedScoutTarget(data.getLongArray(SCOUT_VISITED), target));
             cancelCaveScout(villager, data);
             data.putLong(NEXT_SCOUT, now + SCOUT_INTERVAL_TICKS);
             return;
@@ -258,6 +263,7 @@ public final class VillagerCaveSupport {
         List<BlockPos> candidates = new ArrayList<>(256);
         long[] trail = data.getLongArray(TRAIL);
         long[] failed = data.getLongArray(FAILED_SCOUTS);
+        long[] visited = data.getLongArray(SCOUT_VISITED);
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 if (dx * dx + dz * dz > radius * radius) continue;
@@ -270,6 +276,7 @@ public final class VillagerCaveSupport {
                     if (origin.distSqr(candidate) < SCOUT_MIN_DISTANCE_SQUARED
                         || !isSafeCaveNode(level, candidate, surfaceY)
                         || isNearRememberedTrail(candidate, trail)
+                        || isNearVisitedScoutTarget(visited, candidate)
                         || isFailedScoutTarget(failed, candidate)) continue;
                     candidates.add(candidate.immutable());
                 }
@@ -353,6 +360,30 @@ public final class VillagerCaveSupport {
             || floor.is(Blocks.SOUL_CAMPFIRE) || floor.is(Blocks.CACTUS)
             || floor.is(Blocks.POWDER_SNOW) || floor.is(Blocks.FIRE)
             || floor.is(Blocks.SOUL_FIRE);
+    }
+
+    /** Stores recently reached scouting sites separately from the return trail. */
+    static long[] appendVisitedScoutTarget(long[] previous, BlockPos target) {
+        if (target == null) return previous == null ? new long[0] : previous;
+        long[] old = previous == null ? new long[0] : previous;
+        if (isNearVisitedScoutTarget(old, target)) return old;
+        if (old.length < MAX_VISITED_SCOUTS) {
+            long[] next = new long[old.length + 1];
+            System.arraycopy(old, 0, next, 0, old.length);
+            next[old.length] = target.asLong();
+            return next;
+        }
+        long[] next = new long[MAX_VISITED_SCOUTS];
+        System.arraycopy(old, old.length - (MAX_VISITED_SCOUTS - 1), next, 0, MAX_VISITED_SCOUTS - 1);
+        next[MAX_VISITED_SCOUTS - 1] = target.asLong();
+        return next;
+    }
+
+    private static boolean isNearVisitedScoutTarget(long[] visited, BlockPos candidate) {
+        for (long packed : visited) {
+            if (candidate.distSqr(BlockPos.of(packed)) <= VISITED_SCOUT_DISTANCE_SQUARED) return true;
+        }
+        return false;
     }
 
     static long[] appendFailedScoutTarget(long[] previous, BlockPos target) {

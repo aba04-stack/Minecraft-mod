@@ -84,6 +84,24 @@ public final class VillageReservationGameTests {
     }
 
     @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_scout")
+    public static void visitedCaveScoutTargetsRemainBoundedAndDeduplicated(GameTestHelper helper) {
+        long[] visited = new long[0];
+        BlockPos newest = new BlockPos(0, 20, 0);
+        for (int i = 0; i < VillagerCaveSupport.MAX_VISITED_SCOUTS + 12; i++) {
+            newest = new BlockPos(i * 10, 20, 0);
+            visited = VillagerCaveSupport.appendVisitedScoutTarget(visited, newest);
+        }
+        helper.assertTrue(visited.length == VillagerCaveSupport.MAX_VISITED_SCOUTS,
+            "Visited cave scouting memory must stay within its fixed NBT limit.");
+        helper.assertTrue(BlockPos.of(visited[visited.length - 1]).equals(newest),
+            "The newest successfully reached cave site must remain remembered.");
+        long[] duplicate = VillagerCaveSupport.appendVisitedScoutTarget(visited, newest);
+        helper.assertTrue(duplicate.length == visited.length,
+            "A successfully visited cave site must not be recorded repeatedly.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_scout")
     public static void failedCaveScoutTargetsRemainBoundedAndDeduplicated(GameTestHelper helper) {
         long[] failed = new long[0];
         BlockPos newest = new BlockPos(0, 20, 0);
