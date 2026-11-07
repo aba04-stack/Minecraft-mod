@@ -55,6 +55,62 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_memory")
+    public static void caveTrailRemainsBoundedAndKeepsItsEntranceWaypoint(GameTestHelper helper) {
+        BlockPos entrance = new BlockPos(0, 20, 0);
+        long[] trail = new long[0];
+        BlockPos newest = entrance;
+        for (int i = 0; i < VillagerCaveSupport.MAX_WAYPOINTS + 12; i++) {
+            newest = new BlockPos(i * 10, 20, 0);
+            trail = VillagerCaveSupport.appendBoundedWaypoint(trail, newest);
+        }
+        helper.assertTrue(trail.length == VillagerCaveSupport.MAX_WAYPOINTS,
+            "The cave trail must never exceed its fixed NBT waypoint limit.");
+        helper.assertTrue(BlockPos.of(trail[0]).equals(entrance),
+            "The first cave waypoint must remain available as the remembered exit-side anchor.");
+        helper.assertTrue(BlockPos.of(trail[trail.length - 1]).equals(newest),
+            "The newest waypoint must remain available to start a return from deep exploration.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_memory")
+    public static void blockedHomeReturnKeepsTrailAndStopsAfterBoundedRetries(GameTestHelper helper) {
+        Villager miner = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        miner.setNoAi(true);
+        BlockPos home = helper.absolutePos(new BlockPos(4, 1, 4));
+        CompoundTag data = miner.getPersistentData();
+        data.putInt(VillagerRoles.HOME_X, home.getX());
+        data.putInt(VillagerRoles.HOME_Y, home.getY());
+        data.putInt(VillagerRoles.HOME_Z, home.getZ());
+        long[] route = new long[] {
+            miner.blockPosition().asLong(),
+            miner.blockPosition().offset(0, -2, 0).asLong()
+        };
+        data.putBoolean(VillagerCaveSupport.RETURNING, true);
+        data.putLongArray(VillagerCaveSupport.TRAIL, route);
+        data.putInt(VillagerCaveSupport.RETURN_INDEX, -1);
+
+        long baseTick = helper.getLevel().getGameTime();
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            long now = baseTick + attempt * 1000L;
+            data.putLong(VillagerCaveSupport.RETURN_LAST_POS, miner.blockPosition().asLong());
+            data.putLong(VillagerCaveSupport.RETURN_LAST_PROGRESS, now - 500L);
+            data.putLong(VillagerCaveSupport.RETURN_LAST_ORDER, 0L);
+            data.remove(VillagerCaveSupport.RETURN_TARGET);
+            VillagerCaveSupport.continueReturnHome(miner, helper.getLevel(), data, now);
+        }
+
+        helper.assertTrue(data.getBoolean(VillagerCaveSupport.RETURNING),
+            "A blocked HOME leg must not falsely complete the return trip.");
+        helper.assertTrue(data.getLongArray(VillagerCaveSupport.TRAIL).length == route.length,
+            "The remembered cave route must survive a blocked HOME leg.");
+        helper.assertTrue(data.getBoolean(VillagerCaveSupport.HOME_PAUSED),
+            "After three failed HOME attempts, navigation must pause instead of retrying forever.");
+        helper.assertTrue(data.getInt(VillagerCaveSupport.HOME_STALLS) == 3,
+            "The HOME retry counter must stop at its hard maximum.");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "village_lighting")
     public static void guardPatrolLightingYieldsToCombatAndRetreat(GameTestHelper helper) {
         Villager guard = helper.spawn(EntityType.VILLAGER, 1, 1, 1);

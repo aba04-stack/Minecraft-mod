@@ -31,25 +31,32 @@ import java.util.Optional;
  */
 public final class VillagerCaveSupport {
     private static final String P = "livingvillages_cave_";
-    private static final String TRAIL = P + "trail";
+    static final String TRAIL = P + "trail";
     private static final String LAST_WAYPOINT = P + "last_waypoint";
     private static final String LAST_TORCH = P + "last_torch";
     private static final String LAST_TORCH_TICK = P + "last_torch_tick";
     private static final String NEXT_TORCH_RESTOCK = P + "next_torch_restock";
-    private static final String RETURNING = P + "returning";
-    private static final String RETURN_INDEX = P + "return_index";
-    private static final String RETURN_TARGET = P + "return_target";
-    private static final String RETURN_LAST_POS = P + "return_last_pos";
-    private static final String RETURN_LAST_PROGRESS = P + "return_last_progress";
-    private static final String RETURN_LAST_ORDER = P + "return_last_order";
+    static final String RETURNING = P + "returning";
+    static final String RETURN_INDEX = P + "return_index";
+    static final String RETURN_TARGET = P + "return_target";
+    static final String RETURN_LAST_POS = P + "return_last_pos";
+    static final String RETURN_LAST_PROGRESS = P + "return_last_progress";
+    static final String RETURN_LAST_ORDER = P + "return_last_order";
+    static final String HOME_STALLS = P + "home_stalls";
+    static final String HOME_RETRY_AT = P + "home_retry_at";
+    static final String HOME_PAUSED = P + "home_paused";
+    static final String HOME_PAUSED_AT = P + "home_paused_at";
+    static final String HOME_PAUSED_HOME = P + "home_paused_home";
 
     private static final int TICK_STEP = 10;
-    private static final int MAX_WAYPOINTS = 48;
+    static final int MAX_WAYPOINTS = 48;
+    private static final int MAX_HOME_RETURN_STALLS = 3;
     private static final int WAYPOINT_SPACING_SQUARED = 36;
     private static final int TORCH_SPACING_SQUARED = 49;
     private static final long TORCH_COOLDOWN_TICKS = 80L;
     private static final long ROUTE_REISSUE_TICKS = 40L;
     private static final long WAYPOINT_STALL_TICKS = 400L;
+    private static final long HOME_RETRY_BASE_TICKS = 200L;
     private static final double ARRIVAL_DISTANCE_SQUARED = 6.25D;
     private static final float WALK_SPEED = 0.62F;
 
@@ -91,7 +98,9 @@ public final class VillagerCaveSupport {
 
         recordCaveWaypoint(villager, level, data);
         restockTorches(villager, level, data, now);
-        placeTorchAtDarkSpot(villager, level, data, now);
+        if (isUnderground(level, villager.blockPosition())) {
+            placeTorchAtDarkSpot(villager, level, data, now);
+        }
 
         long dayTime = Math.floorMod(level.getDayTime(), 24000L);
         boolean lowHealth = villager.getHealth() <= villager.getMaxHealth() * 0.35F;
@@ -103,20 +112,43 @@ public final class VillagerCaveSupport {
 
     private static void recordCaveWaypoint(Villager villager, ServerLevel level, CompoundTag data) {
         BlockPos feet = villager.blockPosition();
-        if (!level.hasChunkAt(feet)) return;
-        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, feet.getX(), feet.getZ());
-        // Only remember underground movement. Surface work and ordinary village paths do not fill the trail.
-        if (feet.getY() > surfaceY - 5) return;
+        if (!isUnderground(level, feet)) return;
 
         long[] old = data.getLongArray(TRAIL);
-        if (old.length > 0 && BlockPos.of(old[old.length - 1]).distSqr(feet) < WAYPOINT_SPACING_SQUARED) return;
-
-        int keep = Math.min(old.length, MAX_WAYPOINTS - 1);
-        long[] next = new long[keep + 1];
-        if (keep > 0) System.arraycopy(old, old.length - keep, next, 0, keep);
-        next[keep] = feet.asLong();
+        long[] next = appendBoundedWaypoint(old, feet);
+        if (next == old) return;
         data.putLongArray(TRAIL, next);
         data.putLong(LAST_WAYPOINT, level.getGameTime());
+    }
+
+    private static boolean isUnderground(ServerLevel level, BlockPos feet) {
+        if (!level.hasChunkAt(feet)) return false;
+        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, feet.getX(), feet.getZ());
+        return feet.getY() <= surfaceY - 5;
+    }
+
+    /** Retains the cave entrance and the newest points without allowing an unbounded entity NBT trail. */
+    static long[] appendBoundedWaypoint(long[] old, BlockPos feet) {
+        if (feet == null) return old == null ? new long[0] : old;
+        long[] route = old == null ? new long[0] : old;
+        if (route.length > 0
+            && BlockPos.of(route[route.length - 1]).distSqr(feet) < WAYPOINT_SPACING_SQUARED) return route;
+
+        if (route.length < MAX_WAYPOINTS) {
+            long[] next = new long[route.length + 1];
+            System.arraycopy(route, 0, next, 0, route.length);
+            next[route.length] = feet.asLong();
+            return next;
+        }
+
+        long[] next = new long[MAX_WAYPOINTS];
+        next[0] = route[0];
+        int tailCount = MAX_WAYPOINTS - 2;
+        int sourceStart = Math.max(1, route.length - tailCount);
+        int copied = route.length - sourceStart;
+        System.arraycopy(route, sourceStart, next, 1, copied);
+        next[copied + 1] = feet.asLong();
+        return next;
     }
 
     private static void restockTorches(Villager villager, ServerLevel level, CompoundTag data, long now) {
@@ -177,8 +209,7 @@ public final class VillagerCaveSupport {
         if (countTorches(villager) <= 0) return;
 
         BlockPos origin = villager.blockPosition();
-        List<BlockPos> candidates = new ArrayList<>(9);
-        candidates.add(origin);
+        List<BlockPos> candidates = new ArrayList<>(8);
         candidates.add(origin.north());
         candidates.add(origin.east());
         candidates.add(origin.south());
@@ -197,7 +228,7 @@ public final class VillagerCaveSupport {
             if (level.getMaxLocalRawBrightness(candidate) >= 8) continue;
             if (previousTorch != null && previousTorch.distSqr(candidate) < TORCH_SPACING_SQUARED) continue;
             BlockState existing = level.getBlockState(candidate);
-            if (!existing.isAir() && !VillageBuilder.isAirOrReplaceableVegetation(existing)) continue;
+            if (!existing.isAir()) continue;
             if (!level.getFluidState(candidate).isEmpty() || !level.getBlockState(candidate.below()).blocksMotion()) continue;
             if (!Blocks.TORCH.defaultBlockState().canSurvive(level, candidate)) continue;
             double distance = villager.distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(candidate));
@@ -206,9 +237,11 @@ public final class VillagerCaveSupport {
                 best = candidate.immutable();
             }
         }
-        if (best == null || !consumeTorch(villager)) return;
-        if (!level.setBlock(best, Blocks.TORCH.defaultBlockState(), 3)) {
-            villager.getInventory().addItem(new ItemStack(Items.TORCH));
+        if (best == null) return;
+        BlockState replaced = level.getBlockState(best);
+        if (!level.setBlock(best, Blocks.TORCH.defaultBlockState(), 3)) return;
+        if (!consumeTorch(villager)) {
+            level.setBlock(best, replaced, 3);
             return;
         }
         data.putLong(LAST_TORCH, best.asLong());
@@ -259,9 +292,36 @@ public final class VillagerCaveSupport {
         data.putLong(RETURN_LAST_ORDER, 0L);
         data.putLong(RETURN_LAST_POS, villager.blockPosition().asLong());
         data.remove(RETURN_TARGET);
+        data.putInt(HOME_STALLS, 0);
+        data.remove(HOME_RETRY_AT);
+        data.putBoolean(HOME_PAUSED, false);
+        data.remove(HOME_PAUSED_AT);
+        data.remove(HOME_PAUSED_HOME);
     }
 
-    private static void continueReturnHome(Villager villager, ServerLevel level, CompoundTag data, long now) {
+    static void continueReturnHome(Villager villager, ServerLevel level, CompoundTag data, long now) {
+        BlockPos home = VillagerRoles.getHome(villager);
+        if (home == null) {
+            clearReturnTarget(villager, data);
+            return;
+        }
+
+        if (data.getBoolean(HOME_PAUSED)) {
+            boolean moved = villager.blockPosition().asLong() != data.getLong(HOME_PAUSED_AT);
+            boolean homeChanged = home.asLong() != data.getLong(HOME_PAUSED_HOME);
+            if (!moved && !homeChanged) return;
+            data.putBoolean(HOME_PAUSED, false);
+            data.putInt(HOME_STALLS, 0);
+            data.remove(HOME_PAUSED_AT);
+            data.remove(HOME_PAUSED_HOME);
+            data.remove(HOME_RETRY_AT);
+            data.putLong(RETURN_LAST_PROGRESS, now);
+            data.putLong(RETURN_LAST_POS, villager.blockPosition().asLong());
+            data.putLong(RETURN_LAST_ORDER, 0L);
+            data.remove(RETURN_TARGET);
+        }
+        if (now < data.getLong(HOME_RETRY_AT)) return;
+
         long[] trail = data.getLongArray(TRAIL);
         int index = Math.min(data.getInt(RETURN_INDEX), trail.length - 1);
         BlockPos target = null;
@@ -277,26 +337,9 @@ public final class VillagerCaveSupport {
 
         boolean headingHome = index < 0;
         if (headingHome) {
-            BlockPos home = VillagerRoles.getHome(villager);
-            if (home == null) {
-                finishReturn(villager, data);
-                return;
-            }
             if (!level.hasChunkAt(home)) {
-                // Keep the route in NBT and wait. Never force-load the village chunk or discard
-                // the only remembered way out merely because the player moved away.
-                if (data.contains(RETURN_TARGET)) {
-                    BlockPos owned = BlockPos.of(data.getLong(RETURN_TARGET));
-                    villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
-                        if (walk.getTarget().currentBlockPosition().equals(owned)) {
-                            villager.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
-                        }
-                    });
-                    data.remove(RETURN_TARGET);
-                }
-                if (now - data.getLong(RETURN_LAST_PROGRESS) >= WAYPOINT_STALL_TICKS) {
-                    data.putLong(RETURN_LAST_PROGRESS, now);
-                }
+                // Wait for the home chunk to load naturally; keep the route and do not force-load it.
+                clearReturnTarget(villager, data);
                 return;
             }
             if (villager.blockPosition().distSqr(home) <= ARRIVAL_DISTANCE_SQUARED) {
@@ -310,16 +353,28 @@ public final class VillagerCaveSupport {
         if (villager.blockPosition().distSqr(BlockPos.of(lastPosition)) >= 1.0D) {
             data.putLong(RETURN_LAST_POS, villager.blockPosition().asLong());
             data.putLong(RETURN_LAST_PROGRESS, now);
+            data.putInt(HOME_STALLS, 0);
+            data.remove(HOME_RETRY_AT);
         } else if (now - data.getLong(RETURN_LAST_PROGRESS) >= WAYPOINT_STALL_TICKS) {
-            // Skip one stale/blocked waypoint rather than retrying forever. The final HOME leg
-            // is bounded too, so a missing or inaccessible bed cannot trap a worker indefinitely.
-            data.putInt(RETURN_INDEX, index - 1);
+            clearReturnTarget(villager, data);
+            data.putLong(RETURN_LAST_POS, villager.blockPosition().asLong());
             data.putLong(RETURN_LAST_PROGRESS, now);
             data.putLong(RETURN_LAST_ORDER, 0L);
-            data.remove(RETURN_TARGET);
             if (headingHome) {
-                finishReturn(villager, data);
-                return;
+                int stalls = Math.min(MAX_HOME_RETURN_STALLS, data.getInt(HOME_STALLS) + 1);
+                data.putInt(HOME_STALLS, stalls);
+                if (stalls >= MAX_HOME_RETURN_STALLS) {
+                    // Stop issuing navigation after a few failed attempts, but keep the NBT trail.
+                    // Moving the villager or changing HOME lets a later tick resume the saved route.
+                    data.putBoolean(HOME_PAUSED, true);
+                    data.putLong(HOME_PAUSED_AT, villager.blockPosition().asLong());
+                    data.putLong(HOME_PAUSED_HOME, home.asLong());
+                    data.remove(HOME_RETRY_AT);
+                } else {
+                    data.putLong(HOME_RETRY_AT, now + HOME_RETRY_BASE_TICKS * stalls);
+                }
+            } else {
+                data.putInt(RETURN_INDEX, index - 1);
             }
             return;
         }
@@ -335,7 +390,7 @@ public final class VillagerCaveSupport {
         }
     }
 
-    private static void finishReturn(Villager villager, CompoundTag data) {
+    private static void clearReturnTarget(Villager villager, CompoundTag data) {
         if (data.contains(RETURN_TARGET)) {
             BlockPos owned = BlockPos.of(data.getLong(RETURN_TARGET));
             villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
@@ -343,7 +398,12 @@ public final class VillagerCaveSupport {
                     villager.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
                 }
             });
+            data.remove(RETURN_TARGET);
         }
+    }
+
+    private static void finishReturn(Villager villager, CompoundTag data) {
+        clearReturnTarget(villager, data);
         data.putBoolean(RETURNING, false);
         data.remove(TRAIL);
         data.remove(LAST_WAYPOINT);
@@ -352,6 +412,11 @@ public final class VillagerCaveSupport {
         data.remove(RETURN_LAST_POS);
         data.remove(RETURN_LAST_PROGRESS);
         data.remove(RETURN_LAST_ORDER);
+        data.remove(HOME_STALLS);
+        data.remove(HOME_RETRY_AT);
+        data.remove(HOME_PAUSED);
+        data.remove(HOME_PAUSED_AT);
+        data.remove(HOME_PAUSED_HOME);
     }
 
     private static boolean isStorage(BlockState state) {
