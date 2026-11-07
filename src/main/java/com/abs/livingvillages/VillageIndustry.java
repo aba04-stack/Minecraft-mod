@@ -657,7 +657,53 @@ public final class VillageIndustry {
         return found;
     }
 
+    /** One owned chest, trapped chest, or barrel is sufficient as the village's shared starting warehouse. */
+    public static boolean hasVillageStorage(ServerLevel level, BlockPos center) {
+        return level != null && center != null
+            && hasStorageBlock(level, center, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+    }
+
+    /** A compact setup hint shown by the elder so a new settlement never fails silently. */
+    public static String describeStartupStatus(ServerLevel level, BlockPos center, List<Villager> residents) {
+        if (level == null || center == null) return "";
+        int adults = residents == null ? 0 : (int) residents.stream()
+            .filter(v -> v != null && v.isAlive() && !v.isBaby()).count();
+        if (adults < LivingVillagesConfig.MINIMUM_VILLAGERS.get()) {
+            return "Старт: нужно взрослых жителей — " + adults + "/"
+                + LivingVillagesConfig.MINIMUM_VILLAGERS.get() + ".";
+        }
+
+        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
+        List<StorageRef> storages = findStorages(level, center, radius);
+        if (storages.isEmpty()) {
+            if (hasStorageBlock(level, center, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) {
+                return "Старт: общий склад найден, но сейчас занят другим заданием.";
+            }
+            var plan = VillageResourcePlanner.getPlan(level, center, residents);
+            return plan.treesAvailable()
+                ? "Старт: поставь один сундук/бочку или дай жителю 2 брёвна для первого склада."
+                : "Старт: нет склада и деревьев. Поставь один сундук/бочку и положи реальные ресурсы.";
+        }
+
+        if (!hasBlock(level, center, Blocks.CRAFTING_TABLE, radius)) {
+            if (totalPlanks(storages) < 4) {
+                return "Старт: склад найден. Для первого верстака нужны 4 доски — положи 1 бревно.";
+            }
+            return "Старт: склад найден. Житель готовит место для первого верстака.";
+        }
+
+        var plan = VillageResourcePlanner.getPlan(level, center, residents);
+        if (plan.needsMining() && countAvailablePickaxes(level, center) == 0) {
+            return "Старт: склад и верстак готовы. Для шахтёра положи настоящую кирку.";
+        }
+        if (plan.needsFood() && plan.availableSeeds() == 0 && plan.matureCrops() == 0) {
+            return "Старт: для фермы нужны 24 семени одного вида, мотыга, ведро воды и компостер.";
+        }
+        return "Старт: общий склад и верстак готовы; жители используют только настоящие ресурсы.";
+    }
+
     private static boolean hasStorageBlock(ServerLevel level, BlockPos center, int radius) {
+        if (level == null || center == null) return false;
         int scanRadius = Math.min(radius, 24);
         for (int dx = -scanRadius; dx <= scanRadius; dx++) {
             for (int dz = -scanRadius; dz <= scanRadius; dz++) {

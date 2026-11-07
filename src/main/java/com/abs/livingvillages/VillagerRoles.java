@@ -103,8 +103,13 @@ public final class VillagerRoles {
             && VillageIndustry.hasCraftingTable(level, center);
         boolean housingNeeded = LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
             && (VillageBuilder.housingNeeded(level, center, all.size()) || VillageElder.hasHouseRequest(all));
-
         VillageResourceDemandModel.Plan resourcePlan = VillageResourcePlanner.getPlan(level, center, all);
+        boolean houseMaterialsReady = housingNeeded && VillageBuilder.hasMaterialsForHouse(level, center);
+        boolean penNeeded = LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+            && VillageLivestock.needsPen(level, center);
+        boolean penMaterialsReady = penNeeded && VillageLivestock.hasMaterialsForPen(level, center);
+        boolean builderNeeded = shouldAssignBuilder(
+            housingNeeded, houseMaterialsReady, penNeeded, penMaterialsReady);
         boolean pendingWoodDemand = VillageWorkOrders.pendingWoodLogItem(level, center) != Items.AIR;
         boolean pendingQuarryDemand = VillageWorkOrders.pendingQuarryOutputItem(level, center) != Items.AIR;
         int desiredLumberjacksForQueue = LivingVillagesConfig.ENABLE_VILLAGER_TREE_WORK.get()
@@ -146,7 +151,7 @@ public final class VillagerRoles {
 
             boolean missingRequiredTool = (ROLE_MINER.equals(role) && availablePickaxes == 0)
                 || (ROLE_GUARD.equals(role) && availableSwords == 0);
-            boolean builderNoLongerNeeded = ROLE_BUILDER.equals(role) && !activeBuilderProject && !housingNeeded;
+            boolean builderNoLongerNeeded = ROLE_BUILDER.equals(role) && !activeBuilderProject && !builderNeeded;
             boolean tenureElapsed = now - data.getLong(ROLE_ASSIGNED_TICK_KEY)
                 >= com.abs.livingvillages.domain.SettlementSimulationModel.MIN_ROLE_TENURE_TICKS;
             boolean surplusRole = (ROLE_LUMBERJACK.equals(role) && excessLumberjacks > 0)
@@ -201,7 +206,7 @@ public final class VillagerRoles {
         int guards = (int) all.stream().filter(VillagerRoles::isGuard).count();
         int herders = (int) all.stream().filter(VillagerRoles::isHerder).count();
 
-        int desiredBuilders = housingNeeded ? 1 : 0;
+        int desiredBuilders = builderNeeded ? 1 : 0;
         int desiredCraftspeople = workshopExists ? 1 : 0;
         int desiredLumberjacks = desiredLumberjacksForQueue;
         int desiredFarmers = LivingVillagesConfig.ENABLE_FARMER_STOCKPILING.get()
@@ -287,6 +292,12 @@ public final class VillagerRoles {
         data.putInt(HOME_Y, home.getY());
         data.putInt(HOME_Z, home.getZ());
         VillageRegistry.recordDiagnostic(level, center, "Роли", "Назначена роль: " + role);
+    }
+
+    /** A worker is not reserved as builder until a real house or pen bill is ready to be spent. */
+    static boolean shouldAssignBuilder(boolean housingNeeded, boolean houseMaterialsReady,
+                                       boolean penNeeded, boolean penMaterialsReady) {
+        return (housingNeeded && houseMaterialsReady) || (penNeeded && penMaterialsReady);
     }
 
     /**

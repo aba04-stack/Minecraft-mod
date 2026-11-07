@@ -431,6 +431,28 @@ public final class VillageLivestock {
         return Items.AIR;
     }
 
+    /** True only when every missing fence/gate for this pen or repair is physically available in owned storage. */
+    public static boolean hasMaterialsForPen(ServerLevel level, BlockPos center) {
+        if (level == null || center == null || !needsPen(level, center)
+            || !ensurePenWorkOrder(level, center)) return false;
+
+        PenRepairPlan repair = getPenRepairPlan(level, center);
+        Item fence = repair != null ? repair.fenceItem() : pendingPenFenceItem(level, center);
+        Item gate = repair != null ? repair.gateItem() : pendingPenGateItem(level, center);
+        int fencesNeeded = repair != null ? repair.missingFenceCount() : pendingPenFenceCount(level, center);
+        int gateNeeded = repair != null ? repair.missingGateCount() : pendingPenGateCount(level, center);
+        if ((fencesNeeded > 0 && fence == Items.AIR)
+            || (gateNeeded > 0 && gate == Items.AIR)
+            || fencesNeeded + gateNeeded <= 0) return false;
+
+        Set<String> required = new java.util.HashSet<>();
+        if (fencesNeeded > 0) required.add(BuiltInRegistries.ITEM.getKey(fence).toString());
+        if (gateNeeded > 0) required.add(BuiltInRegistries.ITEM.getKey(gate).toString());
+        Map<String, Integer> stock = VillageRegistry.countAvailableOwnedStorageItems(level, center, required);
+        return (fencesNeeded == 0 || stock.getOrDefault(BuiltInRegistries.ITEM.getKey(fence).toString(), 0) >= fencesNeeded)
+            && (gateNeeded == 0 || stock.getOrDefault(BuiltInRegistries.ITEM.getKey(gate).toString(), 0) >= gateNeeded);
+    }
+
     /** Starts construction only after all 15 fence pieces and the matching gate physically exist in owned storage. */
     public static boolean tryStartPenProject(ServerLevel level, BlockPos center) {
         if (!ensurePenWorkOrder(level, center) || hasCompletePen(level, center)
