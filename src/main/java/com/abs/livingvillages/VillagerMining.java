@@ -89,6 +89,7 @@ public final class VillagerMining {
             return;
         }
         CompoundTag data = villager.getPersistentData();
+        if (VillagerCaveSupport.isReturning(villager)) return;
         if (!VillagerRoles.isMiner(villager)) {
             if (data.getBoolean(ACTIVE)) cancelTask(villager, data);
             return;
@@ -291,7 +292,12 @@ public final class VillagerMining {
         int radius = LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get();
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
-        int minY = Math.max(level.getMinBuildHeight() + 1, origin.getY() - 8);
+        int surfaceY = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+            origin.getX(), origin.getZ());
+        // Surface workers keep the cheaper vanilla-like scan. Once a miner is actually underground,
+        // it can search farther down through naturally exposed cave faces.
+        int verticalDepth = origin.getY() < surfaceY - 5 ? 20 : 8;
+        int minY = Math.max(level.getMinBuildHeight() + 1, origin.getY() - verticalDepth);
         int maxY = Math.min(level.getMaxBuildHeight() - 2, origin.getY() + 3);
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
@@ -481,7 +487,7 @@ public final class VillagerMining {
     private static boolean isSafeMineTarget(ServerLevel level, Villager villager, BlockPos pos, BlockState state) {
         if (!level.hasChunkAt(pos) || state.isAir() || state.getDestroySpeed(level, pos) < 0.0F
             || state.hasBlockEntity() || !level.getFluidState(pos).isEmpty()) return false;
-        if (pos.getY() < villager.blockPosition().getY() - 4
+        if (pos.getY() < villager.blockPosition().getY() - 20
             || pos.getY() > villager.blockPosition().getY() + 3) return false;
         // Never dig the block immediately underneath the worker. This prevents the basic AI
         // from opening a pit under itself while chasing a vein.
@@ -752,6 +758,31 @@ public final class VillagerMining {
             level.destroyBlockProgress(-villager.getId(),
                 new BlockPos(data.getInt(BREAK_X), data.getInt(BREAK_Y), data.getInt(BREAK_Z)), -1);
         }
+    }
+
+    /** True while the miner owns an active extraction target. */
+    public static boolean hasActiveTask(Villager villager) {
+        return villager != null && villager.getPersistentData().getBoolean(ACTIVE);
+    }
+
+    /** Check only real pickaxes already carried by the worker; storage pickup remains in ensurePickaxe. */
+    public static boolean hasPickaxeAvailable(Villager villager) {
+        if (villager == null) return false;
+        if (isPickaxe(villager.getItemBySlot(EquipmentSlot.MAINHAND))) return true;
+        var inventory = villager.getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (isPickaxe(inventory.getItem(slot))) return true;
+        }
+        return false;
+    }
+
+    /** Suspend the active extraction order before cave safety-return takes ownership of navigation. */
+    public static void suspendForCaveReturn(Villager villager) {
+        if (villager == null) return;
+        CompoundTag data = villager.getPersistentData();
+        if (!data.getBoolean(ACTIVE)) return;
+        cancelTask(villager, data);
+        data.putLong(NEXT_SEARCH, villager.level().getGameTime() + 200L);
     }
 
     private static void cancelTask(Villager villager, CompoundTag data) {
