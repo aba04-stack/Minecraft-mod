@@ -51,4 +51,4 @@
   "livingvillages.config.max_ai_checks_per_tick": "Максимум тяжёлых проверок ИИ за серверный тик",
   "livingvillages.config.enable_animal_behavior": "Улучшенное поведение животных: реакция стада на опасность, защита детёнышей, поиск корма/укрытия и разведение",
   "livingvillages.config.enable_daily_life": "Повседневная жизнь: короткие визиты к соседям в свободное время",
-  "livingvillages.config.enable_village_livestock": "Животноводство поселения: сбор настоящей шерсти с закреплённых овец для строительства жилья"}
+  "livingvillages.config.enable_village_livestock": "Животноводство: строитель возводит настоящий загон, животновод приводит овец на пшеницу и собирает шерсть ножницами"}
