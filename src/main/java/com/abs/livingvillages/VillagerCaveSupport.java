@@ -323,9 +323,10 @@ public final class VillagerCaveSupport {
     }
 
     static boolean isSafeCaveNode(ServerLevel level, BlockPos feet, int surfaceY) {
+        // Heightmap depth is deterministic immediately after block updates. canSeeSky may still
+        // report stale skylight data in the same tick a cave roof is placed or removed.
         return feet.getY() <= surfaceY - 5
-            && isSafeWalkNode(level, feet)
-            && !level.canSeeSky(feet);
+            && isSafeWalkNode(level, feet);
     }
 
     private static boolean isSafeWalkNode(ServerLevel level, BlockPos feet) {

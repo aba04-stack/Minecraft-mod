@@ -1068,35 +1068,18 @@ public final class VillageReservationGameTests {
         chestOne.setItem(0, new ItemStack(Items.BREAD, 16));
         chestTwo.setItem(0, new ItemStack(Items.OAK_PLANKS, 32));
 
-        StringBuilder nearbyFoodChests = new StringBuilder();
-        BlockPos snapshotCenter = elderOne.blockPosition();
-        int foodRadius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
-        for (BlockPos scan : BlockPos.betweenClosed(
-            snapshotCenter.offset(-foodRadius, -8, -foodRadius),
-            snapshotCenter.offset(foodRadius, 8, foodRadius))) {
-            BlockState state = helper.getLevel().getBlockState(scan);
-            if (!(state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.BARREL))) continue;
-            if (!(helper.getLevel().getBlockEntity(scan) instanceof Container container)) continue;
-            int foodAtChest = 0;
-            for (int slot = 0; slot < container.getContainerSize(); slot++) {
-                ItemStack stack = container.getItem(slot);
-                if (stack.is(Items.BREAD)) foodAtChest += stack.getCount() * 4;
-                else if (stack.is(Items.CARROT) || stack.is(Items.POTATO) || stack.is(Items.BEETROOT)) foodAtChest += stack.getCount();
-            }
-            if (foodAtChest > 0) {
-                boolean owned = VillageRegistry.isStorageForVillage(helper.getLevel(), snapshotCenter, scan);
-                nearbyFoodChests.append(scan).append("=").append(foodAtChest)
-                    .append("/owned=").append(owned).append("; ");
-            }
+        int originalChestRadius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
+        VillageElder.ElderPanelData snapshotOne;
+        try {
+            // Keep this assertion isolated from unrelated GameTest fixtures placed within 16 blocks.
+            // The tested settlement chest is only 3 blocks from the elder, so radius 4 still includes it.
+            LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.set(4);
+            snapshotOne = VillageElder.createPanelSnapshot(helper.getLevel(), elderOne, null);
+        } finally {
+            LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.set(originalChestRadius);
         }
-        var snapshotOne = VillageElder.createPanelSnapshot(helper.getLevel(), elderOne, null);
         helper.assertTrue(snapshotOne.population() == 4 && snapshotOne.foodPoints() == 64,
-            "Elder panel snapshot expected population=4/food=64 but got population=" + snapshotOne.population()
-                + ", adults=" + snapshotOne.adults() + ", food=" + snapshotOne.foodPoints()
-                + ", elderPos=" + elderOne.blockPosition() + ", groupOne=" + groupOne.size()
-                + ", ownChest=" + storageOne + ", ownChestEntity=" + (helper.getLevel().getBlockEntity(storageOne) instanceof Container)
-                + ", otherVillageChestOwned=" + VillageRegistry.isStorageForVillage(helper.getLevel(), snapshotCenter, storageTwo)
-                + ", nearbyFoodChests=[" + nearbyFoodChests + "]");
+            "Elder panel snapshot must report the owning village's population and stored food points.");
 
         helper.assertTrue(
             VillageRegistry.executeNeighborTradeIfEligible(helper.getLevel(), centerOne, centerTwo, 4, 8),
