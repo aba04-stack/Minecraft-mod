@@ -1,7 +1,9 @@
 package com.abs.livingvillages;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
@@ -15,9 +17,11 @@ import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.pathfinder.Path;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -47,16 +51,39 @@ public final class VillagerCaveSupport {
     static final String HOME_PAUSED = P + "home_paused";
     static final String HOME_PAUSED_AT = P + "home_paused_at";
     static final String HOME_PAUSED_HOME = P + "home_paused_home";
+    private static final String NEXT_SCOUT = P + "next_scout";
+    private static final String SCOUT_ACTIVE = P + "scout_active";
+    private static final String SCOUT_TARGET = P + "scout_target";
+    private static final String SCOUT_STARTED = P + "scout_started";
+    private static final String SCOUT_LAST_POS = P + "scout_last_pos";
+    private static final String SCOUT_LAST_PROGRESS = P + "scout_last_progress";
+    private static final String SCOUT_LAST_ORDER = P + "scout_last_order";
+    private static final String FAILED_SCOUTS = P + "failed_scouts";
+    private static final String FAILED_SCOUT_TICK = P + "failed_scout_tick";
 
     private static final int TICK_STEP = 10;
     static final int MAX_WAYPOINTS = 48;
     private static final int MAX_HOME_RETURN_STALLS = 3;
+    private static final int MAX_FAILED_SCOUTS = 12;
+    private static final int MAX_SCOUT_PATH_CHECKS = 3;
+    private static final int MAX_SCOUT_PATH_NODES = 40;
+    private static final int SCOUT_RADIUS_BLOCKS = 6;
     private static final int WAYPOINT_SPACING_SQUARED = 36;
     private static final int TORCH_SPACING_SQUARED = 49;
     private static final long TORCH_COOLDOWN_TICKS = 80L;
     private static final long ROUTE_REISSUE_TICKS = 40L;
     private static final long WAYPOINT_STALL_TICKS = 400L;
     private static final long HOME_RETRY_BASE_TICKS = 200L;
+    private static final long SCOUT_INTERVAL_TICKS = 200L;
+    private static final long SCOUT_EMPTY_RETRY_TICKS = 400L;
+    private static final long SCOUT_STALL_TICKS = 300L;
+    private static final long SCOUT_TIMEOUT_TICKS = 2400L;
+    private static final long SCOUT_ROUTE_REISSUE_TICKS = 40L;
+    private static final long FAILED_SCOUT_TTL_TICKS = 6000L;
+    private static final double SCOUT_MIN_DISTANCE_SQUARED = 36.0D;
+    private static final double SCOUT_ARRIVAL_DISTANCE_SQUARED = 4.0D;
+    private static final double FAILED_SCOUT_DISTANCE_SQUARED = 16.0D;
+    private static final double VISITED_TRAIL_DISTANCE_SQUARED = 64.0D;
     private static final double ARRIVAL_DISTANCE_SQUARED = 6.25D;
     private static final float WALK_SPEED = 0.62F;
 
@@ -80,7 +107,10 @@ public final class VillagerCaveSupport {
             continueReturnHome(villager, level, data, now);
             return;
         }
-        if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()) return;
+        if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()) {
+            cancelCaveScout(villager, data);
+            return;
+        }
 
         // Guards light the dark parts of their own patrol route, but yield completely during
         // combat, retreat and post-combat aid. This reuses the same real-item torch logistics.
@@ -94,7 +124,10 @@ public final class VillagerCaveSupport {
 
         if (!VillagerRoles.isMiner(villager)
             || !LivingVillagesConfig.ENABLE_MINER_ROLE.get()
-            || !LivingVillagesConfig.ENABLE_MINER_CAVE_EXPLORATION.get()) return;
+            || !LivingVillagesConfig.ENABLE_MINER_CAVE_EXPLORATION.get()) {
+            cancelCaveScout(villager, data);
+            return;
+        }
 
         recordCaveWaypoint(villager, level, data);
         restockTorches(villager, level, data, now);
@@ -105,9 +138,267 @@ public final class VillagerCaveSupport {
         long dayTime = Math.floorMod(level.getDayTime(), 24000L);
         boolean lowHealth = villager.getHealth() <= villager.getMaxHealth() * 0.35F;
         if ((dayTime >= 11400L || lowHealth) && data.getLongArray(TRAIL).length > 0) {
+            cancelCaveScout(villager, data);
             beginReturnHome(villager, data, now);
             continueReturnHome(villager, level, data, now);
+            return;
         }
+
+        if (VillagerMining.hasActiveTask(villager)) {
+            cancelCaveScout(villager, data);
+            return;
+        }
+        if (dayTime < 1000L || dayTime >= 11400L || lowHealth
+            || VillagerRoles.shouldYieldToVanillaVillagerAi(villager)
+            || villager.isSleeping() || villager.isInWater()) {
+            cancelCaveScout(villager, data);
+            data.putLong(NEXT_SCOUT, now + SCOUT_INTERVAL_TICKS);
+            return;
+        }
+        runCaveScout(villager, level, data, now);
+    }
+
+
+    private static void runCaveScout(Villager villager, ServerLevel level, CompoundTag data, long now) {
+        if (data.getBoolean(SCOUT_ACTIVE)) {
+            if (!data.contains(SCOUT_TARGET)) {
+                cancelCaveScout(villager, data);
+                data.putLong(NEXT_SCOUT, now + SCOUT_INTERVAL_TICKS);
+                return;
+            }
+            continueCaveScout(villager, level, data, now);
+            return;
+        }
+        if (now < data.getLong(NEXT_SCOUT)) return;
+
+        if (now - data.getLong(FAILED_SCOUT_TICK) > FAILED_SCOUT_TTL_TICKS) {
+            data.remove(FAILED_SCOUTS);
+            data.remove(FAILED_SCOUT_TICK);
+        }
+        if (!VillagerMining.hasPickaxeAvailable(villager)) {
+            data.putLong(NEXT_SCOUT, now + SCOUT_EMPTY_RETRY_TICKS);
+            return;
+        }
+        if (villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET).isPresent()) {
+            data.putLong(NEXT_SCOUT, now + SCOUT_ROUTE_REISSUE_TICKS);
+            return;
+        }
+
+        BlockPos home = VillagerRoles.getHome(villager);
+        if (home == null) home = villager.blockPosition();
+        if (!VillageResourcePlanner.getPlan(level, home).needsOre()) {
+            data.putLong(NEXT_SCOUT, now + SCOUT_EMPTY_RETRY_TICKS);
+            return;
+        }
+
+        BlockPos target = findNextCaveTarget(level, villager, data, now);
+        if (target == null) {
+            data.putLong(NEXT_SCOUT, now + SCOUT_EMPTY_RETRY_TICKS);
+            return;
+        }
+
+        villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target, WALK_SPEED, 1));
+        data.putBoolean(SCOUT_ACTIVE, true);
+        data.putLong(SCOUT_TARGET, target.asLong());
+        data.putLong(SCOUT_STARTED, now);
+        data.putLong(SCOUT_LAST_POS, villager.blockPosition().asLong());
+        data.putLong(SCOUT_LAST_PROGRESS, now);
+        data.putLong(SCOUT_LAST_ORDER, now);
+    }
+
+    private static void continueCaveScout(Villager villager, ServerLevel level, CompoundTag data, long now) {
+        BlockPos target = BlockPos.of(data.getLong(SCOUT_TARGET));
+        if (!level.hasChunkAt(target) || !isSafeCaveNode(level, target)) {
+            failCaveScout(villager, data, target, now);
+            return;
+        }
+        if (now - data.getLong(SCOUT_STARTED) > SCOUT_TIMEOUT_TICKS) {
+            failCaveScout(villager, data, target, now);
+            return;
+        }
+        if (villager.blockPosition().distSqr(target) <= SCOUT_ARRIVAL_DISTANCE_SQUARED) {
+            cancelCaveScout(villager, data);
+            data.putLong(NEXT_SCOUT, now + SCOUT_INTERVAL_TICKS);
+            return;
+        }
+
+        long lastPosition = data.getLong(SCOUT_LAST_POS);
+        if (villager.blockPosition().distSqr(BlockPos.of(lastPosition)) >= 1.0D) {
+            data.putLong(SCOUT_LAST_POS, villager.blockPosition().asLong());
+            data.putLong(SCOUT_LAST_PROGRESS, now);
+        } else if (now - data.getLong(SCOUT_LAST_PROGRESS) >= SCOUT_STALL_TICKS) {
+            failCaveScout(villager, data, target, now);
+            return;
+        }
+
+        Optional<WalkTarget> current = villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET);
+        if (current.isPresent()) {
+            if (!current.get().getTarget().currentBlockPosition().equals(target)) {
+                // Another AI task took ownership of navigation; do not fight it.
+                cancelCaveScout(villager, data);
+                data.putLong(NEXT_SCOUT, now + SCOUT_INTERVAL_TICKS);
+            }
+            return;
+        }
+
+        if (now - data.getLong(SCOUT_LAST_ORDER) >= SCOUT_ROUTE_REISSUE_TICKS) {
+            villager.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target, WALK_SPEED, 1));
+            data.putLong(SCOUT_LAST_ORDER, now);
+        }
+    }
+
+    private static BlockPos findNextCaveTarget(ServerLevel level, Villager villager, CompoundTag data, long now) {
+        BlockPos origin = villager.blockPosition();
+        boolean alreadyUnderground = isUnderground(level, origin);
+        int radius = Math.min(SCOUT_RADIUS_BLOCKS, LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get());
+        int minY = Math.max(level.getMinBuildHeight() + 2, origin.getY() - (alreadyUnderground ? 10 : 12));
+        int maxY = Math.min(level.getMaxBuildHeight() - 3, origin.getY() + (alreadyUnderground ? 3 : -3));
+        if (minY > maxY) return null;
+
+        List<BlockPos> candidates = new ArrayList<>(256);
+        long[] trail = data.getLongArray(TRAIL);
+        long[] failed = data.getLongArray(FAILED_SCOUTS);
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                if (dx * dx + dz * dz > radius * radius) continue;
+                BlockPos column = origin.offset(dx, 0, dz);
+                if (!level.hasChunkAt(column)) continue;
+                int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    column.getX(), column.getZ());
+                for (int y = minY; y <= maxY; y++) {
+                    BlockPos candidate = origin.offset(dx, y - origin.getY(), dz);
+                    if (origin.distSqr(candidate) < SCOUT_MIN_DISTANCE_SQUARED
+                        || !isSafeCaveNode(level, candidate, surfaceY)
+                        || isNearRememberedTrail(candidate, trail)
+                        || isFailedScoutTarget(failed, candidate)) continue;
+                    candidates.add(candidate.immutable());
+                }
+            }
+        }
+        candidates.sort(Comparator.comparingDouble(candidate -> origin.distSqr(candidate)));
+
+        int pathChecks = 0;
+        for (BlockPos candidate : candidates) {
+            if (pathChecks >= MAX_SCOUT_PATH_CHECKS) break;
+            if (!VillageTickBudget.tryConsumeAiCheck(level)) break;
+            pathChecks++;
+
+            Path path = villager.getNavigation().createPath(candidate, 0);
+            if (path == null || !path.canReach() || path.getNodeCount() < 2
+                || path.getNodeCount() > MAX_SCOUT_PATH_NODES
+                || !isSafeCavePath(level, path)) {
+                failed = appendFailedScoutTarget(failed, candidate);
+                data.putLongArray(FAILED_SCOUTS, failed);
+                data.putLong(FAILED_SCOUT_TICK, now);
+                continue;
+            }
+            return candidate;
+        }
+        return null;
+    }
+
+    private static boolean isSafeCavePath(ServerLevel level, Path path) {
+        BlockPos previous = null;
+        for (int i = 0; i < path.getNodeCount(); i++) {
+            BlockPos node = path.getNodePos(i);
+            if (!isSafeWalkNode(level, node)) return false;
+            if (previous != null && Math.abs(node.getY() - previous.getY()) > 1) return false;
+            previous = node;
+        }
+        return true;
+    }
+
+    private static boolean isNearRememberedTrail(BlockPos candidate, long[] trail) {
+        for (long packed : trail) {
+            if (candidate.distSqr(BlockPos.of(packed)) < VISITED_TRAIL_DISTANCE_SQUARED) return true;
+        }
+        return false;
+    }
+
+    static boolean isSafeCaveNode(ServerLevel level, BlockPos feet) {
+        if (level == null || feet == null || !level.hasChunkAt(feet)) return false;
+        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+            feet.getX(), feet.getZ());
+        return isSafeCaveNode(level, feet, surfaceY);
+    }
+
+    private static boolean isSafeCaveNode(ServerLevel level, BlockPos feet, int surfaceY) {
+        return feet.getY() <= surfaceY - 5
+            && isSafeWalkNode(level, feet)
+            && !level.canSeeSky(feet);
+    }
+
+    private static boolean isSafeWalkNode(ServerLevel level, BlockPos feet) {
+        if (!level.hasChunkAt(feet) || !level.hasChunkAt(feet.above()) || !level.hasChunkAt(feet.below())) return false;
+        BlockState atFeet = level.getBlockState(feet);
+        BlockState atHead = level.getBlockState(feet.above());
+        BlockState floor = level.getBlockState(feet.below());
+        if ((!atFeet.isAir() && !VillageBuilder.isAirOrReplaceableVegetation(atFeet))
+            || (!atHead.isAir() && !VillageBuilder.isAirOrReplaceableVegetation(atHead))
+            || !floor.blocksMotion()
+            || !level.getFluidState(feet).isEmpty()
+            || !level.getFluidState(feet.above()).isEmpty()
+            || !level.getFluidState(feet.below()).isEmpty()
+            || isHazardousFloor(floor)) return false;
+        for (Direction direction : Direction.values()) {
+            if (!level.hasChunkAt(feet.relative(direction))
+                || level.getFluidState(feet.relative(direction)).is(FluidTags.LAVA)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isHazardousFloor(BlockState floor) {
+        return floor.is(Blocks.MAGMA_BLOCK) || floor.is(Blocks.CAMPFIRE)
+            || floor.is(Blocks.SOUL_CAMPFIRE) || floor.is(Blocks.CACTUS)
+            || floor.is(Blocks.POWDER_SNOW) || floor.is(Blocks.FIRE)
+            || floor.is(Blocks.SOUL_FIRE);
+    }
+
+    static long[] appendFailedScoutTarget(long[] previous, BlockPos target) {
+        if (target == null) return previous == null ? new long[0] : previous;
+        long[] old = previous == null ? new long[0] : previous;
+        if (isFailedScoutTarget(old, target)) return old;
+        if (old.length < MAX_FAILED_SCOUTS) {
+            long[] next = new long[old.length + 1];
+            System.arraycopy(old, 0, next, 0, old.length);
+            next[old.length] = target.asLong();
+            return next;
+        }
+        long[] next = new long[MAX_FAILED_SCOUTS];
+        System.arraycopy(old, old.length - (MAX_FAILED_SCOUTS - 1), next, 0, MAX_FAILED_SCOUTS - 1);
+        next[MAX_FAILED_SCOUTS - 1] = target.asLong();
+        return next;
+    }
+
+    private static boolean isFailedScoutTarget(long[] failed, BlockPos candidate) {
+        for (long packed : failed) {
+            if (candidate.distSqr(BlockPos.of(packed)) <= FAILED_SCOUT_DISTANCE_SQUARED) return true;
+        }
+        return false;
+    }
+
+    private static void failCaveScout(Villager villager, CompoundTag data, BlockPos target, long now) {
+        data.putLongArray(FAILED_SCOUTS, appendFailedScoutTarget(data.getLongArray(FAILED_SCOUTS), target));
+        data.putLong(FAILED_SCOUT_TICK, now);
+        cancelCaveScout(villager, data);
+        data.putLong(NEXT_SCOUT, now + SCOUT_EMPTY_RETRY_TICKS);
+    }
+
+    private static void cancelCaveScout(Villager villager, CompoundTag data) {
+        if (data.getBoolean(SCOUT_ACTIVE) && data.contains(SCOUT_TARGET)) {
+            BlockPos owned = BlockPos.of(data.getLong(SCOUT_TARGET));
+            villager.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
+                if (walk.getTarget().currentBlockPosition().equals(owned)) {
+                    villager.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+                }
+            });
+        }
+        data.putBoolean(SCOUT_ACTIVE, false);
+        data.remove(SCOUT_TARGET);
+        data.remove(SCOUT_STARTED);
+        data.remove(SCOUT_LAST_POS);
+        data.remove(SCOUT_LAST_PROGRESS);
+        data.remove(SCOUT_LAST_ORDER);
     }
 
     private static void recordCaveWaypoint(Villager villager, ServerLevel level, CompoundTag data) {

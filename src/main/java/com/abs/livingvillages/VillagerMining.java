@@ -740,6 +740,22 @@ public final class VillagerMining {
         }
     }
 
+    /** True while the miner owns an active extraction target. */
+    public static boolean hasActiveTask(Villager villager) {
+        return villager != null && villager.getPersistentData().getBoolean(ACTIVE);
+    }
+
+    /** Check only real pickaxes already carried by the worker; storage pickup remains in ensurePickaxe. */
+    public static boolean hasPickaxeAvailable(Villager villager) {
+        if (villager == null) return false;
+        if (isPickaxe(villager.getItemBySlot(EquipmentSlot.MAINHAND))) return true;
+        var inventory = villager.getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (isPickaxe(inventory.getItem(slot))) return true;
+        }
+        return false;
+    }
+
     /** Suspend the active extraction order before cave safety-return takes ownership of navigation. */
     public static void suspendForCaveReturn(Villager villager) {
         if (villager == null) return;

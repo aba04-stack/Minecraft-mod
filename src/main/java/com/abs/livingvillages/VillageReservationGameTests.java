@@ -39,6 +39,54 @@ import java.util.Set;
 public final class VillageReservationGameTests {
     private VillageReservationGameTests() {}
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_scout")
+    public static void caveScoutOnlyAcceptsEnclosedDrySafeWalkableNodes(GameTestHelper helper) {
+        BlockPos feet = helper.absolutePos(new BlockPos(3, 2, 3));
+        BlockPos roof = feet.above(5);
+        helper.getLevel().setBlock(feet.below(), Blocks.STONE.defaultBlockState(), 3);
+        helper.getLevel().setBlock(roof, Blocks.STONE.defaultBlockState(), 3);
+        helper.assertTrue(VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
+            "A dry, supported, enclosed underground air space should be a valid cave scout node.");
+
+        helper.getLevel().setBlock(feet, Blocks.WATER.defaultBlockState(), 3);
+        helper.assertTrue(!VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
+            "A water-filled node must never be selected for cave exploration.");
+        helper.getLevel().setBlock(feet, Blocks.AIR.defaultBlockState(), 3);
+
+        helper.getLevel().setBlock(feet.east(), Blocks.LAVA.defaultBlockState(), 3);
+        helper.assertTrue(!VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
+            "A node directly adjacent to lava must be rejected.");
+        helper.getLevel().setBlock(feet.east(), Blocks.AIR.defaultBlockState(), 3);
+
+        helper.getLevel().setBlock(feet.below(), Blocks.MAGMA_BLOCK.defaultBlockState(), 3);
+        helper.assertTrue(!VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
+            "A magma-block floor must be rejected.");
+        helper.getLevel().setBlock(feet.below(), Blocks.STONE.defaultBlockState(), 3);
+
+        helper.getLevel().setBlock(roof, Blocks.AIR.defaultBlockState(), 3);
+        helper.assertTrue(!VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
+            "An open-to-sky location must not be treated as a cave.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_scout")
+    public static void failedCaveScoutTargetsRemainBoundedAndDeduplicated(GameTestHelper helper) {
+        long[] failed = new long[0];
+        BlockPos newest = new BlockPos(0, 20, 0);
+        for (int i = 0; i < 20; i++) {
+            newest = new BlockPos(i * 10, 20, 0);
+            failed = VillagerCaveSupport.appendFailedScoutTarget(failed, newest);
+        }
+        helper.assertTrue(failed.length == 12,
+            "Failed cave targets must stay within the fixed NBT limit.");
+        helper.assertTrue(BlockPos.of(failed[failed.length - 1]).equals(newest),
+            "The most recent failed cave target must remain remembered.");
+        long[] duplicate = VillagerCaveSupport.appendFailedScoutTarget(failed, newest);
+        helper.assertTrue(duplicate.length == failed.length,
+            "The same failed cave target must not be added repeatedly.");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_memory")
     public static void caveReturnStartsFromNearestRememberedWaypoint(GameTestHelper helper) {
         BlockPos current = new BlockPos(12, 18, 4);
