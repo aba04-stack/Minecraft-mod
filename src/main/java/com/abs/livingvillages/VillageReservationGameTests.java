@@ -2662,7 +2662,12 @@ public final class VillageReservationGameTests {
         herder.setNoAi(true);
         BlockPos chosen = VillageLivestock.findPenGateApproachStand(helper.getLevel(), herder, gate);
         helper.assertTrue(alternate.equals(chosen),
-            "When the direct north approach is obstructed, the herder must choose the nearby safe, reachable exterior stand.");
+            "When the direct north approach is obstructed, the herder must choose the nearby safe, reachable exterior stand. "
+                + "chosen=" + chosen + ", expected=" + alternate + ", villager=" + herder.blockPosition()
+                + ", floor=" + helper.getLevel().getBlockState(alternate.below())
+                + ", feet=" + helper.getLevel().getBlockState(alternate)
+                + ", head=" + helper.getLevel().getBlockState(alternate.above())
+                + ", chunksLoaded=" + helper.getLevel().hasChunkAt(alternate));
         helper.succeed();
     }
 

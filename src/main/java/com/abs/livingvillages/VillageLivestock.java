@@ -680,7 +680,7 @@ public final class VillageLivestock {
 
         if (state == STATE_HERD_TO_GATE) {
             BlockPos outside = storedPenGateApproach(data);
-            if (outside == null || !isSafeStand(level, outside) || !canReach(herder, outside)) {
+            if (outside == null || !isSafeStand(level, outside) || !canReachPenGateStand(herder, outside)) {
                 outside = findPenGateApproachStand(level, herder, penGatePosition(level, center));
                 if (outside == null) {
                     requestPenGateClose(level, center, data);
@@ -1251,6 +1251,12 @@ public final class VillageLivestock {
         return path != null && path.canReach();
     }
 
+    /** Navigation may return no path when the villager is already standing on the target block. */
+    private static boolean canReachPenGateStand(Villager villager, BlockPos pos) {
+        return villager != null && pos != null
+            && (villager.blockPosition().equals(pos) || canReach(villager, pos));
+    }
+
     /**
      * Finds a safe, directly reachable stand on the outside of the registered north gate.
      * The bounded 5x3 search never routes through the pen boundary or chooses an interior point.
@@ -1261,7 +1267,7 @@ public final class VillageLivestock {
         for (int depth = 1; depth <= 3; depth++) {
             for (int lateral = -2; lateral <= 2; lateral++) {
                 BlockPos stand = gatePos.offset(lateral, 0, -depth);
-                if (!isSafeStand(level, stand) || !canReach(herder, stand)) continue;
+                if (!isSafeStand(level, stand) || !canReachPenGateStand(herder, stand)) continue;
                 candidates.add(stand.immutable());
             }
         }
