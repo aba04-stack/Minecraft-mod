@@ -374,7 +374,7 @@ public final class VillageLivestock {
     public static boolean hasShearsAvailable(ServerLevel level, BlockPos center) {
         if (level == null || center == null) return false;
         for (Villager resident : VillageArea.findVillagers(level, center)) {
-            if (countItem(resident.getInventory(), Items.SHEARS) > 0) return true;
+            if (isResidentAvailableForTransfer(resident) && countItem(resident.getInventory(), Items.SHEARS) > 0) return true;
         }
         return findStorages(level, center, null).stream()
             .anyMatch(ref -> countItem(ref.container(), Items.SHEARS) > 0);
@@ -437,7 +437,12 @@ public final class VillageLivestock {
             return;
         }
 
-        // Fill the pen to its small starter herd before spending shears on wool.
+        // Do not let a missing bait supply block a real wool/bed shortage when usable shears exist.
+        if (needsWoolForHousing(level, center) && hasShearsAvailable(level, center)) {
+            runShearing(villager, level, center, data, now);
+            return;
+        }
+
         if (needsHerding(level, center)) {
             runHerding(villager, level, center, data, now);
             return;
@@ -1191,23 +1196,32 @@ public final class VillageLivestock {
         }
     }
 
+    private static boolean isResidentAvailableForTransfer(Villager resident) {
+        if (resident == null || !resident.isAlive() || resident.isBaby()) return false;
+        CompoundTag data = resident.getPersistentData();
+        return !data.getBoolean(VillageBuilder.ACTIVE_KEY)
+            && !data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
+            && !data.getBoolean(VillagePopulation.ACTIVE_KEY)
+            && !data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
+            && !data.getBoolean(ACTIVE_KEY)
+            && !data.getBoolean("livingvillages_logistics_active")
+            && !data.getBoolean("livingvillages_mining_active")
+            && !data.getBoolean("livingvillages_treework_active")
+            && !data.getBoolean("livingvillages_treework_replant_active")
+            && !data.getBoolean("livingvillages_defense_has_route")
+            && !data.getBoolean("livingvillages_industry_route_active")
+            && !data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
+            && !data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY)
+            && !data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY);
+    }
+
     /** Transfers one real item from an idle resident so the specialist can use it. */
     private static boolean transferFromResident(ServerLevel level, BlockPos center, Villager recipient, Item item) {
         if (level == null || center == null || recipient == null || item == null
             || inventoryCapacityFor(recipient.getInventory(), item) < 1) return false;
         for (Villager resident : VillageArea.findVillagers(level, center)) {
             if (resident == recipient || !resident.isAlive() || resident.isBaby()) continue;
-            CompoundTag data = resident.getPersistentData();
-            if (data.getBoolean(VillageBuilder.ACTIVE_KEY)
-                || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
-                || data.getBoolean(VillagePopulation.ACTIVE_KEY)
-                || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
-                || data.getBoolean("livingvillages_logistics_active")
-                || data.getBoolean("livingvillages_mining_active")
-                || data.getBoolean("livingvillages_treework_active")
-                || data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
-                || data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY)
-                || data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY)) continue;
+            if (!isResidentAvailableForTransfer(resident)) continue;
 
             ItemStack removed = removeOne(resident.getInventory(), item);
             if (removed.isEmpty()) continue;
