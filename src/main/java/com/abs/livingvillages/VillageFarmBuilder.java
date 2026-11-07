@@ -135,6 +135,20 @@ public final class VillageFarmBuilder {
             || (seedItem == Items.BEETROOT_SEEDS && cropBlock == Blocks.BEETROOTS);
     }
 
+    private static Item pendingWaterItem(ServerLevel level, BlockPos center) {
+        for (VillageWorkOrderModel.Order order : VillageWorkOrders.list(level, center, level.getGameTime())) {
+            if (!"farm".equals(order.kind())
+                || (order.state() != VillageWorkOrderModel.OPEN
+                    && order.state() != VillageWorkOrderModel.WAITING_FOR_RESOURCES)) continue;
+            for (VillageWorkOrderModel.Requirement requirement : order.requirements()) {
+                if (requirement == null) continue;
+                Item item = parseItem(requirement.itemId());
+                if (item == Items.BUCKET || item == Items.WATER_BUCKET) return item;
+            }
+        }
+        return Items.AIR;
+    }
+
     /** Prefer an already-filled real bucket. Otherwise an empty bucket can be filled in-world. */
     public static Item selectWaterSupplyItem(List<Container> storages) {
         if (containsItem(storages, Items.WATER_BUCKET)) return Items.WATER_BUCKET;
@@ -169,7 +183,7 @@ public final class VillageFarmBuilder {
     public static boolean hasRenewableWaterSource(ServerLevel level, BlockPos center) {
         if (level == null || center == null) return false;
         long now = level.getGameTime();
-        long regionKey = ((long) (center.getX() >> 4) << 32) | ((center.getZ() >> 4) & 0xffffffffL);
+        long regionKey = center.asLong();
         Map<Long, WaterSourceCache> cache = WATER_SOURCE_CACHE.computeIfAbsent(level, ignored -> new HashMap<>());
         WaterSourceCache cached = cache.get(regionKey);
         if (cached != null && now < cached.expiresAtTick()) return cached.available();
@@ -286,7 +300,10 @@ public final class VillageFarmBuilder {
             Item candidateHoe = requiredHoe == Items.AIR
                 ? firstHoeInStorage(candidateStorages)
                 : containsItem(candidateStorages, requiredHoe) ? requiredHoe : Items.AIR;
-            Item candidateWater = selectWaterSupplyItem(candidateStorages);
+            Item pinnedWater = pendingWaterItem(level, center);
+            Item candidateWater = pinnedWater == Items.AIR
+                ? selectWaterSupplyItem(candidateStorages)
+                : containsItem(candidateStorages, pinnedWater) ? pinnedWater : Items.AIR;
             if (candidateHoe == Items.AIR || candidateWater == Items.AIR
                 || (candidateWater == Items.BUCKET && !hasRenewableWaterSource(level, candidateOrigin))
                 || !canFitRequiredItems(candidate.getInventory(), seedItem, candidateHoe)) continue;
