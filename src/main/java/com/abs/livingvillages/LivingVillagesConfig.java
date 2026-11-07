@@ -11,6 +11,7 @@ public final class LivingVillagesConfig {
     public static final ModConfigSpec.BooleanValue ENABLE_HOUSING_PROJECTS;
     public static final ModConfigSpec.BooleanValue ENABLE_VILLAGE_BUILDER;
     public static final ModConfigSpec.BooleanValue ENABLE_FARM_PROJECTS;
+    public static final ModConfigSpec.BooleanValue ENABLE_DESERT_STARTER_KIT;
     public static final ModConfigSpec.IntValue SCAN_INTERVAL_SECONDS;
     public static final ModConfigSpec.IntValue VILLAGE_RADIUS_BLOCKS;
     public static final ModConfigSpec.IntValue RESOURCE_CHEST_RADIUS_BLOCKS;
@@ -72,10 +73,15 @@ public final class LivingVillagesConfig {
             .translation("livingvillages.config.enable_farm_projects")
             .define("enable_farm_projects", true);
 
+        ENABLE_DESERT_STARTER_KIT = builder
+            .comment("Один раз выдаёт ограниченный стартовый запас деревне в пустыне без деревьев. Набор не пополняется после выдачи.")
+            .translation("livingvillages.config.enable_desert_starter_kit")
+            .define("enable_desert_starter_kit", true);
+
         SCAN_INTERVAL_SECONDS = builder
             .comment("Как часто планировщик проверяет активные поселения, в секундах.")
             .translation("livingvillages.config.scan_interval_seconds")
-            .defineInRange("scan_interval_seconds", 60, 15, 600);
+            .defineInRange("scan_interval_seconds", 15, 15, 600);
 
         VILLAGE_RADIUS_BLOCKS = builder
             .comment("Радиус поиска жителей, кроватей и готовых построек, в блоках.")

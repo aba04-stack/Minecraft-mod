@@ -68,6 +68,8 @@ public final class VillageRegistry extends SavedData {
     private final Map<UUID, Boolean> guardEquipmentRequests = new HashMap<>();
     private final Map<UUID, Long> villageLastVisitedTick = new HashMap<>();
     private final Map<UUID, Map<String, String>> villageDiagnostics = new HashMap<>();
+    /** Stable one-time claim for the finite starter cache issued to treeless desert settlements. */
+    private final Set<UUID> desertStarterKits = new HashSet<>();
 
     private VillageRegistry() {}
 
@@ -484,6 +486,11 @@ public final class VillageRegistry extends SavedData {
                 data.villageLastVisitedTick.put(id, entry.getLong("tick"));
             }
         }
+        ListTag desertStarterTags = tag.getList("desertStarterKits", Tag.TAG_COMPOUND);
+        for (int i = 0; i < desertStarterTags.size(); i++) {
+            UUID id = parseUuid(desertStarterTags.getCompound(i).getString("id"));
+            if (id != null) data.desertStarterKits.add(id);
+        }
         return data;
     }
 
@@ -594,6 +601,13 @@ public final class VillageRegistry extends SavedData {
             visitedTags.add(value);
         }
         tag.put("villageLastVisited", visitedTags);
+        ListTag desertStarterTags = new ListTag();
+        desertStarterKits.stream().sorted(Comparator.comparing(UUID::toString)).forEach(id -> {
+            CompoundTag entry = new CompoundTag();
+            entry.putString("id", id.toString());
+            desertStarterTags.add(entry);
+        });
+        tag.put("desertStarterKits", desertStarterTags);
         return tag;
     }
 
@@ -1024,6 +1038,28 @@ public final class VillageRegistry extends SavedData {
             case "minecraft:oak_planks" -> Items.OAK_PLANKS;
             default -> Items.AIR;
         };
+    }
+
+    /** True when this settlement has already received its one-time desert starter cache. */
+    public static boolean hasDesertStarterKit(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return false;
+        UUID id = villageId(level, center);
+        return id != null && get(level).desertStarterKits.contains(id);
+    }
+
+    /** Mark the one-time cache only after all items have been committed to an owned container. */
+    public static boolean recordDesertStarterKitGranted(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return false;
+        UUID id = villageId(level, center);
+        if (id == null) return false;
+        VillageRegistry registry = get(level);
+        if (!registry.desertStarterKits.add(id)) return false;
+        registry.setDirty();
+        return true;
+    }
+
+    boolean hasDesertStarterKit(UUID villageId) {
+        return villageId != null && desertStarterKits.contains(villageId);
     }
 
     public static void setGuardEquipmentRequested(ServerLevel level, BlockPos center, boolean requested) {

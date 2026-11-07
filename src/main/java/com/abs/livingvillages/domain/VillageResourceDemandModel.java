@@ -61,7 +61,11 @@ public final class VillageResourceDemandModel {
         // Wood units use plank-equivalents: one real log counts as four planks.
         // Targets scale with population, but are capped to prevent runaway stockpiling.
         int targetWood = clamp(48 + adults * 8, 96, 256);
-        int targetStone = clamp(24 + adults * 4, 48, 160);
+        // Treeless settlements must be able to quarry the complete 96-block sandstone bill
+        // for their first house before the miner is released.
+        int targetStone = treesAvailable
+            ? clamp(24 + adults * 4, 48, 160)
+            : clamp(Math.max(96, 24 + adults * 4), 96, 160);
         int targetOre = clamp(adults * 2, 4, 32);
         int targetFood = clamp(adults * 8, 32, 256);
 
