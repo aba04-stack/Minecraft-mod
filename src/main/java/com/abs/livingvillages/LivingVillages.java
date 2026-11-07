@@ -425,12 +425,13 @@ public final class LivingVillages {
             : chooseCropPlan(containers);
         Item hoeItem = pendingRequirementItem(pendingFarm, VillageFarmBuilder::isHoeItem);
         if (hoeItem == Items.AIR) hoeItem = selectAvailableHoeItem(containers);
+        Item waterItem = VillageFarmBuilder.selectWaterSupplyItem(containers);
         if (hoeItem == Items.AIR) hoeItem = Items.WOODEN_HOE;
 
         VillageWorkOrderModel.Order recorded = VillageWorkOrders.recordPendingProjectRequirements(
             level, center, "farm", 60, now, List.of(
                 new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(cropPlan.seedItem()).toString(), FARM_CROP_COUNT),
-                new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(Items.WATER_BUCKET).toString(), 1),
+                new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(waterItem).toString(), 1),
                 new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(Items.COMPOSTER).toString(), 1),
                 new VillageWorkOrderModel.Requirement(BuiltInRegistries.ITEM.getKey(hoeItem).toString(), 1)
             )
@@ -453,8 +454,16 @@ public final class LivingVillages {
             VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", now);
             return BuildResult.failure(msg);
         }
-        if (countItem(containers, Items.WATER_BUCKET) < 1) {
-            String msg = "Для фермы нужно настоящее ведро воды в ближайшем хранилище.";
+        if (waterItem == Items.BUCKET && !VillageFarmBuilder.hasRenewableWaterSource(level, center)) {
+            String msg = "Для наполнения пустого ведра не найден безопасный возобновляемый источник воды в загруженной области поселения.";
+            VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
+            VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", now);
+            return BuildResult.failure(msg);
+        }
+        if (countItem(containers, waterItem) < 1) {
+            String msg = waterItem == Items.BUCKET
+                ? "Для фермы нужно настоящее пустое ведро. Ремесленник может изготовить его из трёх железных слитков, если рядом есть источник воды."
+                : "Для фермы нужно настоящее ведро воды в ближайшем хранилище.";
             VillageRegistry.recordDiagnostic(level, center, "Ферма", msg);
             VillageWorkOrders.markPendingProjectWaiting(level, center, "farm", now);
             return BuildResult.failure(msg);
@@ -491,7 +500,9 @@ public final class LivingVillages {
             VillageWorkOrders.markPendingProjectOpen(level, center, "farm", now);
             return BuildResult.failure(msg);
         }
-        String ok = "Рабочий начал собирать настоящие семена, воду, компостер и мотыгу. Ферма будет строиться поэтапно.";
+        String ok = waterItem == Items.BUCKET
+            ? "Рабочий собирает реальные материалы, наполнит пустое ведро у безопасного источника воды и построит ферму поэтапно."
+            : "Рабочий начал собирать настоящие семена, воду, компостер и мотыгу. Ферма будет строиться поэтапно.";
         VillageRegistry.recordDiagnostic(level, center, "Ферма", ok);
         return BuildResult.projectStarted(site, ok);
     }
