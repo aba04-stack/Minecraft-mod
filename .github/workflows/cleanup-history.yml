@@ -1,56 +1,31 @@
-name: Clean up old Actions runs
+name: Cleanup old Actions runs
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - ".github/workflows/cleanup-history.yml"
+      - .github/workflows/cleanup-history.yml
   workflow_dispatch:
-    inputs:
-      keep_successful:
-        description: "Number of latest successful Build mod runs to keep"
-        required: true
-        default: "12"
-        type: string
-      keep_failures:
-        description: "Number of latest failed Build mod runs to keep for diagnostics"
-        required: true
-        default: "3"
-        type: string
 
 permissions:
   actions: write
   contents: read
 
-concurrency:
-  group: cleanup-actions-history
-  cancel-in-progress: false
-
 jobs:
   cleanup:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'chore: clean old GitHub Actions history'
     runs-on: ubuntu-latest
     steps:
-      - name: Delete obsolete Build mod runs and their artifacts
+      - name: Delete obsolete Build mod runs and attached artifacts
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          KEEP_SUCCESSFUL: ${{ inputs.keep_successful || '12' }}
-          KEEP_FAILURES: ${{ inputs.keep_failures || '3' }}
-        shell: bash
         run: |
           set -euo pipefail
 
-          for value in "$KEEP_SUCCESSFUL" "$KEEP_FAILURES"; do
-            if [[ ! "$value" =~ ^[0-9]+$ ]]; then
-              echo "::error::Retention values must be whole numbers."
-              exit 1
-            fi
-          done
-          if (( KEEP_SUCCESSFUL < 1 || KEEP_SUCCESSFUL > 50 || KEEP_FAILURES > 20 )); then
-            echo "::error::Keep 1-50 successful runs and 0-20 failed runs."
-            exit 1
-          fi
+          KEEP_SUCCESSFUL=12
+          KEEP_FAILURES=3
 
           gh api --paginate --slurp "repos/$REPOSITORY/actions/runs?per_page=100" > /tmp/all-runs.json
 
