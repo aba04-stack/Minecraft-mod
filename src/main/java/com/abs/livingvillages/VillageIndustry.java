@@ -676,8 +676,12 @@ public final class VillageIndustry {
             && hasStorageBlock(level, center, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
     }
 
+    static boolean needsDesertStarterKit(VillageResourceDemandModel.Plan demand) {
+        return demand != null && (demand.needsWood() || demand.needsStone() || demand.needsFood());
+    }
+
     /**
-     * A treeless desert settlement receives one finite starter cache. This is an explicit,
+     * A resource-deficient desert settlement receives one finite starter cache. This is an explicit,
      * persisted bootstrap exception, not a recurring item generator: after the cache is
      * committed its village UUID is recorded in SavedData and no second cache can be granted.
      */
@@ -691,7 +695,7 @@ public final class VillageIndustry {
             || VillageRegistry.hasDesertStarterKit(level, center)) return false;
 
         VillageResourceDemandModel.Plan demand = VillageResourcePlanner.getPlan(level, center, villagers);
-        if (demand.treesAvailable()) return false;
+        if (!needsDesertStarterKit(demand)) return false;
 
         // If the only owned container is currently reserved, wait instead of creating duplicate depots.
         if ((storages == null || storages.isEmpty())
@@ -834,8 +838,7 @@ public final class VillageIndustry {
                 + LivingVillagesConfig.MINIMUM_VILLAGERS.get() + ".";
         }
         if (LivingVillagesConfig.ENABLE_DESERT_STARTER_KIT.get()
-            && level.getBiome(center).is(BiomeTags.HAS_VILLAGE_DESERT)
-            && !VillageResourcePlanner.getPlan(level, center, residents).treesAvailable()
+            && needsDesertStarterKit(VillageResourcePlanner.getPlan(level, center, residents))
             && !VillageRegistry.hasDesertStarterKit(level, center)) {
             return "Пустынный старт: готовится одноразовый склад с ресурсами, киркой и комплектом первой фермы.";
         }
