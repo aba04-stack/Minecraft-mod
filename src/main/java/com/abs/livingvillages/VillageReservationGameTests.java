@@ -2614,6 +2614,29 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "livestock_autonomy")
+    public static void herderUsesWheatOnlyForItsSelectedSheep(GameTestHelper helper) {
+        Villager herder = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        net.minecraft.world.entity.animal.Sheep target = helper.spawn(EntityType.SHEEP, 3, 1, 1);
+        net.minecraft.world.entity.animal.Sheep bystander = helper.spawn(EntityType.SHEEP, 4, 1, 1);
+        herder.setNoAi(true);
+        herder.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_HERDER);
+        herder.getPersistentData().putBoolean(VillageLivestock.ACTIVE_KEY, true);
+        herder.getPersistentData().putInt(VillageLivestock.STATE, VillageLivestock.STATE_HERD_APPROACH);
+        herder.getPersistentData().putString(VillageLivestock.TARGET_SHEEP, target.getUUID().toString());
+        herder.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, new ItemStack(Items.WHEAT));
+
+        helper.assertTrue(VillageLivestock.isCurrentHerdTarget(herder, target),
+            "The selected sheep must follow the active herder carrying real wheat.");
+        helper.assertTrue(!VillageLivestock.isCurrentHerdTarget(herder, bystander),
+            "Nearby sheep must not be attracted unless they are the selected herd target.");
+
+        herder.getPersistentData().putInt(VillageLivestock.STATE, 0);
+        helper.assertTrue(!VillageLivestock.isCurrentHerdTarget(herder, target),
+            "A herder outside an active herding phase must not attract sheep.");
+        helper.succeed();
+    }
+
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;
