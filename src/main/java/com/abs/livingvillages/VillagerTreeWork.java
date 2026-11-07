@@ -189,9 +189,15 @@ public final class VillagerTreeWork {
         CompoundTag data = villager.getPersistentData();
         BlockPos home = VillagerRoles.getHome(villager);
         if (home == null) home = villager.blockPosition();
-        boolean generalWoodDemand = VillageResourcePlanner.getPlan((ServerLevel) villager.level(), home).needsWood();
-        boolean queuedWoodDemand = VillageWorkOrders.pendingWoodLogItem((ServerLevel) villager.level(), home) != Items.AIR;
-        if (!generalWoodDemand && !queuedWoodDemand) return false;
+        VillageResourceDemandModel.Plan resourcePlan =
+            VillageResourcePlanner.getPlan((ServerLevel) villager.level(), home);
+        boolean queuedWoodDemand = VillageWorkOrders.pendingWoodLogItem(
+            (ServerLevel) villager.level(), home) != Items.AIR;
+        // Keep wood shortages in the settlement plan, but only send a worker when a real
+        // mature tree is available. This prevents idle villagers circling an empty tree search.
+        boolean harvestableWoodDemand = resourcePlan.treesAvailable()
+            && (resourcePlan.needsWood() || queuedWoodDemand);
+        if (!harvestableWoodDemand) return false;
         boolean roleAllowsForestWork = (role.isEmpty()
                 || VillagerRoles.isLumberjack(villager)
                 || (VillagerRoles.ROLE_BUILDER.equals(role) && !VillageBuilder.isProjectActive(villager))
