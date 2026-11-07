@@ -175,7 +175,12 @@ public final class VillageReservations {
         if (storage == null) return false;
         if (owner != null) {
             BlockPos groupCenter = VillagerRoles.getHome(owner);
-            if (groupCenter == null) groupCenter = owner.blockPosition();
+            if (groupCenter == null) {
+                groupCenter = owner.getBrain().getMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.HOME)
+                    .filter(home -> home.dimension().equals(level.dimension()))
+                    .map(net.minecraft.core.GlobalPos::pos)
+                    .orElse(owner.blockPosition());
+            }
             if (!VillageRegistry.isStorageForVillage(level, groupCenter, storage)) return false;
         }
         AABB search = new AABB(storage).inflate(LOOKUP_RADIUS, 24.0D, LOOKUP_RADIUS);
