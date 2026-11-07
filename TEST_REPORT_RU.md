@@ -5,11 +5,12 @@
 ## Последняя успешная проверка feature-ветки 0.16.0
 
 - Ветка: `work/autonomous-wool-and-housing`; PR #7 остаётся открытым черновиком и нацелен на `main`. Ветка `main` не изменялась.
-- Проверенный коммит: `d082f7f4733404e088420071b9dfe2d968787d4b` — `fix: restore damaged registered livestock pens in place`.
-- GitHub Actions CI #443: [run 42393689191](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42393689191). Успешны `python3 tools/validate_project.py`, `./gradlew build`, `./gradlew runGameTestServer`, запуск dedicated server и client smoke-test с software OpenGL.
-- **45/45 обязательных Minecraft GameTests прошли.** Новый GameTest проверяет ремонт одной отсутствующей ограды, ремонт только калитки без лишних оград и отказ от ремонта при чужом сплошном блоке.
-- CI-артефакт `livingvillages-0.16.0`: [artifact 13582955688](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42393689191/artifacts/13582955688), 535 327 байт, SHA-256 `71ab31702e4c4fd14a1c4e371efb2e9ef1acbaa13153019deace2a9c1e8dc757`. Это проверочная сборка, не опубликованный GitHub Release.
-- Остаётся полевая проверка в обычном survival-мире: длинный маршрут приманивания овцы по рельефу, вход через калитку, безопасное закрытие, сбор/доставка шерсти и изготовление кровати. Успешные GameTests и smoke-tests не заменяют этот сценарий.
+- Проверенный коммит: `48dfa5a2d131c804fe0142887c205f5f732f01b0` — `fix: accept herder already at the gate approach stand`.
+- GitHub Actions CI #446: [run 42396622900](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42396622900). Успешны `python3 tools/validate_project.py`, `./gradlew build`, `./gradlew runGameTestServer`, запуск dedicated server и client smoke-test с software OpenGL.
+- **46/46 обязательных Minecraft GameTests прошли.** Новый тест подтверждает выбор другой достижимой точки снаружи калитки, если прямой северный подход заблокирован. Проверено также, что уже достигнутая точка остаётся допустимой, даже когда навигация не возвращает путь к текущему блоку.
+- Предыдущий CI #445 выявил этот граничный случай; он исправлен в коммите выше и подтверждён полным повторным прогоном #446.
+- CI-артефакт `livingvillages-0.16.0`: [artifact 13583633235](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42396622900/artifacts/13583633235), 536 755 байт, SHA-256 `e8acca7ac4f4c648c640a44d66c5690bfa0c881bb867442ca30430207ce99f09`. Это проверочная сборка, не опубликованный GitHub Release.
+- Остаётся полевая проверка в обычном survival-мире: длинный маршрут приманивания овцы по рельефу, проход через калитку, безопасное закрытие, сбор/доставка шерсти и изготовление кровати. Успешные GameTests и smoke-tests не заменяют этот сценарий.
 
 ## Историческая база 0.15.0
 
