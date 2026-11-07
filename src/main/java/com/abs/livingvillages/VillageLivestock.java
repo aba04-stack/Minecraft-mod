@@ -666,6 +666,13 @@ public final class VillageLivestock {
         long now = level.getGameTime();
         String lureOwner = sheepData.getString(SHEEP_LURE_OWNER);
         long lastLure = sheepData.getLong(SHEEP_LAST_LURE_TICK);
+        // Herding never overrides the animal controller's danger response, parental protection,
+        // or shelter-seeking decision. The alert window also protects the herd between AI checks.
+        int animalAction = sheepData.getInt(VillageAnimalAI.LAST_ACTION_KEY);
+        if (sheepData.getLong(VillageAnimalAI.HERD_ALERT_UNTIL_KEY) > now
+            || animalAction == com.abs.livingvillages.domain.TrustAndAnimalModel.ANIMAL_ACTION_FLEE_THREAT
+            || animalAction == com.abs.livingvillages.domain.TrustAndAnimalModel.ANIMAL_ACTION_PROTECT_OFFSPRING
+            || animalAction == com.abs.livingvillages.domain.TrustAndAnimalModel.ANIMAL_ACTION_SEEK_SHELTER) return;
         if (villageId == null || (!owner.isBlank() && !owner.equals(villageId.toString()))
             || (!lureOwner.isBlank() && !lureOwner.equals(villageId.toString()) && now - lastLure < HERD_TIMEOUT_TICKS)
             || isInsideVillagePen(level, center, sheep) || sheep.distanceToSqr(herder) > SHEEP_LURE_RADIUS_SQR
