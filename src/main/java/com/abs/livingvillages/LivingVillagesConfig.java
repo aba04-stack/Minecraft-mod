@@ -222,7 +222,7 @@ public final class LivingVillagesConfig {
             .define("enable_daily_life", true);
 
         ENABLE_VILLAGE_LIVESTOCK = builder
-            .comment("Разрешить животноводу собирать настоящую шерсть с явно закреплённых за деревней овец в закрытых загонах для строительства кроватей. Требуются реальные ножницы.")
+            .comment("Строитель возводит загон из реальных материалов, животновод приводит овец на настоящую пшеницу и собирает шерсть настоящими ножницами.")
             .translation("livingvillages.config.enable_village_livestock")
             .define("enable_village_livestock", true);
 
