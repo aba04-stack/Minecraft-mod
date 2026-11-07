@@ -318,7 +318,9 @@ public final class VillageLogistics {
         if (block != Blocks.AIR) {
             BlockState state = block.defaultBlockState();
             if (state.is(BlockTags.LOGS) || state.is(BlockTags.PLANKS) || state.is(BlockTags.SAPLINGS)
-                || state.is(BlockTags.WOOL) || VillageBuilder.isSupportedStructuralBlock(block)) return true;
+                || state.is(BlockTags.WOOL) || VillageBuilder.isSupportedStructuralBlock(block)
+                || block instanceof net.minecraft.world.level.block.FenceBlock
+                || block instanceof net.minecraft.world.level.block.FenceGateBlock) return true;
         }
         return (VillageBuilder.isSupportedBedItem(stack.getItem())
                 || Block.byItem(stack.getItem()) instanceof DoorBlock)
