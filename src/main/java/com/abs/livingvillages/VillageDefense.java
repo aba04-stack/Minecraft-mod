@@ -42,6 +42,7 @@ public final class VillageDefense {
     private static final String ROUTE_X = P + "route_x", ROUTE_Y = P + "route_y", ROUTE_Z = P + "route_z";
     private static final String ROUTE_KIND = P + "route_kind";
     private static final String ROUTE_THREAT_UUID = P + "threat_uuid";
+    private static final String COMBAT_ACTIVE = P + "combat_active";
     private static final int TICK_STEP = 5;
     private static final int EQUIP_INTERVAL_TICKS = 200;
     private static final int ATTACK_COOLDOWN_TICKS = 20;
@@ -78,6 +79,7 @@ public final class VillageDefense {
         BlockPos home = getOrCreateHome(guard, level, radius);
         Mob threat = findThreat(guard, level, home, radius);
         if (threat != null) {
+            data.putBoolean(COMBAT_ACTIVE, true);
             data.putLong(NEXT_PATROL, now + PATROL_INTERVAL_TICKS);
             VillageRegistry.raiseVillageAlarm(level, home, now);
             ringNearbyVillageBell(level, home);
@@ -89,7 +91,9 @@ public final class VillageDefense {
             return;
         }
 
-        // No current threat. Assist wounded villagers after combat before returning to patrol.
+        // No current threat. Routine lighting is allowed again only after this tick confirms combat ended.
+        data.putBoolean(COMBAT_ACTIVE, false);
+        // Assist wounded villagers after combat before returning to patrol.
         if (assistWoundedVillagerAfterCombat(guard, level, home, data, now)) {
             return;
         }
@@ -105,6 +109,17 @@ public final class VillageDefense {
                 setOwnedRoute(guard, data, patrolTarget, "patrol", null, now);
             }
         }
+    }
+
+    /** Routine lighting must not interrupt active combat, retreat, or post-combat aid. */
+    public static boolean canPerformPatrolLighting(Villager guard) {
+        if (guard == null) return false;
+        CompoundTag data = guard.getPersistentData();
+        String routeKind = data.getString(ROUTE_KIND);
+        return !data.getBoolean(COMBAT_ACTIVE)
+            && !"threat".equals(routeKind)
+            && !"retreat".equals(routeKind)
+            && !"assist_wounded".equals(routeKind);
     }
 
     public static Mob selectPriorityThreat(Villager guard, ServerLevel level, BlockPos home, int radius) {
