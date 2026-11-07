@@ -26,6 +26,12 @@ assert "boolean needsWood = adults > 1 && wood < targetWood;" in DEMAND, (
 assert "int desiredLumberjacks = needsWood && treesAvailable ? populationWorkSlots : 0;" in DEMAND, (
     "do not send a lumberjack to a location with no mature tree"
 )
+ROLES = (JAVA / "VillagerRoles.java").read_text(encoding="utf-8")
+assert "desiredLumberjackSlots(true, false, 0, true) == 0" in GAME_TESTS
+assert "if (!enabled || !treesAvailable) return 0;" in ROLES
+assert "resourcePlan.treesAvailable() &&" in TREE,
+"no lumberjack assignment without a real tree");
+
 assert '.define("enable_daily_life", false)' in CONFIG, (
     "social visits must be disabled by default so development has priority"
 )
