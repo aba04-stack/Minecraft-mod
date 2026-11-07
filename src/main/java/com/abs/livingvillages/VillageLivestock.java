@@ -10,6 +10,7 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.memory.WalkTarget;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.animal.Sheep;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.Villager;
@@ -48,6 +49,7 @@ import java.util.UUID;
  */
 public final class VillageLivestock {
     public static final String ACTIVE_KEY = "livingvillages_livestock_active";
+    public static final String PENDING_GATE_CLOSE_KEY = "livingvillages_livestock_gate_close_pending";
     public static final String SHEEP_OWNER_KEY = "livingvillages_livestock_owner";
 
     private static final String STATE = "livingvillages_livestock_state";
@@ -385,12 +387,16 @@ public final class VillageLivestock {
     public static void onVillagerTick(EntityTickEvent.Post event) {
         if (!(event.getEntity() instanceof Villager villager)
             || villager.level().isClientSide() || !villager.isAlive() || villager.isBaby()
-            || villager.tickCount % 5 != 0 || !VillagerRoles.isHerder(villager)
+            || villager.tickCount % 5 != 0
+            || (!VillagerRoles.isHerder(villager) && !villager.getPersistentData().getBoolean(ACTIVE_KEY)
+                && !villager.getPersistentData().getBoolean(PENDING_GATE_CLOSE_KEY))
             || !(villager.level() instanceof ServerLevel level)) return;
 
         CompoundTag data = villager.getPersistentData();
         BlockPos center = ownershipCenter(villager);
         long now = level.getGameTime();
+        servicePendingGateClose(level, center, data);
+        if (!VillagerRoles.isHerder(villager) && !data.getBoolean(ACTIVE_KEY)) return;
         if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
             || !LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
@@ -448,6 +454,9 @@ public final class VillageLivestock {
     private static void runHerding(Villager herder, ServerLevel level, BlockPos center, CompoundTag data, long now) {
         if (!hasWheatInHand(herder)) {
             if (!equipWheatFromInventory(herder)) {
+                transferFromResident(level, center, herder, Items.WHEAT);
+            }
+            if (!equipWheatFromInventory(herder)) {
                 StorageTarget source = findNearestStorageWithItem(herder, level, Items.WHEAT);
                 if (source == null) {
                     data.putLong(NEXT_ACTION, now + FAILURE_BACKOFF_TICKS);
@@ -477,8 +486,8 @@ public final class VillageLivestock {
         }
 
         if (now > data.getLong(HERD_DEADLINE)) {
-            closePenGate(level, center);
-            clearOwnedWalkTarget(herder, penCenter(level, center));
+            requestPenGateClose(level, center, data);
+            clearHerdMovement(herder, level, center, data);
             data.remove(TARGET_SHEEP);
             data.putInt(STATE, STATE_IDLE);
             data.putLong(NEXT_ACTION, now + FAILURE_BACKOFF_TICKS);
@@ -522,7 +531,7 @@ public final class VillageLivestock {
         if (state == STATE_HERD_ENTER_PEN) {
             BlockPos inside = penCenter(level, center);
             if (inside == null) {
-                closePenGate(level, center);
+                requestPenGateClose(level, center, data);
                 finishTask(herder, data, now + RETRY_TICKS);
                 return;
             }
@@ -538,14 +547,14 @@ public final class VillageLivestock {
                     VillageRegistry.recordDiagnostic(level, center, "Животновод",
                         "Овца приведена в загон на настоящую пшеницу.");
                 }
-                closePenGate(level, center);
+                requestPenGateClose(level, center, data);
                 data.remove(TARGET_SHEEP);
                 data.putInt(STATE, STATE_IDLE);
                 data.putLong(NEXT_ACTION, now + 20L);
                 return;
             }
             if (!hasWheatInHand(herder)) {
-                closePenGate(level, center);
+                requestPenGateClose(level, center, data);
                 data.remove(TARGET_SHEEP);
                 data.putInt(STATE, STATE_IDLE);
                 return;
@@ -555,6 +564,9 @@ public final class VillageLivestock {
     }
 
     private static void runShearing(Villager herder, ServerLevel level, BlockPos center, CompoundTag data, long now) {
+        if (countItem(herder.getInventory(), Items.SHEARS) <= 0) {
+            transferFromResident(level, center, herder, Items.SHEARS);
+        }
         if (countItem(herder.getInventory(), Items.SHEARS) <= 0) {
             StorageTarget source = findNearestStorageWithItem(herder, level, Items.SHEARS);
             if (source == null) {
@@ -648,12 +660,16 @@ public final class VillageLivestock {
         BlockPos center = ownershipCenter(herder);
         UUID villageId = VillageRegistry.villageId(level, center);
         String owner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
+        CompoundTag sheepData = sheep.getPersistentData();
+        long now = level.getGameTime();
+        String lureOwner = sheepData.getString(SHEEP_LURE_OWNER);
+        long lastLure = sheepData.getLong(SHEEP_LAST_LURE_TICK);
         if (villageId == null || (!owner.isBlank() && !owner.equals(villageId.toString()))
+            || (!lureOwner.isBlank() && !lureOwner.equals(villageId.toString()) && now - lastLure < HERD_TIMEOUT_TICKS)
             || isInsideVillagePen(level, center, sheep) || sheep.distanceToSqr(herder) > SHEEP_LURE_RADIUS_SQR
             || !canSeeSheep(level, sheep, herder)) return;
 
-        long now = level.getGameTime();
-        if (now - sheep.getPersistentData().getLong(SHEEP_LAST_LURE_TICK) < 20L) return;
+        if (now - lastLure < 20L) return;
         sheep.getNavigation().moveTo(herder, SHEEP_FOLLOW_SPEED);
         sheep.getPersistentData().putLong(SHEEP_LAST_LURE_TICK, now);
         sheep.getPersistentData().putString(SHEEP_LURE_OWNER, villageId.toString());
@@ -904,12 +920,26 @@ public final class VillageLivestock {
         return true;
     }
 
-    private static void closePenGate(ServerLevel level, BlockPos center) {
+    private static boolean closePenGateIfClear(ServerLevel level, BlockPos center) {
         BlockPos gatePos = penGatePosition(level, center);
-        if (gatePos == null || !level.hasChunkAt(gatePos)) return;
+        if (gatePos == null || !level.hasChunkAt(gatePos)) return false;
         BlockState gate = level.getBlockState(gatePos);
-        if (gate.getBlock() instanceof FenceGateBlock && gate.getValue(FenceGateBlock.OPEN)) {
-            level.setBlock(gatePos, gate.setValue(FenceGateBlock.OPEN, false), 3);
+        if (!(gate.getBlock() instanceof FenceGateBlock)) return false;
+        if (!gate.getValue(FenceGateBlock.OPEN)) return true;
+        // Never close the gate on the sheep or villager currently crossing it.
+        AABB gateVolume = new AABB(gatePos);
+        if (!level.getEntitiesOfClass(LivingEntity.class, gateVolume, LivingEntity::isAlive).isEmpty()) return false;
+        return level.setBlock(gatePos, gate.setValue(FenceGateBlock.OPEN, false), 3);
+    }
+
+    private static void requestPenGateClose(ServerLevel level, BlockPos center, CompoundTag data) {
+        if (closePenGateIfClear(level, center)) data.remove(PENDING_GATE_CLOSE_KEY);
+        else data.putBoolean(PENDING_GATE_CLOSE_KEY, true);
+    }
+
+    private static void servicePendingGateClose(ServerLevel level, BlockPos center, CompoundTag data) {
+        if (data.getBoolean(PENDING_GATE_CLOSE_KEY) && closePenGateIfClear(level, center)) {
+            data.remove(PENDING_GATE_CLOSE_KEY);
         }
     }
 
@@ -1022,13 +1052,25 @@ public final class VillageLivestock {
 
     private static void pauseOwnedRoute(Villager worker, CompoundTag data) {
         if (data.getBoolean(ROUTE_ACTIVE)) clearOwnedWalkTarget(worker, routeStand(data));
-        if (VillagerRoles.isHerder(worker) && worker.level() instanceof ServerLevel level) {
+        if (worker.level() instanceof ServerLevel level) {
             int state = data.getInt(STATE);
             if (state == STATE_HERD_TO_GATE || state == STATE_HERD_ENTER_PEN) {
-                closePenGate(level, ownershipCenter(worker));
+                requestPenGateClose(level, ownershipCenter(worker), data);
             }
+            clearHerdMovement(worker, level, ownershipCenter(worker), data);
         }
         // A pause does not delete or consume the physical bait/tool/cargo.
+    }
+
+    private static void clearHerdMovement(Villager worker, ServerLevel level, BlockPos center, CompoundTag data) {
+        int state = data.getInt(STATE);
+        if (state == STATE_HERD_APPROACH || state == STATE_SHEAR) {
+            Sheep target = findTargetSheep(level, worker, data.getString(TARGET_SHEEP));
+            if (target != null) clearOwnedWalkTarget(worker, target.blockPosition());
+        }
+        BlockPos gate = penGatePosition(level, center);
+        if (gate != null) clearOwnedWalkTarget(worker, gate.north());
+        clearOwnedWalkTarget(worker, penCenter(level, center));
     }
 
     private static void clearOwnedWalkTarget(Villager worker, BlockPos target) {
@@ -1111,6 +1153,38 @@ public final class VillageLivestock {
         }
     }
 
+    /** Transfers one real item from an idle resident so the specialist can use it. */
+    private static boolean transferFromResident(ServerLevel level, BlockPos center, Villager recipient, Item item) {
+        if (level == null || center == null || recipient == null || item == null
+            || inventoryCapacityFor(recipient.getInventory(), item) < 1) return false;
+        for (Villager resident : VillageArea.findVillagers(level, center)) {
+            if (resident == recipient || !resident.isAlive() || resident.isBaby()) continue;
+            CompoundTag data = resident.getPersistentData();
+            if (data.getBoolean(VillageBuilder.ACTIVE_KEY)
+                || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
+                || data.getBoolean(VillagePopulation.ACTIVE_KEY)
+                || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
+                || data.getBoolean("livingvillages_logistics_active")
+                || data.getBoolean("livingvillages_mining_active")
+                || data.getBoolean("livingvillages_treework_active")
+                || data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
+                || data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY)
+                || data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY)) continue;
+
+            ItemStack removed = removeOne(resident.getInventory(), item);
+            if (removed.isEmpty()) continue;
+            ItemStack remainder = recipient.getInventory().addItem(removed);
+            if (!remainder.isEmpty()) {
+                ItemStack stillUnreturned = resident.getInventory().addItem(remainder.copy());
+                if (!stillUnreturned.isEmpty()) resident.spawnAtLocation(stillUnreturned);
+            }
+            resident.getInventory().setChanged();
+            recipient.getInventory().setChanged();
+            return remainder.isEmpty();
+        }
+        return false;
+    }
+
     private static void transferFromStorage(Villager worker, Container storage, Item item, int amount) {
         if (worker == null || storage == null || amount <= 0) return;
         int removed = removeItem(storage, item, amount);
@@ -1130,7 +1204,10 @@ public final class VillageLivestock {
     private static void finishTask(Villager villager, CompoundTag data, long retryAt) {
         clearStorageRoute(villager, data);
         VillageReservations.release(data, "livestock");
-        if (villager.level() instanceof ServerLevel level) closePenGate(level, ownershipCenter(villager));
+        if (villager.level() instanceof ServerLevel level) {
+            requestPenGateClose(level, ownershipCenter(villager), data);
+            clearHerdMovement(villager, level, ownershipCenter(villager), data);
+        }
         returnWheatToInventory(villager);
         data.putBoolean(ACTIVE_KEY, false);
         data.putInt(STATE, STATE_IDLE);
