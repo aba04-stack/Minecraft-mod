@@ -267,6 +267,20 @@ public final class VillageLivestock {
         return pendingPenRequirement(level, center, false);
     }
 
+    /** Resolves the matching plank type from the material-pinned fence requirement. */
+    public static Item pendingPenPlankItem(ServerLevel level, BlockPos center) {
+        Item fence = pendingPenFenceItem(level, center);
+        if (fence == Items.AIR) return Items.AIR;
+        ResourceLocation fenceKey = BuiltInRegistries.ITEM.getKey(fence);
+        String path = fenceKey.getPath();
+        if (!path.endsWith("_fence")) return Items.AIR;
+        ResourceLocation plankKey = ResourceLocation.tryParse(
+            fenceKey.getNamespace() + ":" + path.substring(0, path.length() - "_fence".length()) + "_planks");
+        if (plankKey == null) return Items.AIR;
+        Item planks = BuiltInRegistries.ITEM.get(plankKey);
+        return Block.byItem(planks).defaultBlockState().is(net.minecraft.tags.BlockTags.PLANKS) ? planks : Items.AIR;
+    }
+
     private static Item pendingPenRequirement(ServerLevel level, BlockPos center, boolean fence) {
         for (var order : VillageWorkOrders.list(level, center, level.getGameTime())) {
             if (!"animal_pen".equals(order.kind()) || order.isTerminal()) continue;
@@ -312,9 +326,23 @@ public final class VillageLivestock {
     }
 
     /** A herder is useful before shearing too: first it fills the village-built pen with sheep. */
+    public static boolean hasWheatAvailable(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return false;
+        if (VillageRegistry.countAvailableOwnedStorageItems(level, center, Set.of("minecraft:wheat"))
+            .getOrDefault("minecraft:wheat", 0) > 0) return true;
+        return VillageArea.findVillagers(level, center).stream()
+            .anyMatch(resident -> countItem(resident.getInventory(), Items.WHEAT) > 0);
+    }
+
+    public static boolean hasHerderWorkAvailable(ServerLevel level, BlockPos center) {
+        return LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
+            && ((needsHerding(level, center) && hasWheatAvailable(level, center))
+                || (needsWoolForHousing(level, center) && hasShearsAvailable(level, center)));
+    }
+
     public static boolean canAssignHerder(ServerLevel level, BlockPos center, Villager candidate) {
         return candidate != null && candidate.isAlive() && !candidate.isBaby()
-            && (needsHerding(level, center) || needsWoolForHousing(level, center));
+            && hasHerderWorkAvailable(level, center);
     }
 
     public static boolean needsWoolForHousing(ServerLevel level, BlockPos center) {
@@ -366,11 +394,12 @@ public final class VillageLivestock {
         }
 
         if (!data.getBoolean(ACTIVE_KEY)) {
-            if (!hasCompletePen(level, center)) return;
+            if (now < data.getLong(NEXT_ACTION)) return;
+            if (!hasCompletePen(level, center)
+                || (!hasWoolInInventory(villager) && !needsHerding(level, center) && !needsWoolForHousing(level, center))) return;
             data.putBoolean(ACTIVE_KEY, true);
             data.putInt(STATE, STATE_IDLE);
             data.putLong(TASK_STARTED, now);
-            data.putLong(NEXT_ACTION, 0L);
         }
         if (now < data.getLong(NEXT_ACTION)) return;
 
@@ -392,13 +421,14 @@ public final class VillageLivestock {
             return;
         }
 
-        if (needsWoolForHousing(level, center)) {
-            runShearing(villager, level, center, data, now);
+        // Fill the pen to its small starter herd before spending shears on wool.
+        if (needsHerding(level, center)) {
+            runHerding(villager, level, center, data, now);
             return;
         }
 
-        if (needsHerding(level, center)) {
-            runHerding(villager, level, center, data, now);
+        if (needsWoolForHousing(level, center)) {
+            runShearing(villager, level, center, data, now);
             return;
         }
 
@@ -983,7 +1013,12 @@ public final class VillageLivestock {
 
     private static void pauseOwnedRoute(Villager worker, CompoundTag data) {
         if (data.getBoolean(ROUTE_ACTIVE)) clearOwnedWalkTarget(worker, routeStand(data));
-        if (VillagerRoles.isHerder(worker) && hasWheatInHand(worker)) return;
+        if (VillagerRoles.isHerder(worker) && worker.level() instanceof ServerLevel level) {
+            int state = data.getInt(STATE);
+            if (state == STATE_HERD_TO_GATE || state == STATE_HERD_ENTER_PEN) {
+                closePenGate(level, ownershipCenter(worker));
+            }
+        }
         // A pause does not delete or consume the physical bait/tool/cargo.
     }
 
@@ -1086,6 +1121,7 @@ public final class VillageLivestock {
     private static void finishTask(Villager villager, CompoundTag data, long retryAt) {
         clearStorageRoute(villager, data);
         VillageReservations.release(data, "livestock");
+        if (villager.level() instanceof ServerLevel level) closePenGate(level, ownershipCenter(villager));
         returnWheatToInventory(villager);
         data.putBoolean(ACTIVE_KEY, false);
         data.putInt(STATE, STATE_IDLE);
