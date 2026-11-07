@@ -273,11 +273,11 @@ public final class VillageDailyLife {
             || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY)
             || data.getBoolean(VillageBuilder.ACTIVE_KEY)
             || data.getBoolean(VillageFarmBuilder.ACTIVE_KEY)
-            || data.getBoolean(VillageLivestock.ACTIVE_KEY);
             || data.getBoolean(VillagerAutonomy.HARVEST_ACTIVE_KEY)
             || data.getBoolean(VillagerAutonomy.HARVEST_CYCLE_KEY)
             || data.getBoolean(VillagerAutonomy.SEED_FETCH_ACTIVE_KEY)
-            || data.getBoolean("livingvillages_autonomy_target_active");
+            || data.getBoolean("livingvillages_autonomy_target_active")
+            || data.getBoolean(VillageLivestock.ACTIVE_KEY);
     }
 
     private static void setRoute(Villager villager, Villager target) {
