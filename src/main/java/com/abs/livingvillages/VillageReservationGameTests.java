@@ -650,10 +650,19 @@ public final class VillageReservationGameTests {
 
         BlockPos centerOne = helper.absolutePos(new BlockPos(2, 1, 1));
         BlockPos centerTwo = helper.absolutePos(new BlockPos(26, 1, 1));
+        List<Villager> firstResidentGroup = VillageArea.findVillagers(helper.getLevel(), centerOne, 32, 32);
+        List<Villager> secondResidentGroup = VillageArea.findVillagers(helper.getLevel(), centerTwo, 32, 32);
+        helper.assertTrue(firstResidentGroup.size() == 2 && secondResidentGroup.size() == 2,
+            "The two test HOME clusters must each resolve to exactly their own residents (first="
+                + firstResidentGroup.size() + ", second=" + secondResidentGroup.size() + ").");
+
         java.util.UUID villageOneId = VillageRegistry.villageId(helper.getLevel(), centerOne);
         java.util.UUID villageTwoId = VillageRegistry.villageId(helper.getLevel(), centerTwo);
         helper.assertTrue(villageOneId != null && villageTwoId != null && !villageOneId.equals(villageTwoId),
-            "The two disjoint HOME clusters must resolve to distinct persistent village identities.");
+            "The two disjoint HOME clusters must resolve to distinct identities (first=" + villageOneId
+                + ", second=" + villageTwoId + ", firstGroup="
+                + firstResidentGroup.stream().map(v -> v.getUUID().toString()).toList()
+                + ", secondGroup=" + secondResidentGroup.stream().map(v -> v.getUUID().toString()).toList() + ").");
         helper.assertTrue(VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerOne, storageOne)
                 && VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerTwo, storageTwo)
                 && !VillageArea.isStorageInResidentGroup(helper.getLevel(), ownerOne, storageTwo)
