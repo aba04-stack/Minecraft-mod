@@ -66,6 +66,7 @@ public final class VillageLivestock {
     private static final String ROUTE_STORAGE_Z = "livingvillages_livestock_route_storage_z";
     private static final String ROUTE_STAND_X = "livingvillages_livestock_route_stand_x";
     private static final String ROUTE_STAND_Y = "livingvillages_livestock_route_stand_y";
+    private static final String ROUTE_STAND_Z = "livingvillages_livestock_route_stand_z";
     private static final String ROUTE_STARTED = "livingvillages_livestock_route_started";
 
     private static final String SHEEP_LAST_LURE_TICK = "livingvillages_livestock_last_lure_tick";
@@ -91,7 +92,7 @@ public final class VillageLivestock {
     private static final long HERD_TIMEOUT_TICKS = 500L;
     private static final double SHEEP_LURE_RADIUS_SQR = 10.0D * 10.0D;
     private static final double SHEEP_FOLLOW_SPEED = 1.05D;
-    private static final double WALK_SPEED = 0.92D;
+    private static final float WALK_SPEED = 0.92F;
 
     private static final List<Item> WOOL_ITEMS = List.of(
         Items.WHITE_WOOL, Items.ORANGE_WOOL, Items.MAGENTA_WOOL, Items.LIGHT_BLUE_WOOL,
@@ -631,7 +632,8 @@ public final class VillageLivestock {
         if (villageId == null || !hasCompletePen(level, center)) return;
         var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
         BlockPos site = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
-        AABB inside = new AABB(site.offset(1, 0, 1), site.offset(4, 2, 4));
+        AABB inside = new AABB(site.getX() + 1.0D, site.getY(), site.getZ() + 1.0D,
+            site.getX() + 4.0D, site.getY() + 2.0D, site.getZ() + 4.0D);
         for (Sheep sheep : level.getEntitiesOfClass(Sheep.class, inside, Sheep::isAlive)) {
             if (!isInsideVillagePen(level, center, sheep)) continue;
             String owner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
@@ -702,7 +704,14 @@ public final class VillageLivestock {
             || !level.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)
             || !villageId.toString().equals(sheep.getPersistentData().getString(SHEEP_OWNER_KEY))
             || !isInsideVillagePen(level, center, sheep) || !sheep.readyForShearing()) return false;
-        sheep.shear(level, SoundSource.NEUTRAL, shears);
+        // 1.21.1 exposes Sheep.shear(SoundSource); it creates the vanilla drops.
+        // Apply the real shears' durability cost because the tool is carried in inventory, not equipped.
+        sheep.shear(SoundSource.NEUTRAL);
+        if (sheep.isSheared()) {
+            int nextDamage = shears.getDamageValue() + 1;
+            if (nextDamage >= shears.getMaxDamage()) shears.shrink(1);
+            else shears.setDamageValue(nextDamage);
+        }
         return sheep.isSheared();
     }
 
@@ -757,7 +766,8 @@ public final class VillageLivestock {
         var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
         BlockPos site = checkpoint == null ? null : new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
         if (site == null) return null;
-        AABB inside = new AABB(site.offset(1, 0, 1), site.offset(4, 2, 4));
+        AABB inside = new AABB(site.getX() + 1.0D, site.getY(), site.getZ() + 1.0D,
+            site.getX() + 4.0D, site.getY() + 2.0D, site.getZ() + 4.0D);
         return level.getEntitiesOfClass(Sheep.class, inside,
                 sheep -> sheep.isAlive() && !sheep.isBaby()
                     && villageId.toString().equals(sheep.getPersistentData().getString(SHEEP_OWNER_KEY))
@@ -781,7 +791,8 @@ public final class VillageLivestock {
         var checkpoint = VillageRegistry.getLivestockPenCheckpoint(level, center);
         if (owner == null || checkpoint == null || !hasCompletePen(level, center)) return 0;
         BlockPos site = new BlockPos(checkpoint.siteX(), checkpoint.siteY(), checkpoint.siteZ());
-        AABB inside = new AABB(site.offset(1, 0, 1), site.offset(4, 2, 4));
+        AABB inside = new AABB(site.getX() + 1.0D, site.getY(), site.getZ() + 1.0D,
+            site.getX() + 4.0D, site.getY() + 2.0D, site.getZ() + 4.0D);
         return level.getEntitiesOfClass(Sheep.class, inside,
             sheep -> sheep.isAlive() && !sheep.isBaby()
                 && owner.toString().equals(sheep.getPersistentData().getString(SHEEP_OWNER_KEY))
@@ -1016,6 +1027,7 @@ public final class VillageLivestock {
         data.putInt(ROUTE_STORAGE_Z, target.storage().getZ());
         data.putInt(ROUTE_STAND_X, target.stand().getX());
         data.putInt(ROUTE_STAND_Y, target.stand().getY());
+        data.putInt(ROUTE_STAND_Z, target.stand().getZ());
         data.putLong(ROUTE_STARTED, now);
         data.putLong(LAST_ORDER, now);
         worker.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target.stand(), WALK_SPEED, 1));
@@ -1066,7 +1078,7 @@ public final class VillageLivestock {
         }
         data.putBoolean(ROUTE_ACTIVE, false);
         data.remove(ROUTE_KIND); data.remove(ROUTE_STORAGE_X); data.remove(ROUTE_STORAGE_Y); data.remove(ROUTE_STORAGE_Z);
-        data.remove(ROUTE_STAND_X); data.remove(ROUTE_STAND_Y); data.remove(ROUTE_STARTED);
+        data.remove(ROUTE_STAND_X); data.remove(ROUTE_STAND_Y); data.remove(ROUTE_STAND_Z); data.remove(ROUTE_STARTED);
     }
 
     private static void pauseOwnedRoute(Villager worker, CompoundTag data) {
