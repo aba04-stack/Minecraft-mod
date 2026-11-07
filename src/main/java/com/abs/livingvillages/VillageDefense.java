@@ -1,0 +1,502 @@
+package com.abs.livingvillages;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.ai.memory.WalkTarget;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.event.tick.EntityTickEvent;
+
+import java.util.Comparator;
+import java.util.List;
+import java.util.function.Predicate;
+
+/**
+ * A village guard role layered over a vanilla villager. Guards can equip weapons and armor
+ * from community storage, walk toward nearby hostile mobs, attack only at close range and
+ * retreat toward the village when badly hurt. The villager keeps its vanilla sleep and social AI.
+ */
+public final class VillageDefense {
+    private static final String P = "livingvillages_defense_";
+    private static final String NEXT_EQUIP = P + "next_equip";
+    private static final String NEXT_ATTACK = P + "next_attack";
+    private static final String NEXT_PATROL = P + "next_patrol";
+    private static final String NEXT_ASSIST = P + "next_assist";
+    private static final String LAST_ROUTE_ORDER = P + "last_route_order";
+    private static final String HAS_ROUTE = P + "has_route";
+    private static final String ROUTE_X = P + "route_x", ROUTE_Y = P + "route_y", ROUTE_Z = P + "route_z";
+    private static final String ROUTE_KIND = P + "route_kind";
+    private static final String ROUTE_THREAT_UUID = P + "threat_uuid";
+    private static final String COMBAT_ACTIVE = P + "combat_active";
+    private static final int TICK_STEP = 5;
+    private static final int EQUIP_INTERVAL_TICKS = 200;
+    private static final int ATTACK_COOLDOWN_TICKS = 20;
+    private static final int PATROL_INTERVAL_TICKS = 160;
+    private static final int ASSIST_COOLDOWN_TICKS = 100;
+    private static final float WALK_SPEED = 0.82F;
+    private VillageDefense() {
+    }
+
+    public static void onVillagerTick(EntityTickEvent.Post event) {
+        if (!(event.getEntity() instanceof Villager guard) || guard.level().isClientSide()
+            || !guard.isAlive() || guard.isBaby() || guard.tickCount % TICK_STEP != 0) {
+            return;
+        }
+        CompoundTag data = guard.getPersistentData();
+        if (!VillagerRoles.isGuard(guard)) {
+            if (data.getBoolean(HAS_ROUTE)) clearOwnedRoute(guard, data);
+            return;
+        }
+        if (!LivingVillagesConfig.ENABLE_AUTONOMOUS_DEVELOPMENT.get()
+            || !LivingVillagesConfig.ENABLE_VILLAGE_GUARDS.get()) {
+            if (data.getBoolean(HAS_ROUTE)) clearOwnedRoute(guard, data);
+            return;
+        }
+        if (!(guard.level() instanceof ServerLevel level)) return;
+        long now = level.getGameTime();
+
+        if (now >= data.getLong(NEXT_EQUIP)) {
+            equipFromNearbyStorage(guard, level);
+            data.putLong(NEXT_EQUIP, now + EQUIP_INTERVAL_TICKS);
+        }
+
+        int radius = LivingVillagesConfig.VILLAGE_DEFENSE_RADIUS_BLOCKS.get();
+        BlockPos home = getOrCreateHome(guard, level, radius);
+        Mob threat = findThreat(guard, level, home, radius);
+        if (threat != null) {
+            data.putBoolean(COMBAT_ACTIVE, true);
+            data.putLong(NEXT_PATROL, now + PATROL_INTERVAL_TICKS);
+            VillageRegistry.raiseVillageAlarm(level, home, now);
+            ringNearbyVillageBell(level, home);
+            if (!isSword(guard.getItemBySlot(EquipmentSlot.MAINHAND))) {
+                VillageRegistry.setGuardEquipmentRequested(level, home, true);
+            }
+            evacuateNearbyCivilians(level, home);
+            defendAgainst(guard, threat, level, data, now);
+            return;
+        }
+
+        // No current threat. Routine lighting is allowed again only after this tick confirms combat ended.
+        data.putBoolean(COMBAT_ACTIVE, false);
+        // Assist wounded villagers after combat before returning to patrol.
+        if (assistWoundedVillagerAfterCombat(guard, level, home, data, now)) {
+            return;
+        }
+
+        // Return to normal patrol/duties once threat and post-combat aid are complete.
+        if (data.getBoolean(HAS_ROUTE) && !data.getString(ROUTE_KIND).equals("patrol")) {
+            clearOwnedRoute(guard, data);
+        }
+        if (now >= data.getLong(NEXT_PATROL)
+            && !guard.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
+            BlockPos patrolTarget = choosePatrolPoint(guard, level, radius);
+            if (patrolTarget != null) {
+                setOwnedRoute(guard, data, patrolTarget, "patrol", null, now);
+            }
+        }
+    }
+
+    /** Routine lighting must not interrupt active combat, retreat, or post-combat aid. */
+    public static boolean canPerformPatrolLighting(Villager guard) {
+        if (guard == null) return false;
+        CompoundTag data = guard.getPersistentData();
+        String routeKind = data.getString(ROUTE_KIND);
+        return !data.getBoolean(COMBAT_ACTIVE)
+            && !"threat".equals(routeKind)
+            && !"retreat".equals(routeKind)
+            && !"assist_wounded".equals(routeKind);
+    }
+
+    public static Mob selectPriorityThreat(Villager guard, ServerLevel level, BlockPos home, int radius) {
+        if (guard == null || level == null || home == null) return null;
+        AABB area = new AABB(home).inflate(radius, 10.0D, radius);
+        List<Villager> residents = VillageArea.findVillagers(level, home);
+        List<Mob> enemies = level.getEntitiesOfClass(Mob.class, area,
+            mob -> mob.isAlive() && mob instanceof Enemy && !mob.isRemoved());
+        Mob best = null;
+        double bestScore = -Double.MAX_VALUE;
+        for (Mob mob : enemies) {
+            if (!isInsideHorizontalRadius(home, mob.blockPosition(), radius)) continue;
+            double guardDistSqr = guard.distanceToSqr(mob);
+            if (guardDistSqr > (double) radius * radius * 2.0D) continue;
+
+            boolean targetingVillager = mob.getTarget() instanceof Villager;
+            boolean recentlyHurtVillager = false;
+            double nearestCivilianSqr = Double.MAX_VALUE;
+            for (Villager resident : residents) {
+                if (!resident.isAlive()) continue;
+                if (resident.getLastHurtByMob() == mob) {
+                    recentlyHurtVillager = true;
+                }
+                if (!VillagerRoles.isGuard(resident)) {
+                    nearestCivilianSqr = Math.min(nearestCivilianSqr, resident.distanceToSqr(mob));
+                }
+            }
+            double score = com.abs.livingvillages.domain.MonsterTacticalModel.scoreGuardThreatPriority(
+                guardDistSqr,
+                nearestCivilianSqr,
+                targetingVillager,
+                recentlyHurtVillager
+            );
+            if (score > bestScore || (score == bestScore && best != null
+                && mob.getUUID().toString().compareTo(best.getUUID().toString()) < 0)) {
+                bestScore = score;
+                best = mob;
+            }
+        }
+        return best;
+    }
+
+    private static Mob findThreat(Villager guard, ServerLevel level, BlockPos home, int radius) {
+        return selectPriorityThreat(guard, level, home, radius);
+    }
+
+    public static boolean assistWoundedVillagerAfterCombat(
+            Villager guard,
+            ServerLevel level,
+            BlockPos home,
+            CompoundTag data,
+            long now) {
+        if (guard == null || level == null || home == null || data == null) return false;
+        if (now < data.getLong(NEXT_ASSIST)) return false;
+
+        List<Villager> residents = VillageArea.findVillagers(level, home);
+        Villager mostWounded = null;
+        double lowestRatio = 1.0D;
+        for (Villager resident : residents) {
+            if (resident == guard || !resident.isAlive()) continue;
+            double ratio = resident.getMaxHealth() > 0.0F
+                ? (resident.getHealth() / resident.getMaxHealth())
+                : 1.0D;
+            if (!com.abs.livingvillages.domain.MonsterTacticalModel.shouldGuardAssistWoundedVillager(false, ratio)) {
+                continue;
+            }
+            if (ratio < lowestRatio || (ratio == lowestRatio && mostWounded != null
+                && resident.getUUID().toString().compareTo(mostWounded.getUUID().toString()) < 0)) {
+                lowestRatio = ratio;
+                mostWounded = resident;
+            }
+        }
+        if (mostWounded == null) return false;
+
+        if (guard.distanceToSqr(mostWounded) <= 3.5D * 3.5D) {
+            clearOwnedRoute(guard, data);
+            mostWounded.heal(2.0F);
+            mostWounded.addEffect(new net.minecraft.world.effect.MobEffectInstance(
+                net.minecraft.world.effect.MobEffects.REGENERATION, 60, 0));
+            shareRecoveryFoodIfCarried(guard, mostWounded);
+            level.sendParticles(ParticleTypes.HEART,
+                mostWounded.getX(), mostWounded.getY() + 1.0D, mostWounded.getZ(),
+                2, 0.2D, 0.2D, 0.2D, 0.01D);
+            data.putLong(NEXT_ASSIST, now + ASSIST_COOLDOWN_TICKS);
+            return true;
+        }
+
+        setOwnedRoute(guard, data, mostWounded.blockPosition(), "assist_wounded", null, now);
+        return true;
+    }
+
+    private static void shareRecoveryFoodIfCarried(Villager guard, Villager recipient) {
+        var guardInv = guard.getInventory();
+        for (int i = 0; i < guardInv.getContainerSize(); i++) {
+            ItemStack stack = guardInv.getItem(i);
+            if (stack.is(Items.BREAD) || stack.is(Items.CARROT) || stack.is(Items.POTATO) || stack.is(Items.BEETROOT)) {
+                ItemStack single = stack.copyWithCount(1);
+                ItemStack remainder = recipient.getInventory().addItem(single);
+                if (remainder.isEmpty()) {
+                    stack.shrink(1);
+                    if (stack.isEmpty()) guardInv.setItem(i, ItemStack.EMPTY);
+                    guardInv.setChanged();
+                    recipient.getInventory().setChanged();
+                }
+                return;
+            }
+        }
+    }
+
+    private static boolean isInsideHorizontalRadius(BlockPos center, BlockPos pos, int radius) {
+        int dx = center.getX() - pos.getX();
+        int dz = center.getZ() - pos.getZ();
+        return dx * dx + dz * dz <= radius * radius;
+    }
+
+    private static void defendAgainst(Villager guard, Mob threat, ServerLevel level, CompoundTag data, long now) {
+        // If critically wounded, fall back toward the nearby group instead of charging to death.
+        float retreatFactor = VillagerProgression.retreatHealthThreshold(guard, 0.35F);
+        if (guard.getHealth() <= guard.getMaxHealth() * retreatFactor) {
+            BlockPos retreat = getOrCreateHome(guard, level, LivingVillagesConfig.VILLAGE_DEFENSE_RADIUS_BLOCKS.get());
+            boolean alreadyRetreating = data.getBoolean(HAS_ROUTE) && data.getString(ROUTE_KIND).equals("retreat");
+            boolean routeMissing = !guard.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET);
+            if (retreat != null && guard.blockPosition().distSqr(retreat) > 9.0D
+                && (!alreadyRetreating || routeMissing || now - data.getLong(LAST_ROUTE_ORDER) >= 40L)) {
+                setOwnedRoute(guard, data, retreat, "retreat", threat, now);
+            } else if (retreat != null && guard.blockPosition().distSqr(retreat) <= 9.0D
+                && data.getBoolean(HAS_ROUTE) && !alreadyRetreating) {
+                clearOwnedRoute(guard, data);
+            }
+            return;
+        }
+
+        double distanceSqr = guard.distanceToSqr(threat);
+        if (distanceSqr <= 3.4D * 3.4D && guard.getSensing().hasLineOfSight(threat)) {
+            if (now >= data.getLong(NEXT_ATTACK)) {
+                clearOwnedRoute(guard, data);
+                guard.getLookControl().setLookAt(threat, 30.0F, 30.0F);
+                guard.swing(InteractionHand.MAIN_HAND);
+                float damage = attackDamage(guard.getItemBySlot(EquipmentSlot.MAINHAND));
+                if (threat.hurt(level.damageSources().mobAttack(guard), damage)) {
+                    ItemStack weapon = guard.getItemBySlot(EquipmentSlot.MAINHAND);
+                    if (!weapon.isEmpty() && isSword(weapon)) {
+                        weapon.hurtAndBreak(1, guard, EquipmentSlot.MAINHAND);
+                    }
+                    threat.knockback(0.25D, guard.getX() - threat.getX(), guard.getZ() - threat.getZ());
+                    level.sendParticles(ParticleTypes.CRIT, threat.getX(), threat.getY() + 0.6D,
+                        threat.getZ(), 3, 0.15D, 0.2D, 0.15D, 0.02D);
+                    VillageTickBudget.recordActivitySignal(level, guard.blockPosition());
+                    VillagerProgression.recordCompletedWork(
+                        guard,
+                        com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_GUARD,
+                        3,
+                        true,
+                        now
+                    );
+                }
+                data.putLong(NEXT_ATTACK, now + ATTACK_COOLDOWN_TICKS);
+            }
+            return;
+        }
+
+        BlockPos targetPos = threat.blockPosition();
+        boolean sameTarget = data.getString(ROUTE_KIND).equals("threat")
+            && threat.getUUID().toString().equals(data.getString(ROUTE_THREAT_UUID));
+        boolean routePresent = guard.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET);
+        if (!sameTarget || !routePresent || now - data.getLong(LAST_ROUTE_ORDER) >= 40L) {
+            // Re-issue occasionally because hostile mobs move; this does not teleport the guard.
+            setOwnedRoute(guard, data, targetPos, "threat", threat, now);
+        }
+    }
+
+    private static void equipFromNearbyStorage(Villager guard, ServerLevel level) {
+        // Gear comes from real items placed in local chests/barrels; nothing is conjured.
+        equipSlot(guard, level, EquipmentSlot.MAINHAND, VillageDefense::isSword);
+        equipSlot(guard, level, EquipmentSlot.HEAD, VillageDefense::isHelmet);
+        equipSlot(guard, level, EquipmentSlot.CHEST, VillageDefense::isChestplate);
+        equipSlot(guard, level, EquipmentSlot.LEGS, VillageDefense::isLeggings);
+        equipSlot(guard, level, EquipmentSlot.FEET, VillageDefense::isBoots);
+        equipSlot(guard, level, EquipmentSlot.OFFHAND, stack -> stack.is(Items.SHIELD));
+        if (isSword(guard.getItemBySlot(EquipmentSlot.MAINHAND))) {
+            BlockPos home = VillagerRoles.getHome(guard);
+            if (home != null) {
+                VillageRegistry.setGuardEquipmentRequested(level, home, false);
+            }
+        }
+    }
+
+    private static void equipSlot(Villager guard, ServerLevel level, EquipmentSlot slot, Predicate<ItemStack> predicate) {
+        ItemStack equipped = guard.getItemBySlot(slot);
+        if (predicate.test(equipped)) return;
+        if (!equipped.isEmpty()) {
+            ItemStack remainder = guard.getInventory().addItem(equipped.copy());
+            if (!remainder.isEmpty()) return; // Do not overwrite an item if it cannot be stowed.
+            guard.setItemSlot(slot, ItemStack.EMPTY);
+        }
+
+        var inventory = guard.getInventory();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack candidate = inventory.getItem(i);
+            if (!predicate.test(candidate)) continue;
+            ItemStack take = candidate.split(1);
+            if (candidate.isEmpty()) inventory.setItem(i, ItemStack.EMPTY);
+            inventory.setChanged();
+            guard.setItemSlot(slot, take);
+            return;
+        }
+
+        ItemStack fromStorage = takeMatchingFromStorage(level, guard, guard.blockPosition(), predicate);
+        if (!fromStorage.isEmpty()) guard.setItemSlot(slot, fromStorage);
+    }
+
+    private static ItemStack takeMatchingFromStorage(ServerLevel level, Villager guard, BlockPos origin, Predicate<ItemStack> predicate) {
+        int radius = Math.min(10, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        BlockPos ownershipCenter = VillagerRoles.getHome(guard);
+        if (ownershipCenter == null) ownershipCenter = guard.blockPosition();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -3; dy <= 4; dy++) {
+                    BlockPos pos = origin.offset(dx, dy, dz);
+                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
+                        || !VillageReservations.isStorageAvailable(level, pos, guard)) continue;
+                    BlockEntity be = level.getBlockEntity(pos);
+                    if (!(be instanceof Container container)) continue;
+                    for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                        ItemStack stack = container.getItem(slot);
+                        if (!predicate.test(stack)) continue;
+                        ItemStack take = stack.split(1);
+                        if (stack.isEmpty()) container.setItem(slot, ItemStack.EMPTY);
+                        container.setChanged();
+                        return take;
+                    }
+                }
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    private static boolean isStorage(BlockState state) {
+        return state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST) || state.is(Blocks.BARREL);
+    }
+
+    private static boolean isSword(ItemStack stack) {
+        return stack.is(Items.WOODEN_SWORD) || stack.is(Items.STONE_SWORD) || stack.is(Items.IRON_SWORD)
+            || stack.is(Items.GOLDEN_SWORD) || stack.is(Items.DIAMOND_SWORD) || stack.is(Items.NETHERITE_SWORD);
+    }
+
+    private static boolean isHelmet(ItemStack s) {
+        return s.is(Items.LEATHER_HELMET) || s.is(Items.CHAINMAIL_HELMET) || s.is(Items.IRON_HELMET)
+            || s.is(Items.GOLDEN_HELMET) || s.is(Items.DIAMOND_HELMET) || s.is(Items.NETHERITE_HELMET) || s.is(Items.TURTLE_HELMET);
+    }
+
+    private static boolean isChestplate(ItemStack s) {
+        return s.is(Items.LEATHER_CHESTPLATE) || s.is(Items.CHAINMAIL_CHESTPLATE) || s.is(Items.IRON_CHESTPLATE)
+            || s.is(Items.GOLDEN_CHESTPLATE) || s.is(Items.DIAMOND_CHESTPLATE) || s.is(Items.NETHERITE_CHESTPLATE);
+    }
+
+    private static boolean isLeggings(ItemStack s) {
+        return s.is(Items.LEATHER_LEGGINGS) || s.is(Items.CHAINMAIL_LEGGINGS) || s.is(Items.IRON_LEGGINGS)
+            || s.is(Items.GOLDEN_LEGGINGS) || s.is(Items.DIAMOND_LEGGINGS) || s.is(Items.NETHERITE_LEGGINGS);
+    }
+
+    private static boolean isBoots(ItemStack s) {
+        return s.is(Items.LEATHER_BOOTS) || s.is(Items.CHAINMAIL_BOOTS) || s.is(Items.IRON_BOOTS)
+            || s.is(Items.GOLDEN_BOOTS) || s.is(Items.DIAMOND_BOOTS) || s.is(Items.NETHERITE_BOOTS);
+    }
+
+    private static float attackDamage(ItemStack weapon) {
+        if (weapon.is(Items.NETHERITE_SWORD)) return 8.0F;
+        if (weapon.is(Items.DIAMOND_SWORD)) return 7.0F;
+        if (weapon.is(Items.IRON_SWORD)) return 6.0F;
+        if (weapon.is(Items.STONE_SWORD)) return 5.0F;
+        if (isSword(weapon)) return 4.0F;
+        return 2.0F; // A guard can still defend itself unarmed, though a sword is much better.
+    }
+
+    private static BlockPos choosePatrolPoint(Villager guard, ServerLevel level, int radius) {
+        BlockPos center = getOrCreateHome(guard, level, radius);
+        if (center == null) return null;
+        int phase = (int) Math.floorMod(level.getGameTime() / PATROL_INTERVAL_TICKS + guard.getUUID().hashCode(), 8L);
+        int[][] offsets = {{4, 0}, {3, 3}, {0, 4}, {-3, 3}, {-4, 0}, {-3, -3}, {0, -4}, {3, -3}};
+        int x = center.getX() + offsets[phase][0];
+        int z = center.getZ() + offsets[phase][1];
+        // Patrols must not query heightmaps in an unloaded chunk.
+        if (!level.hasChunkAt(new BlockPos(x, center.getY(), z))) {
+            return isSafeStand(level, center) ? center : null;
+        }
+        int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        BlockPos target = new BlockPos(x, y, z);
+        if (isSafeStand(level, target)) return target;
+        return isSafeStand(level, center) ? center : null;
+    }
+
+    private static BlockPos getOrCreateHome(Villager guard, ServerLevel level, int radius) {
+        BlockPos home = VillagerRoles.getHome(guard);
+        if (home != null) return home;
+
+        List<Villager> villagers = VillageArea.findVillagers(level, guard.blockPosition(), radius, 8).stream()
+            .filter(v -> !v.isBaby()).toList();
+        double x = 0.0D, y = 0.0D, z = 0.0D;
+        for (Villager villager : villagers) {
+            x += villager.getX(); y += villager.getY(); z += villager.getZ();
+        }
+        BlockPos calculated = villagers.isEmpty() ? guard.blockPosition()
+            : BlockPos.containing(x / villagers.size(), y / villagers.size(), z / villagers.size());
+        var data = guard.getPersistentData();
+        data.putInt(VillagerRoles.HOME_X, calculated.getX());
+        data.putInt(VillagerRoles.HOME_Y, calculated.getY());
+        data.putInt(VillagerRoles.HOME_Z, calculated.getZ());
+        return calculated;
+    }
+
+    private static boolean isSafeStand(ServerLevel level, BlockPos feet) {
+        return level.hasChunkAt(feet) && level.hasChunkAt(feet.above()) && level.hasChunkAt(feet.below())
+            && level.getBlockState(feet).isAir() && level.getBlockState(feet.above()).isAir()
+            && level.getBlockState(feet.below()).blocksMotion();
+    }
+
+    private static void setOwnedRoute(Villager guard, CompoundTag data, BlockPos target,
+                                      String kind, Mob threat, long now) {
+        guard.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(target, WALK_SPEED, 1));
+        data.putBoolean(HAS_ROUTE, true);
+        data.putInt(ROUTE_X, target.getX()); data.putInt(ROUTE_Y, target.getY()); data.putInt(ROUTE_Z, target.getZ());
+        data.putString(ROUTE_KIND, kind);
+        data.putString(ROUTE_THREAT_UUID, threat == null ? "" : threat.getUUID().toString());
+        data.putLong(LAST_ROUTE_ORDER, now);
+        data.putLong(NEXT_PATROL, now + PATROL_INTERVAL_TICKS);
+    }
+
+    private static void clearOwnedRoute(Villager guard, CompoundTag data) {
+        if (data.getBoolean(HAS_ROUTE)) {
+            BlockPos route = new BlockPos(data.getInt(ROUTE_X), data.getInt(ROUTE_Y), data.getInt(ROUTE_Z));
+            guard.getBrain().getMemory(MemoryModuleType.WALK_TARGET).ifPresent(walk -> {
+                if (walk.getTarget().currentBlockPosition().equals(route)) {
+                    guard.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
+                }
+            });
+        }
+        data.putBoolean(HAS_ROUTE, false);
+        data.remove(ROUTE_X); data.remove(ROUTE_Y); data.remove(ROUTE_Z);
+        data.remove(ROUTE_KIND); data.remove(ROUTE_THREAT_UUID); data.remove(LAST_ROUTE_ORDER);
+    }
+
+    public static void evacuateNearbyCivilians(ServerLevel level, BlockPos home) {
+        if (level == null || home == null) return;
+        boolean alarmActive = VillageRegistry.isVillageAlarmActive(level, home, level.getGameTime());
+        if (!alarmActive) return;
+
+        List<Villager> residents = VillageArea.findVillagers(level, home);
+        for (Villager resident : residents) {
+            if (!resident.isAlive()) continue;
+            if (!com.abs.livingvillages.domain.SettlementSimulationModel.shouldEvacuateCivilian(
+                alarmActive,
+                VillagerRoles.isGuard(resident),
+                resident.isSleeping()
+            )) {
+                continue;
+            }
+            if (resident.getBrain().hasMemoryValue(MemoryModuleType.WALK_TARGET)) continue;
+            BlockPos shelter = resident.getBrain().getMemory(MemoryModuleType.HOME)
+                .filter(global -> global.dimension().equals(level.dimension()))
+                .map(net.minecraft.core.GlobalPos::pos)
+                .orElse(home);
+            if (resident.blockPosition().distSqr(shelter) > 4.0D) {
+                resident.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(shelter, 0.75F, 1));
+            }
+        }
+    }
+
+    private static void ringNearbyVillageBell(ServerLevel level, BlockPos home) {
+        for (BlockPos pos : BlockPos.betweenClosed(home.offset(-10, -3, -10), home.offset(10, 4, 10))) {
+            if (!level.hasChunkAt(pos)) continue;
+            if (level.getBlockState(pos).is(Blocks.BELL)) {
+                level.blockEvent(pos, Blocks.BELL, 1, 0);
+                VillageTickBudget.recordActivitySignal(level, pos);
+                return;
+            }
+        }
+    }
+}
