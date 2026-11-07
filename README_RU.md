@@ -2,7 +2,7 @@
 
 **Целевая версия в конфигурации (`gradle.properties`):** Minecraft Java Edition 1.21.1 · NeoForge 21.1.264 · Java 21 · Gradle 9.2.1.  
 **Текущая версия этой ветки:** `0.16.0` — черновик [PR #7](https://github.com/aba04-stack/Minecraft-mod/pull/7). Ветка `main` пока остаётся на `0.15.0`; новый GitHub Release не публиковался.  
-**Проверка новой механики:** [CI #416](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42363241908), commit `dad65da70d78f36bab0a2756eb9e1a35142a05da`: сборка, 43/43 GameTests, запуск dedicated server и клиента с software OpenGL.
+**Проверка новой механики:** [CI #441](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42368522719), commit `1e7eb4551eb8f8f9155297f14093e74d709cadd8`: статические проверки, Gradle build, 44/44 GameTests, запуск dedicated server и клиента с software OpenGL. Проверочный артефакт: `livingvillages-0.16.0`, ID `13572618268` (528 807 байт); это не GitHub Release.
 **Статус интеграции 0.15.0:** PR #6 объединён в `main` 7 ноября 2026 года (merge commit `c742873e8b0e74223fefbe01f69783ab86052c44`). Проверенный исходный commit `eb8540f2ffadc8ac4fc05fdeeda2c882fda8167f` прошёл [CI #402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349): сборка, 40/40 обязательных GameTests, запуск dedicated server и клиента с software OpenGL. Длительное тестирование полного развития поселения в обычном мире остаётся отдельной задачей. См. [`docs/TESTING.md`](docs/TESTING.md) и [план автономного развития](docs/SETTLEMENT_AUTONOMY_PLAN.md).
 
 > **Полная техническая документация проекта Living Civilization:**
