@@ -1505,7 +1505,7 @@ public final class VillageReservationGameTests {
         starterChest.setItem(0, new ItemStack(Items.OAK_PLANKS, 64));
         starterChest.setItem(1, new ItemStack(Items.OAK_PLANKS, 32));
         starterChest.setItem(2, new ItemStack(Items.OAK_DOOR, 1));
-        starterChest.setItem(3, new ItemStack(Items.OAK_BED, 1));
+        starterChest.setItem(3, new ItemStack(Items.WHITE_BED, 1));
         starterChest.setChanged();
 
         BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
