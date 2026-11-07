@@ -253,6 +253,32 @@ public final class VillageReservationGameTests {
         helper.assertTrue(VillageReservations.isStorageAvailable(
             helper.getLevel(), chest, owner),
             "The seed storage reservation must be released when seed fetching ends.");
+
+        // Builder-built animal pens use their own reservation kind and must keep it alive.
+        owner.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, true);
+        helper.assertTrue(VillageReservations.tryReserveStoragePositions(
+            helper.getLevel(), owner, List.of(chest), "animal_pen"),
+            "A builder must be able to reserve materials for a livestock pen.");
+        helper.assertTrue(!VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "A pen-material claim must remain exclusive while the builder project is active.");
+        owner.getPersistentData().putBoolean(VillageBuilder.ACTIVE_KEY, false);
+        helper.assertTrue(VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "A pen-material claim must be released when the builder project ends.");
+
+        // The herder retains its chest during the real fetch/delivery route.
+        owner.getPersistentData().putBoolean(VillageLivestock.RESERVATION_ACTIVE_KEY, true);
+        helper.assertTrue(VillageReservations.tryReserveStoragePositions(
+            helper.getLevel(), owner, List.of(chest), "livestock"),
+            "A herder must be able to reserve the chest it is visiting.");
+        helper.assertTrue(!VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "A livestock route must keep its storage claim until the route ends.");
+        owner.getPersistentData().putBoolean(VillageLivestock.RESERVATION_ACTIVE_KEY, false);
+        helper.assertTrue(VillageReservations.isStorageAvailable(
+            helper.getLevel(), chest, challenger),
+            "The herder's claim must be released when its storage route ends.");
         helper.succeed();
     }
 
