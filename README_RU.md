@@ -1,14 +1,14 @@
 # Living Villages 0.15.0 (Living Civilization) — логичная автономная деревня
 
 **Целевая версия в конфигурации (`gradle.properties`):** Minecraft Java Edition 1.21.1 · NeoForge 21.1.264 · Java 21 · Gradle 9.2.1.  
-**Статус интеграционного кандидата 0.15.0:** commit `af45d40a1070f48abffb4e6d97e52c33be2d5ea4` прошёл CI #399: сборка, 40/40 обязательных GameTests, запуск dedicated server и клиента с software OpenGL. Это подтверждает проверенные автоматические сценарии, но не заменяет длительное тестирование полного развития поселения в обычном мире. PR #6 направлен в `main` и пока остаётся Draft. См. [`docs/TESTING.md`](docs/TESTING.md) и [план автономного развития](docs/SETTLEMENT_AUTONOMY_PLAN.md).
+**Статус интеграции 0.15.0:** PR #6 объединён в `main` 7 ноября 2026 года (merge commit `c742873e8b0e74223fefbe01f69783ab86052c44`). Проверенный исходный commit `eb8540f2ffadc8ac4fc05fdeeda2c882fda8167f` прошёл [CI #402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349): сборка, 40/40 обязательных GameTests, запуск dedicated server и клиента с software OpenGL. Длительное тестирование полного развития поселения в обычном мире остаётся отдельной задачей. См. [`docs/TESTING.md`](docs/TESTING.md) и [план автономного развития](docs/SETTLEMENT_AUTONOMY_PLAN.md).
 
 > **Полная техническая документация проекта Living Civilization:**
 > - [Главный обзор и навигация (`README.md`)](README.md) · [Техническое задание (`docs/PROJECT_SPEC.md`)](docs/PROJECT_SPEC.md) · [Дорожная карта (`docs/ROADMAP.md`)](docs/ROADMAP.md)
 > - [Целевая архитектура (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md) · [Прокачка профессий (`docs/PROGRESSION.md`)](docs/PROGRESSION.md) · [Опасный мир и ИИ монстров (`docs/MONSTERS.md`)](docs/MONSTERS.md)
 > - [Производительность (`docs/PERFORMANCE.md`)](docs/PERFORMANCE.md) · [Сохранения (`docs/SAVE_DATA.md`)](docs/SAVE_DATA.md) · [Тестирование (`docs/TESTING.md`)](docs/TESTING.md) · [Качество релизов (`docs/RELEASE_QUALITY.md`)](docs/RELEASE_QUALITY.md)
 
-**Последняя интеграционная проверка:** 7 ноября 2026, commit `af45d40a1070f48abffb4e6d97e52c33be2d5ea4`, [GitHub Actions run #399](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42356912395). Успешно завершились статические проверки, Gradle build, 40/40 GameTests, dedicated-server smoke-test и client smoke-test с software OpenGL. [Проверенный CI JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42356912395/artifacts/13568540072) — артефакт проверки, не опубликованный релиз.
+**Последняя интеграционная проверка:** 7 ноября 2026, исходный commit `eb8540f2ffadc8ac4fc05fdeeda2c882fda8167f`, [GitHub Actions run #402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349). Успешно завершились статические проверки, Gradle build, 40/40 GameTests, dedicated-server smoke-test и client smoke-test с software OpenGL. [Проверенный CI JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349/artifacts/13567479833) — артефакт проверки, не опубликованный релиз.
 
 ## Выбор группы жителей и границы деревень
 
@@ -110,7 +110,7 @@
 - JSON-файлы переводов разбираются парсером.
 - Сборочные shell-скрипты проверяются через `sh -n`.
 - Исходники дополнительно компилируются с Minecraft/NeoForge classpath в GitHub Actions.
-- Интеграционная ревизия `af45d40a1070f48abffb4e6d97e52c33be2d5ea4` прошла [CI #399](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42356912395): сборка, 40/40 GameTests, dedicated server и software-OpenGL client; [CI-артефакт JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42356912395/artifacts/13568540072).
+- Объединённая ревизия исходников прошла [CI #402](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349): сборка, 40/40 GameTests, dedicated server и software-OpenGL client; [CI-артефакт JAR](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42357214349/artifacts/13567479833).
 - В интеграционном CI выполняются 40 обязательных Minecraft GameTests через `runGameTestServer`; среди проверяемых областей — миграция реестра, резервирование хранилищ, изоляция соседних поселений, заказы/логистика, безопасная разведка и снабжение ферм водой.
 - Smoke-test dedicated server подтверждает, что сервер достиг сообщения готовности без ошибки загрузки мода.
 - Headless client smoke-test под Xvfb/software OpenGL создаёт настоящий экран старосты и проверяет семь кнопок/границы панели на окне `427×240`. Нажатия кнопок, сетевые ответы сервера и полный игровой сценарий не автоматизированы.
