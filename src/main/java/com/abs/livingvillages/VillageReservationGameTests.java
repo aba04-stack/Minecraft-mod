@@ -2183,7 +2183,7 @@ public final class VillageReservationGameTests {
             null, 0L,
             List.of(
                 new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:wheat_seeds", 24),
-                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:water_bucket", 1),
+                new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:bucket", 1),
                 new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:composter", 1),
                 new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:wooden_hoe", 1)
             )
@@ -2205,7 +2205,7 @@ public final class VillageReservationGameTests {
             missing.size() == 5
                 && missing.getOrDefault("minecraft:oak_planks", 0) == 24
                 && missing.getOrDefault("minecraft:wheat_seeds", 0) == 12
-                && missing.getOrDefault("minecraft:water_bucket", 0) == 1
+                && missing.getOrDefault("minecraft:bucket", 0) == 1
                 && missing.getOrDefault("minecraft:composter", 0) == 1
                 && missing.getOrDefault("minecraft:wooden_hoe", 0) == 1
                 && !missing.containsKey("minecraft:red_bed"),
@@ -2232,7 +2232,7 @@ public final class VillageReservationGameTests {
                 "minecraft:oak_planks", 96,
                 "minecraft:red_bed", 1,
                 "minecraft:wheat_seeds", 24,
-                "minecraft:water_bucket", 1,
+                "minecraft:bucket", 1,
                 "minecraft:composter", 1,
                 "minecraft:wooden_hoe", 1
             ),
@@ -2240,6 +2240,60 @@ public final class VillageReservationGameTests {
         );
         helper.assertTrue(fulfilled.isEmpty(),
             "A queued project with its full bill in accessible storage must not request extra deliveries.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "farm_water_supply")
+    public static void farmerCanFillAnEmptyBucketFromARealRenewablePool(GameTestHelper helper) {
+        for (int x = 0; x <= 5; x++) {
+            for (int z = 0; z <= 5; z++) helper.setBlock(x, 0, z, Blocks.STONE);
+        }
+        helper.setBlock(2, 1, 2, Blocks.WATER);
+        helper.setBlock(3, 1, 2, Blocks.WATER);
+        helper.setBlock(2, 1, 3, Blocks.WATER);
+        helper.setBlock(3, 1, 3, Blocks.WATER);
+
+        Villager worker = helper.spawn(EntityType.VILLAGER, 1, 1, 2);
+        worker.setNoAi(true);
+        worker.getInventory().addItem(new ItemStack(Items.BUCKET, 1));
+        BlockPos source = helper.absolutePos(new BlockPos(2, 1, 2));
+
+        helper.assertTrue(VillageFarmBuilder.isRenewableWaterSource(helper.getLevel(), source),
+            "A supported 2x2 source-water pool must qualify for safe bucket filling.");
+        helper.assertTrue(VillageFarmBuilder.collectWaterFromSource(helper.getLevel(), worker, source),
+            "A villager adjacent to a renewable source must be able to perform the real bucket transfer.");
+        helper.assertTrue(countItem(worker.getInventory(), Items.BUCKET) == 0
+                && countItem(worker.getInventory(), Items.WATER_BUCKET) == 1,
+            "The worker must exchange one real empty bucket for one real water bucket.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "farm_water_supply")
+    public static void farmerMustNotDrainAnIsolatedWaterSource(GameTestHelper helper) {
+        for (int x = 0; x <= 4; x++) {
+            for (int z = 0; z <= 4; z++) helper.setBlock(x, 0, z, Blocks.STONE);
+        }
+        helper.setBlock(2, 1, 2, Blocks.WATER);
+        Villager worker = helper.spawn(EntityType.VILLAGER, 1, 1, 2);
+        worker.setNoAi(true);
+        worker.getInventory().addItem(new ItemStack(Items.BUCKET, 1));
+        BlockPos source = helper.absolutePos(new BlockPos(2, 1, 2));
+
+        helper.assertTrue(!VillageFarmBuilder.isRenewableWaterSource(helper.getLevel(), source),
+            "A lone water source must not be treated as renewable.");
+        helper.assertTrue(!VillageFarmBuilder.collectWaterFromSource(helper.getLevel(), worker, source),
+            "A villager must not collect an isolated source.");
+        helper.assertTrue(countItem(worker.getInventory(), Items.BUCKET) == 1
+                && countItem(worker.getInventory(), Items.WATER_BUCKET) == 0
+                && helper.getBlockState(new BlockPos(2, 1, 2)).is(Blocks.WATER),
+            "A rejected collection must preserve both the empty bucket and the isolated water block.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "farm_water_supply")
+    public static void emptyBucketCraftingUsesThreeRealIronIngots(GameTestHelper helper) {
+        helper.assertTrue(VillageCraftingJobs.hasValidEmptyBucketRecipe(),
+            "The persisted bucket recipe must output one empty bucket from exactly three iron ingots.");
         helper.succeed();
     }
 
