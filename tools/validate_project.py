@@ -90,7 +90,7 @@ def check_balanced(path: Path) -> None:
 def main() -> int:
     errors: list[str] = []
     props = (ROOT / "gradle.properties").read_text(encoding="utf-8")
-    if not re.search(r"(?m)^mod_version=0\.15\.0$", props):
+    if not re.search(r"(?m)^mod_version=0\.16\.0$", props):
         errors.append("gradle.properties mod_version must be 0.16.0")
     workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
     if "livingvillages-0.16.0.jar" not in workflow or "livingvillages-0.16.0" not in workflow:
