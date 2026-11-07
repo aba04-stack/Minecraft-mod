@@ -744,6 +744,27 @@ public final class VillageBuilder {
         return steps;
     }
 
+    /** Deterministic blueprint contract used by GameTests: 15 matching fences and a final closed gate. */
+    static boolean hasValidLivestockPenBlueprint() {
+        List<BuildStep> steps = makeLivestockPenPlan(BlockPos.ZERO, Blocks.OAK_FENCE, Blocks.OAK_FENCE_GATE);
+        if (steps.size() != 16) return false;
+        java.util.Set<BlockPos> positions = new java.util.HashSet<>();
+        int fenceCount = 0;
+        for (int i = 0; i < steps.size(); i++) {
+            BuildStep step = steps.get(i);
+            if (!positions.add(step.pos()) || step.secondPos() != null) return false;
+            if (i < 15) {
+                if (step.item() != Items.OAK_FENCE) return false;
+                fenceCount++;
+            } else if (step.item() != Items.OAK_FENCE_GATE
+                || !(step.state().getBlock() instanceof FenceGateBlock)
+                || step.state().getValue(FenceGateBlock.OPEN)) {
+                return false;
+            }
+        }
+        return fenceCount == PEN_FENCES_REQUIRED;
+    }
+
     private static void savePenCheckpoint(Villager villager, ServerLevel level, BlockPos site,
                                           CompoundTag data, int stepIndex, int totalSteps) {
         VillageRegistry.recordLivestockPenCheckpoint(level, projectVillageCenter(villager),
