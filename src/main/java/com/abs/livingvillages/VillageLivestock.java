@@ -71,8 +71,8 @@ public final class VillageLivestock {
     private static final String ROUTE_STAND_Z = "livingvillages_livestock_route_stand_z";
     private static final String ROUTE_STARTED = "livingvillages_livestock_route_started";
 
-    private static final String SHEEP_LAST_LURE_TICK = "livingvillages_livestock_last_lure_tick";
-    private static final String SHEEP_LURE_OWNER = "livingvillages_livestock_lure_owner";
+    static final String SHEEP_LAST_LURE_TICK = "livingvillages_livestock_last_lure_tick";
+    static final String SHEEP_LURE_OWNER = "livingvillages_livestock_lure_owner";
 
     private static final int STATE_IDLE = 0;
     static final int STATE_HERD_APPROACH = 1;
@@ -561,10 +561,7 @@ public final class VillageLivestock {
                 return;
             }
             if (isInsideVillagePen(level, center, target)) {
-                String owner = target.getPersistentData().getString(SHEEP_OWNER_KEY);
-                UUID villageId = VillageRegistry.villageId(level, center);
-                if (villageId != null && (owner.isBlank() || owner.equals(villageId.toString()))) {
-                    target.getPersistentData().putString(SHEEP_OWNER_KEY, villageId.toString());
+                if (claimSheepAfterHerding(level, center, target)) {
                     VillageRegistry.recordDiagnostic(level, center, "Животновод",
                         "Овца приведена в загон на настоящую пшеницу.");
                 }
@@ -646,7 +643,32 @@ public final class VillageLivestock {
         data.putLong(NEXT_ACTION, now + 20L);
     }
 
-    /** Sheep are only claimed after the player-controlled settlement's own pen is complete. */
+    /**
+     * Claims an unowned sheep only when a live, recent wheat-lure record proves that this
+     * village's herder brought it into this exact completed pen. Player-named/leashed animals
+     * are never adopted, even if they happen to stand inside the pen.
+     */
+    static boolean claimSheepAfterHerding(ServerLevel level, BlockPos center, Sheep sheep) {
+        if (level == null || center == null || sheep == null || !sheep.isAlive()
+            || sheep.isLeashed() || sheep.hasCustomName()
+            || !isInsideVillagePen(level, center, sheep)) return false;
+        UUID villageId = VillageRegistry.villageId(level, center);
+        if (villageId == null) return false;
+        String expectedOwner = villageId.toString();
+        String existingOwner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
+        if (expectedOwner.equals(existingOwner)) return true;
+        if (!existingOwner.isBlank()) return false;
+
+        CompoundTag data = sheep.getPersistentData();
+        if (!expectedOwner.equals(data.getString(SHEEP_LURE_OWNER))) return false;
+        long elapsed = level.getGameTime() - data.getLong(SHEEP_LAST_LURE_TICK);
+        if (elapsed < 0L || elapsed > HERD_TIMEOUT_TICKS) return false;
+
+        data.putString(SHEEP_OWNER_KEY, expectedOwner);
+        return true;
+    }
+
+    /** Sheep are only claimed after the herder's recent wheat-lure route reaches the village pen. */
     private static void claimSheepAlreadyInsidePen(ServerLevel level, BlockPos center) {
         UUID villageId = VillageRegistry.villageId(level, center);
         if (villageId == null || !hasCompletePen(level, center)) return;
@@ -655,11 +677,7 @@ public final class VillageLivestock {
         AABB inside = new AABB(site.getX() + 1.0D, site.getY(), site.getZ() + 1.0D,
             site.getX() + 4.0D, site.getY() + 2.0D, site.getZ() + 4.0D);
         for (Sheep sheep : level.getEntitiesOfClass(Sheep.class, inside, Sheep::isAlive)) {
-            if (!isInsideVillagePen(level, center, sheep)) continue;
-            String owner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
-            if (owner.isBlank() || owner.equals(villageId.toString())) {
-                sheep.getPersistentData().putString(SHEEP_OWNER_KEY, villageId.toString());
-            }
+            claimSheepAfterHerding(level, center, sheep);
         }
     }
 
@@ -810,9 +828,9 @@ public final class VillageLivestock {
         UUID villageId = VillageRegistry.villageId(level, center);
         int radius = Math.max(12, Math.min(28, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get()));
         AABB area = new AABB(center).inflate(radius, 8.0D, radius);
-        List<Sheep> candidates = level.getEntitiesOfClass(Sheep.class, area,
+        List<Sheep> candidates = new ArrayList<>(level.getEntitiesOfClass(Sheep.class, area,
             sheep -> sheep.isAlive() && !sheep.isBaby()
-                && sheep.distanceToSqr(Vec3.atCenterOf(center)) <= (double) radius * radius);
+                && sheep.distanceToSqr(Vec3.atCenterOf(center)) <= (double) radius * radius));
         long now = level.getGameTime();
         candidates.removeIf(sheep -> {
             CompoundTag sheepData = sheep.getPersistentData();
@@ -858,6 +876,7 @@ public final class VillageLivestock {
                     && isInsideVillagePen(level, center, sheep))
             .stream()
             .filter(Sheep::readyForShearing)
+            .filter(sheep -> !sheep.isLeashed() && !sheep.hasCustomName())
             .filter(sheep -> woolCounts.getOrDefault(woolItem(sheep), 0) < 3)
             .filter(sheep -> canReach(worker, sheep))
             .min(Comparator.comparingDouble(worker::distanceToSqr))
