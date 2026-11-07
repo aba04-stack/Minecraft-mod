@@ -39,6 +39,173 @@ import java.util.Set;
 public final class VillageReservationGameTests {
     private VillageReservationGameTests() {}
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_scout")
+    public static void caveScoutOnlyAcceptsEnclosedDrySafeWalkableNodes(GameTestHelper helper) {
+        BlockPos feet = helper.absolutePos(new BlockPos(3, 2, 3));
+        BlockPos roof = feet.above(5);
+        helper.getLevel().setBlock(feet.below(), Blocks.STONE.defaultBlockState(), 3);
+        // The shared empty GameTest template contains barrier placeholders in some interior cells.
+        // Clear both body blocks explicitly so the safety predicate sees a real walkable air node.
+        helper.getLevel().setBlock(feet, Blocks.AIR.defaultBlockState(), 3);
+        helper.getLevel().setBlock(feet.above(), Blocks.AIR.defaultBlockState(), 3);
+        helper.getLevel().setBlock(roof, Blocks.STONE.defaultBlockState(), 3);
+        int measuredSurfaceY = helper.getLevel().getHeight(
+            net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+            feet.getX(), feet.getZ());
+        boolean seesSky = helper.getLevel().canSeeSky(feet);
+        boolean walkNode = VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet, measuredSurfaceY);
+        helper.assertTrue(walkNode,
+            "Expected safe cave node. surfaceY=" + measuredSurfaceY + ", feetY=" + feet.getY()
+                + ", canSeeSky=" + seesSky + ", floor=" + helper.getLevel().getBlockState(feet.below())
+                + ", feet=" + helper.getLevel().getBlockState(feet)
+                + ", head=" + helper.getLevel().getBlockState(feet.above())
+                + ", roof=" + helper.getLevel().getBlockState(roof)
+                + ", loaded=" + helper.getLevel().hasChunkAt(feet));
+
+        helper.getLevel().setBlock(feet, Blocks.WATER.defaultBlockState(), 3);
+        helper.assertTrue(!VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
+            "A water-filled node must never be selected for cave exploration.");
+        helper.getLevel().setBlock(feet, Blocks.AIR.defaultBlockState(), 3);
+
+        helper.getLevel().setBlock(feet.east(), Blocks.LAVA.defaultBlockState(), 3);
+        helper.assertTrue(!VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
+            "A node directly adjacent to lava must be rejected.");
+        helper.getLevel().setBlock(feet.east(), Blocks.AIR.defaultBlockState(), 3);
+
+        helper.getLevel().setBlock(feet.below(), Blocks.MAGMA_BLOCK.defaultBlockState(), 3);
+        helper.assertTrue(!VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
+            "A magma-block floor must be rejected.");
+        helper.getLevel().setBlock(feet.below(), Blocks.STONE.defaultBlockState(), 3);
+
+        helper.getLevel().setBlock(roof, Blocks.AIR.defaultBlockState(), 3);
+        helper.assertTrue(!VillagerCaveSupport.isSafeCaveNode(helper.getLevel(), feet),
+            "An open-to-sky location must not be treated as a cave.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_scout")
+    public static void visitedCaveScoutTargetsRemainBoundedAndDeduplicated(GameTestHelper helper) {
+        long[] visited = new long[0];
+        BlockPos newest = new BlockPos(0, 20, 0);
+        for (int i = 0; i < VillagerCaveSupport.MAX_VISITED_SCOUTS + 12; i++) {
+            newest = new BlockPos(i * 10, 20, 0);
+            visited = VillagerCaveSupport.appendVisitedScoutTarget(visited, newest);
+        }
+        helper.assertTrue(visited.length == VillagerCaveSupport.MAX_VISITED_SCOUTS,
+            "Visited cave scouting memory must stay within its fixed NBT limit.");
+        helper.assertTrue(BlockPos.of(visited[visited.length - 1]).equals(newest),
+            "The newest successfully reached cave site must remain remembered.");
+        long[] duplicate = VillagerCaveSupport.appendVisitedScoutTarget(visited, newest);
+        helper.assertTrue(duplicate.length == visited.length,
+            "A successfully visited cave site must not be recorded repeatedly.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_scout")
+    public static void failedCaveScoutTargetsRemainBoundedAndDeduplicated(GameTestHelper helper) {
+        long[] failed = new long[0];
+        BlockPos newest = new BlockPos(0, 20, 0);
+        for (int i = 0; i < 20; i++) {
+            newest = new BlockPos(i * 10, 20, 0);
+            failed = VillagerCaveSupport.appendFailedScoutTarget(failed, newest);
+        }
+        helper.assertTrue(failed.length == 12,
+            "Failed cave targets must stay within the fixed NBT limit.");
+        helper.assertTrue(BlockPos.of(failed[failed.length - 1]).equals(newest),
+            "The most recent failed cave target must remain remembered.");
+        long[] duplicate = VillagerCaveSupport.appendFailedScoutTarget(failed, newest);
+        helper.assertTrue(duplicate.length == failed.length,
+            "The same failed cave target must not be added repeatedly.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_memory")
+    public static void caveReturnStartsFromNearestRememberedWaypoint(GameTestHelper helper) {
+        BlockPos current = new BlockPos(12, 18, 4);
+        long[] trail = new long[] {
+            new BlockPos(0, 18, 0).asLong(),
+            new BlockPos(10, 18, 4).asLong(),
+            new BlockPos(18, 18, 4).asLong(),
+            new BlockPos(24, 18, 4).asLong()
+        };
+        helper.assertTrue(VillagerCaveSupport.nearestTrailIndex(current, trail) == 1,
+            "A miner must reverse from the nearest waypoint, not blindly walk toward the deepest recorded point.");
+        helper.assertTrue(VillagerCaveSupport.nearestTrailIndex(current, new long[0]) == -1,
+            "An empty cave trail must not create a return route.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_memory")
+    public static void caveTrailRemainsBoundedAndKeepsItsEntranceWaypoint(GameTestHelper helper) {
+        BlockPos entrance = new BlockPos(0, 20, 0);
+        long[] trail = new long[0];
+        BlockPos newest = entrance;
+        for (int i = 0; i < VillagerCaveSupport.MAX_WAYPOINTS + 12; i++) {
+            newest = new BlockPos(i * 10, 20, 0);
+            trail = VillagerCaveSupport.appendBoundedWaypoint(trail, newest);
+        }
+        helper.assertTrue(trail.length == VillagerCaveSupport.MAX_WAYPOINTS,
+            "The cave trail must never exceed its fixed NBT waypoint limit.");
+        helper.assertTrue(BlockPos.of(trail[0]).equals(entrance),
+            "The first cave waypoint must remain available as the remembered exit-side anchor.");
+        helper.assertTrue(BlockPos.of(trail[trail.length - 1]).equals(newest),
+            "The newest waypoint must remain available to start a return from deep exploration.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "cave_memory")
+    public static void blockedHomeReturnKeepsTrailAndStopsAfterBoundedRetries(GameTestHelper helper) {
+        Villager miner = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        miner.setNoAi(true);
+        BlockPos home = helper.absolutePos(new BlockPos(4, 1, 4));
+        CompoundTag data = miner.getPersistentData();
+        data.putInt(VillagerRoles.HOME_X, home.getX());
+        data.putInt(VillagerRoles.HOME_Y, home.getY());
+        data.putInt(VillagerRoles.HOME_Z, home.getZ());
+        long[] route = new long[] {
+            miner.blockPosition().asLong(),
+            miner.blockPosition().offset(0, -2, 0).asLong()
+        };
+        data.putBoolean(VillagerCaveSupport.RETURNING, true);
+        data.putLongArray(VillagerCaveSupport.TRAIL, route);
+        data.putInt(VillagerCaveSupport.RETURN_INDEX, -1);
+
+        long baseTick = helper.getLevel().getGameTime();
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            long now = baseTick + attempt * 1000L;
+            data.putLong(VillagerCaveSupport.RETURN_LAST_POS, miner.blockPosition().asLong());
+            data.putLong(VillagerCaveSupport.RETURN_LAST_PROGRESS, now - 500L);
+            data.putLong(VillagerCaveSupport.RETURN_LAST_ORDER, 0L);
+            data.remove(VillagerCaveSupport.RETURN_TARGET);
+            VillagerCaveSupport.continueReturnHome(miner, helper.getLevel(), data, now);
+        }
+
+        helper.assertTrue(data.getBoolean(VillagerCaveSupport.RETURNING),
+            "A blocked HOME leg must not falsely complete the return trip.");
+        helper.assertTrue(data.getLongArray(VillagerCaveSupport.TRAIL).length == route.length,
+            "The remembered cave route must survive a blocked HOME leg.");
+        helper.assertTrue(data.getBoolean(VillagerCaveSupport.HOME_PAUSED),
+            "After three failed HOME attempts, navigation must pause instead of retrying forever.");
+        helper.assertTrue(data.getInt(VillagerCaveSupport.HOME_STALLS) == 3,
+            "The HOME retry counter must stop at its hard maximum.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "village_lighting")
+    public static void guardPatrolLightingYieldsToCombatAndRetreat(GameTestHelper helper) {
+        Villager guard = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        helper.assertTrue(VillageDefense.canPerformPatrolLighting(guard),
+            "A guard without a combat task may perform routine lighting.");
+        guard.getPersistentData().putBoolean("livingvillages_defense_combat_active", true);
+        helper.assertTrue(!VillageDefense.canPerformPatrolLighting(guard),
+            "Routine lighting must pause while the guard is fighting.");
+        guard.getPersistentData().putBoolean("livingvillages_defense_combat_active", false);
+        guard.getPersistentData().putString("livingvillages_defense_route_kind", "retreat");
+        helper.assertTrue(!VillageDefense.canPerformPatrolLighting(guard),
+            "Routine lighting must not interrupt a retreat.");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "reservation_competition")
     public static void oneTaskExcludesCompetingTaskUntilItEnds(GameTestHelper helper) {
         placeFloor(helper);
@@ -919,7 +1086,16 @@ public final class VillageReservationGameTests {
         chestOne.setItem(0, new ItemStack(Items.BREAD, 16));
         chestTwo.setItem(0, new ItemStack(Items.OAK_PLANKS, 32));
 
-        var snapshotOne = VillageElder.createPanelSnapshot(helper.getLevel(), elderOne, null);
+        int originalChestRadius = LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get();
+        VillageElder.ElderPanelData snapshotOne;
+        try {
+            // Keep this assertion isolated from unrelated GameTest fixtures placed within 16 blocks.
+            // The tested settlement chest is only 3 blocks from the elder, so radius 4 still includes it.
+            LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.set(4);
+            snapshotOne = VillageElder.createPanelSnapshot(helper.getLevel(), elderOne, null);
+        } finally {
+            LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.set(originalChestRadius);
+        }
         helper.assertTrue(snapshotOne.population() == 4 && snapshotOne.foodPoints() == 64,
             "Elder panel snapshot must report the owning village's population and stored food points.");
 
