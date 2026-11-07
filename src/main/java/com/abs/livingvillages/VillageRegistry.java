@@ -122,12 +122,13 @@ public final class VillageRegistry extends SavedData {
 
         List<Villager> residents = VillageArea.findVillagers(level, center,
             LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get(), 32);
-        UUID result = residents.isEmpty() ? null : resolveOrCreateId(level, center, residents);
+        UUID result = residents.isEmpty() ? null : resolveOrCreateId(level, center, residents, cache);
         cache.ids.put(centerKey, new CachedId(result));
         return result;
     }
 
-    private static UUID resolveOrCreateId(ServerLevel level, BlockPos center, List<Villager> residents) {
+    private static UUID resolveOrCreateId(ServerLevel level, BlockPos center, List<Villager> residents,
+                                          IdentityCache cache) {
         List<BlockPos> homes = new ArrayList<>();
         Set<UUID> currentResidentIds = new HashSet<>();
         for (Villager villager : residents) {
@@ -211,6 +212,16 @@ public final class VillageRegistry extends SavedData {
             }
         }
 
+        // A single old SavedData identity can contain aliases from two settlements that were
+        // merged by an earlier proximity match. During the same server tick, do not reuse that
+        // identity for a second, disjoint HOME cluster. Split the current cluster away and detach
+        // its resident/history entries from the ambiguous old identity before persisting it.
+        if (bestId != null && cache.conflictsWithDifferentGroup(bestId, currentResidentIds, homes)) {
+            detachDisjointGroup(registry, bestId, currentResidentIds, homes);
+            bestId = null;
+            bestDistance = Long.MAX_VALUE;
+        }
+
         boolean changed = false;
         if (bestId == null) {
             bestId = UUID.randomUUID();
@@ -230,7 +241,33 @@ public final class VillageRegistry extends SavedData {
             if (savedResidents.add(residentId)) changed = true;
         }
         if (changed) registry.setDirty();
+        cache.remember(bestId, currentResidentIds, homes);
         return bestId;
+    }
+
+    private static void detachDisjointGroup(VillageRegistry registry, UUID oldId,
+                                            Set<UUID> currentResidents, List<BlockPos> currentHomes) {
+        Set<Long> aliases = registry.knownHomes.get(oldId);
+        boolean anchorRemoved = false;
+        if (aliases != null) {
+            for (BlockPos home : currentHomes) {
+                anchorRemoved |= registry.villageAnchors.get(oldId) != null
+                    && registry.villageAnchors.get(oldId).equals(home);
+                aliases.remove(home.asLong());
+            }
+        }
+        Set<UUID> members = registry.knownResidents.get(oldId);
+        if (members != null) members.removeAll(currentResidents);
+
+        if (anchorRemoved && aliases != null && !aliases.isEmpty()) {
+            BlockPos replacement = aliases.stream().map(BlockPos::of)
+                .min(Comparator.<BlockPos>comparingInt(BlockPos::getX)
+                    .thenComparingInt(BlockPos::getZ)
+                    .thenComparingInt(BlockPos::getY))
+                .orElse(null);
+            if (replacement != null) registry.villageAnchors.put(oldId, replacement);
+        }
+        registry.setDirty();
     }
 
     /** Claim a physical storage block for the persistent village selected around groupCenter. */
@@ -1267,8 +1304,54 @@ public final class VillageRegistry extends SavedData {
     private static final class IdentityCache {
         private final long gameTime;
         private final Map<Long, CachedId> ids = new HashMap<>();
+        private final Map<UUID, List<IdentitySignature>> groupsByVillage = new HashMap<>();
+
         private IdentityCache(long gameTime) { this.gameTime = gameTime; }
+
+        private boolean conflictsWithDifferentGroup(UUID villageId, Set<UUID> residentIds, List<BlockPos> homes) {
+            List<IdentitySignature> existingGroups = groupsByVillage.get(villageId);
+            if (existingGroups == null || existingGroups.isEmpty()) return false;
+            for (IdentitySignature existing : existingGroups) {
+                if (existing.overlapsResidents(residentIds) || existing.hasNearbyHome(homes, ID_MATCH_RADIUS_SQUARED)) {
+                    return false;
+                }
+            }
+            return !homes.isEmpty() && existingGroups.stream().anyMatch(group -> !group.homes().isEmpty());
+        }
+
+        private void remember(UUID villageId, Set<UUID> residentIds, List<BlockPos> homes) {
+            if (villageId == null) return;
+            List<IdentitySignature> groups = groupsByVillage.computeIfAbsent(villageId, ignored -> new ArrayList<>());
+            IdentitySignature signature = new IdentitySignature(Set.copyOf(residentIds), List.copyOf(homes));
+            boolean alreadyKnown = groups.stream().anyMatch(existing ->
+                existing.sameResidents(signature.residents()) || existing.sameHomes(signature.homes()));
+            if (!alreadyKnown) groups.add(signature);
+        }
     }
 
     private record CachedId(UUID id) {}
+    private record IdentitySignature(Set<UUID> residents, List<BlockPos> homes) {
+        private boolean overlapsResidents(Set<UUID> other) {
+            for (UUID resident : residents) if (other.contains(resident)) return true;
+            return false;
+        }
+
+        private boolean sameResidents(Set<UUID> other) {
+            return !residents.isEmpty() && residents.equals(other);
+        }
+
+        private boolean sameHomes(List<BlockPos> other) {
+            if (homes.isEmpty() || other.isEmpty()) return false;
+            return homes.containsAll(other) && other.containsAll(homes);
+        }
+
+        private boolean hasNearbyHome(List<BlockPos> other, int maxDistanceSquared) {
+            for (BlockPos first : homes) {
+                for (BlockPos second : other) {
+                    if (horizontalDistanceSquared(first, second) <= maxDistanceSquared) return true;
+                }
+            }
+            return false;
+        }
+    }
 }
