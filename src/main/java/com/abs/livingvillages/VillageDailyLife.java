@@ -90,6 +90,9 @@ public final class VillageDailyLife {
             || !VillageTickBudget.tryConsumeAiCheck(level)) {
             return false;
         }
+        // At most one social pair per village. Several pairs starting on the same idle tick
+        // made residents crowd around the same meeting area.
+        if (hasActiveSocialVisitInVillage(villager, level)) return false;
 
         Villager peer = findAvailablePeer(villager, level);
         boolean canStart = DailyLifeActivityModel.canStartSocialVisit(
@@ -210,6 +213,14 @@ public final class VillageDailyLife {
             if (path != null && path.canReach()) return candidate;
         }
         return null;
+    }
+
+    private static boolean hasActiveSocialVisitInVillage(Villager villager, ServerLevel level) {
+        int activeVisits = 0;
+        for (Villager resident : VillageArea.findVillagers(level, villager.blockPosition())) {
+            if (resident.getPersistentData().getBoolean(ACTIVE)) activeVisits++;
+        }
+        return !DailyLifeActivityModel.canStartSocialVisitInVillage(activeVisits);
     }
 
     private static boolean isSameVillageIfKnown(Villager first, Villager second, ServerLevel level) {
