@@ -165,6 +165,19 @@ assert GAME_TESTS.count("VillageResourcePlanner.invalidate(helper.getLevel(), ce
     "every fixture change must refresh the cached plan through the new invalidation hook"
 )
 
+# 9b. All GameTests share one world, so the level-wide order board must be asserted per settlement.
+for marker in (
+    "java.util.UUID boardVillage = VillageRegistry.villageId(helper.getLevel(), center);",
+    "ownPersistedOrders == 1",
+    "The board is level-wide SavedData",
+    "The fixture order must be cancellable so it stops reserving materials after the check.",
+    "released.freeWoodUnits() == 256 && !released.needsWood()",
+):
+    assert marker in GAME_TESTS, f"shared-world order board must stay settlement-scoped: {marker}"
+assert "roundTrip.getList(\"orders\", Tag.TAG_COMPOUND).size() == 1" not in GAME_TESTS, (
+    "a global order count couples unrelated settlements tested in the same world"
+)
+
 # 10. Gameplay code still never fabricates saplings; only the in-world fixture may place them.
 gameplay_sources = "\n".join(
     path.read_text(encoding="utf-8") for path in JAVA.rglob("*.java")

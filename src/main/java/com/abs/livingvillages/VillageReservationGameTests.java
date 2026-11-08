@@ -2363,6 +2363,17 @@ public final class VillageReservationGameTests {
         helper.assertTrue(committed.freeWoodUnits() == 56 && committed.needsWood()
                 && !committed.needsFuel() && !committed.needsSaplings(),
             "Materials committed to a real order must stop counting as free stock and reopen the wood deficit.");
+
+        // The board is level-wide SavedData shared with every other test in this world: leave it tidy.
+        helper.assertTrue(VillageWorkOrders.setState(helper.getLevel(), center, order.id(),
+                com.abs.livingvillages.domain.VillageWorkOrderModel.CANCELLED, now + 1L) != null,
+            "The fixture order must be cancellable so it stops reserving materials after the check.");
+        VillageResourcePlanner.invalidate(helper.getLevel(), center);
+        var released = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(released.freeWoodUnits() == 256 && !released.needsWood(),
+            "A cancelled order must give its materials back to the settlement's free stock.");
+        residentA.discard();
+        residentB.discard();
         helper.succeed();
     }
 
@@ -2570,8 +2581,19 @@ public final class VillageReservationGameTests {
             new CompoundTag(), helper.getLevel().registryAccess());
         VillageWorkOrders restored = VillageWorkOrders.load(saved, helper.getLevel().registryAccess());
         CompoundTag roundTrip = restored.save(new CompoundTag(), helper.getLevel().registryAccess());
-        helper.assertTrue(roundTrip.getList("orders", Tag.TAG_COMPOUND).size() == 1,
-            "The village work-order board must survive an NBT save/load round trip.");
+        // The board is level-wide SavedData, so other settlements tested in the same world may own
+        // orders too. Persistence is verified for this settlement's order, not for a global count.
+        java.util.UUID boardVillage = VillageRegistry.villageId(helper.getLevel(), center);
+        ListTag persistedOrders = roundTrip.getList("orders", Tag.TAG_COMPOUND);
+        int ownPersistedOrders = 0;
+        for (int i = 0; i < persistedOrders.size(); i++) {
+            CompoundTag entry = persistedOrders.getCompound(i);
+            if (boardVillage != null && entry.getString("village").equals(boardVillage.toString())) {
+                ownPersistedOrders++;
+            }
+        }
+        helper.assertTrue(persistedOrders.size() >= 1 && ownPersistedOrders == 1,
+            "The village work-order board must survive an NBT save/load round trip with exactly this settlement's order.");
 
         var released = VillageWorkOrders.releaseExpiredClaim(
             helper.getLevel(), center, first.id(), now + 44L);
