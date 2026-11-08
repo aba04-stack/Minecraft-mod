@@ -158,27 +158,49 @@ public final class VillageLogistics {
     /**
      * Returns null when no materialized pending demand exists (legacy stockpiling mode),
      * or an exact shortage map for OPEN/WAITING orders.
+     *
+     * <p>The board hands out an immutable snapshot ({@code Map.copyOf}), while the pickup loop
+     * decrements whatever it actually collected. Mutating the snapshot itself threw
+     * {@code UnsupportedOperationException} from inside the entity tick event, which is a server
+     * crash the first time a courier picked up a drop a pending order was really waiting for.</p>
      */
     private static Map<String, Integer> pendingMaterialDeficits(Villager courier, ServerLevel level) {
         BlockPos center = VillagerRoles.getHome(courier);
         if (center == null) center = courier.blockPosition();
-        return VillageWorkOrders.pendingMaterialPickupDeficits(level, center);
+        Map<String, Integer> deficits = VillageWorkOrders.pendingMaterialPickupDeficits(level, center);
+        return deficits == null ? null : new HashMap<>(deficits);
     }
 
-    private static void collectNearbyMaterials(
+    /**
+     * Collects loose materials this settlement's pending orders are still waiting for, and returns how
+     * many items really moved into the courier's inventory.
+     *
+     * <p>Visible for in-world tests: the courier route is driven by an entity tick event, which a
+     * GameTest cannot fire directly.</p>
+     */
+    public static int collectPendingMaterials(Villager villager, ServerLevel level) {
+        if (villager == null || level == null) return 0;
+        return collectNearbyMaterials(villager, level, pendingMaterialDeficits(villager, level));
+    }
+
+    private static int collectNearbyMaterials(
         Villager villager,
         ServerLevel level,
         Map<String, Integer> materialDeficits
     ) {
         AABB area = villager.getBoundingBox().inflate(PICKUP_RADIUS, 1.5D, PICKUP_RADIUS);
+        // Respect the vanilla pickup delay: a player gets 40 ticks to take a dropped stack back, and
+        // the mod's own food handoff delays its drops by 10. A courier must not bypass either rule,
+        // otherwise loose resources vanish from under the player's cursor.
         List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, area,
-            item -> item.isAlive() && isRawResource(item.getItem())
+            item -> item.isAlive() && item.getPickUpDelay() <= 0 && isRawResource(item.getItem())
                 && villager.distanceToSqr(item) <= (double) PICKUP_RADIUS * PICKUP_RADIUS);
         drops.sort(Comparator
             .comparingInt((ItemEntity entity) -> materialDeficits == null ? 0
                 : -materialDeficits.getOrDefault(BuiltInRegistries.ITEM.getKey(entity.getItem().getItem()).toString(), 0))
             .thenComparingDouble(villager::distanceToSqr));
 
+        int collected = 0;
         for (ItemEntity entity : drops) {
             if (!entity.isAlive()) continue;
             ItemStack entityStack = entity.getItem();
@@ -196,9 +218,11 @@ public final class VillageLogistics {
 
             entityStack.shrink(moved);
             if (entityStack.isEmpty()) entity.discard();
+            collected += moved;
             if (materialDeficits != null) materialDeficits.put(itemId, Math.max(0, requested - moved));
             villager.getInventory().setChanged();
         }
+        return collected;
     }
 
     private static StorageTarget findNearestStorageWithRoom(Villager villager, ServerLevel level) {

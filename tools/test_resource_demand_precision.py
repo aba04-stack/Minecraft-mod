@@ -96,6 +96,17 @@ assert "public static void invalidate(ServerLevel level, BlockPos center) {" in 
 assert "VillageResourcePlanner.invalidate(level, center);" in LOGISTICS, (
     "a real delivery must refresh quotas immediately instead of waiting for the cache"
 )
+# The board publishes an immutable deficit snapshot; the courier may only decrement its own copy.
+assert "Map<String, Integer> deficits = VillageWorkOrders.pendingMaterialPickupDeficits(level, center);" in LOGISTICS
+assert "return deficits == null ? null : new HashMap<>(deficits);" in LOGISTICS, (
+    "mutating the board's immutable deficit snapshot throws inside the entity tick and crashes the server"
+)
+assert "public static int collectPendingMaterials(Villager villager, ServerLevel level)" in LOGISTICS, (
+    "the pickup route needs a test seam: a GameTest cannot fire an entity tick event"
+)
+assert "item.getPickUpDelay() <= 0" in LOGISTICS, (
+    "a courier must respect the vanilla pickup delay instead of stealing player-dropped items"
+)
 
 # 6. Roles/mining: a concrete coal or iron deficit releases and steers a miner.
 assert "static int desiredMinerSlots(boolean enabled, int availablePickaxes, int plannedWorkers," in ROLES

@@ -10,6 +10,7 @@ import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.Item;
@@ -2373,6 +2374,85 @@ public final class VillageReservationGameTests {
         helper.assertTrue(released.freeWoodUnits() == 256 && !released.needsWood(),
             "A cancelled order must give its materials back to the settlement's free stock.");
         residentA.discard();
+        residentB.discard();
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "logistics_pickup")
+    public static void courierCollectsOnlyUnmetPendingMaterialsAndRespectsPickupDelay(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 8; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        Villager courier = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        courier.setNoAi(true);
+        residentB.setNoAi(true);
+        courier.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        long now = level.getGameTime();
+
+        // Real demand: a house bill for forty planks the settlement owns nowhere. Industry turns one log
+        // into four planks, so the pickup demand is published in logs.
+        var order = VillageWorkOrders.enqueue(level, center, "house", "logistics_pickup", 55, now, 10000L,
+            List.of(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:oak_planks", 40)));
+        helper.assertTrue(order != null, "The persistent board must accept the fixture house order.");
+        Map<String, Integer> deficits = VillageWorkOrders.pendingMaterialPickupDeficits(level, center);
+        helper.assertTrue(deficits != null && deficits.getOrDefault("minecraft:oak_log", 0) == 10,
+            "Forty missing planks must translate into exactly ten missing logs, four planks per log.");
+
+        // The board publishes an immutable snapshot. The pickup loop decrements what it really collected,
+        // and doing that on the snapshot itself used to throw inside the entity tick - a server crash the
+        // first time a courier picked up a drop that a pending order was waiting for.
+        ItemEntity firstDrop = helper.spawn(EntityType.ITEM, 2, 1, 1);
+        firstDrop.setItem(new ItemStack(Items.OAK_LOG, 4));
+        helper.assertTrue(VillageLogistics.collectPendingMaterials(courier, level) == 4,
+            "A courier must collect the four loose logs the pending bill is waiting for.");
+        helper.assertTrue(firstDrop.isRemoved(), "A fully collected drop must leave the world.");
+
+        // A drop still inside its vanilla pickup delay belongs to whoever dropped it: a player gets forty
+        // ticks to take the stack back, and the mod's own food handoff delays its drops by ten.
+        ItemEntity delayedDrop = helper.spawn(EntityType.ITEM, 2, 1, 1);
+        delayedDrop.setItem(new ItemStack(Items.OAK_LOG, 4));
+        delayedDrop.setPickUpDelay(40);
+        helper.assertTrue(VillageLogistics.collectPendingMaterials(courier, level) == 0,
+            "A courier must not steal a drop that is still inside its pickup delay.");
+        helper.assertTrue(!delayedDrop.isRemoved() && delayedDrop.getItem().getCount() == 4,
+            "The delayed drop must stay untouched on the ground.");
+
+        // Once the delay expires the courier takes exactly what the bill is still missing, never more:
+        // eight of the forty planks are covered, so two more logs close the gap.
+        delayedDrop.setPickUpDelay(0);
+        helper.assertTrue(VillageLogistics.collectPendingMaterials(courier, level) == 2,
+            "With eight logs already accounted for, the courier must take two more and leave the rest.");
+        helper.assertTrue(!delayedDrop.isRemoved() && delayedDrop.getItem().getCount() == 2,
+            "The surplus logs must stay on the ground for the next trip.");
+        helper.assertTrue(VillageLogistics.collectPendingMaterials(courier, level) == 2,
+            "The remaining two logs must be collected once the bill still misses them.");
+        helper.assertTrue(delayedDrop.isRemoved(), "A fully collected drop must leave the world.");
+        helper.assertTrue(VillageLogistics.collectPendingMaterials(courier, level) == 0,
+            "With no loose material left the pickup route must be a no-op instead of inventing cargo.");
+
+        int carriedLogs = 0;
+        for (int slot = 0; slot < courier.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = courier.getInventory().getItem(slot);
+            if (stack.is(Items.OAK_LOG)) carriedLogs += stack.getCount();
+        }
+        helper.assertTrue(carriedLogs == 8,
+            "All eight dropped logs must end up carried by the courier: nothing created, nothing lost.");
+
+        // The board is level-wide SavedData shared with every other test in this world: leave it tidy.
+        helper.assertTrue(VillageWorkOrders.setState(level, center, order.id(),
+                com.abs.livingvillages.domain.VillageWorkOrderModel.CANCELLED, now + 1L) != null,
+            "The fixture order must be cancellable so it stops creating pickup demand.");
+        VillageWorkOrders.invalidateMaterialDemandCache(level, center);
+        VillageResourcePlanner.invalidate(level, center);
+        courier.discard();
         residentB.discard();
         helper.succeed();
     }
