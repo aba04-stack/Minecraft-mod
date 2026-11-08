@@ -74,6 +74,16 @@
 
 ---
 
+### 2.4. CI-проверка баг-ханта логистики (`TESTED` — automated, регрессия краша)
+
+- **Проверенный коммит:** `e86ebc34a93c945a0474770961a761f27a6b88bc` (цепочка `ffbe242` → `1bb0e7e` → `e86ebc3`).
+- **GitHub Actions run:** [42463143600](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42463143600) (push) и [42463147236](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42463147236) (pull_request); артефакт `livingvillages-0.17.0` (ID `13609873723`, 577 627 байт).
+- **55 `@GameTest`** прошли; добавлен `courierCollectsOnlyUnmetPendingMaterialsAndRespectsPickupDelay` (batch `logistics_pickup`).
+- **Что найдено чтением кода, а не тестами:** `VillageLogistics` вычитал собранные количества из карты, которую `VillageWorkOrders.pendingMaterialPickupDeficits` отдаёт как `Map.copyOf`. Исключение `UnsupportedOperationException` возникало внутри обработчика `EntityTickEvent.Post`, то есть в тике сущности, и приводило к падению сервера. Существующие 54 теста дефект не ловили: в их фикстурах нет активных нарядов-заказов, карта дефицитов приходит `null`, и выполняется запасной путь подбора.
+- **Методика нового теста:** фикстура создаёт настоящий заказ (`VillageWorkOrders.enqueue` на 40 досок), поэтому спрос публикуется в брёвнах (четыре доски из бревна), затем роняет настоящие `ItemEntity` рядом с курьером и вызывает маршрут напрямую через тестовый шов `VillageLogistics.collectPendingMaterials` — породить событие тика сущности из `GameTest` нельзя. Проверяются: неизменяемый снимок переживает подбор, дроп с задержкой поднятия не трогается, берётся ровно недостающее количество, лишнее остаётся на земле, и всё подобранное оказывается в инвентаре (закон сохранения предметов). Фикстура обязана отменить заказ и сбросить кэш дефицитов: борд заказов — общий `SavedData` уровня.
+- **Что показали два промежуточных падения:** [42461971894](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42461971894) — `cannot find symbol` для `ItemEntity.getPickUpDelay()`, [42462868259](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42462868259) — `pickupDelay has private access in ItemEntity`. Публичны только сеттеры, поэтому значение читается из NBT сущности (`saveWithoutId` → `PickupDelay`), а ключ сверен с патчем NeoForge для `1.21.1`.
+- **Ограничения:** длинные маршруты курьера (`TRIP_TIMEOUT_TICKS = 2400`), ночная пауза и уступка ванильному ИИ в тесте не проверяются — они требуют полевого прогона.
+
 ## 3. Обязательный каталог проверок по подсистемам
 
 ### 3.1. Компиляция и проверка переносимости доменной логики (`LANGUAGE_PORTABILITY`)
