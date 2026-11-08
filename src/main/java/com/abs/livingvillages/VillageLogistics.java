@@ -189,11 +189,12 @@ public final class VillageLogistics {
         Map<String, Integer> materialDeficits
     ) {
         AABB area = villager.getBoundingBox().inflate(PICKUP_RADIUS, 1.5D, PICKUP_RADIUS);
-        // Respect the vanilla pickup delay: a player gets 40 ticks to take a dropped stack back, and
-        // the mod's own food handoff delays its drops by 10. A courier must not bypass either rule,
-        // otherwise loose resources vanish from under the player's cursor.
+        // Respect the vanilla pickup delay (a public field on ItemEntity in these mappings; there is no
+        // getter): a player gets 40 ticks to take a dropped stack back, and the mod's own food handoff
+        // delays its drops by 10. A courier must not bypass either rule, otherwise loose resources
+        // vanish from under the player's cursor.
         List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, area,
-            item -> item.isAlive() && item.getPickUpDelay() <= 0 && isRawResource(item.getItem())
+            item -> item.isAlive() && item.pickupDelay <= 0 && isRawResource(item.getItem())
                 && villager.distanceToSqr(item) <= (double) PICKUP_RADIUS * PICKUP_RADIUS);
         drops.sort(Comparator
             .comparingInt((ItemEntity entity) -> materialDeficits == null ? 0

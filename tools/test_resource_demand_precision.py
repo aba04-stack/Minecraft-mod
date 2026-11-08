@@ -104,7 +104,7 @@ assert "return deficits == null ? null : new HashMap<>(deficits);" in LOGISTICS,
 assert "public static int collectPendingMaterials(Villager villager, ServerLevel level)" in LOGISTICS, (
     "the pickup route needs a test seam: a GameTest cannot fire an entity tick event"
 )
-assert "item.getPickUpDelay() <= 0" in LOGISTICS, (
+assert "item.pickupDelay <= 0" in LOGISTICS, (
     "a courier must respect the vanilla pickup delay instead of stealing player-dropped items"
 )
 
