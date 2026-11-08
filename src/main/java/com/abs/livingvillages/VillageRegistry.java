@@ -981,11 +981,14 @@ public final class VillageRegistry extends SavedData {
                 Container from = findNearestOwnedStorageWithItem(level, new BlockPos(fromX, fromY, fromZ), item, count);
                 List<Container> dests = findAvailableOwnedStorages(level, new BlockPos(toX, toY, toZ));
                 if (from == null || dests.isEmpty() || !canFitItemInContainer(dests.get(0), item, count)) return false;
-                int removed = removeItemFromContainer(from, item, count);
-                if (removed != count) return false;
-                insertItemIntoContainer(dests.get(0), new ItemStack(item, removed));
-                from.setChanged();
-                dests.get(0).setChanged();
+                Container to = dests.get(0);
+                int moved = VillageItemTransfers.moveRealItems(from, to, item, count, null);
+                if (moved != count) {
+                    // The port contract is transactional: a partial move is rolled back as real stacks,
+                    // so no item keeps a component set it never had and none disappears.
+                    if (moved > 0) VillageItemTransfers.moveRealItems(to, from, item, moved, null);
+                    return false;
+                }
                 return true;
             }
         };

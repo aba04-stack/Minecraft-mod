@@ -2,10 +2,12 @@ package com.abs.livingvillages;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.entity.EntityType;
@@ -21,6 +23,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
@@ -2454,6 +2457,68 @@ public final class VillageReservationGameTests {
         VillageResourcePlanner.invalidate(level, center);
         courier.discard();
         residentB.discard();
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "tool_identity")
+    public static void workerTransfersKeepToolDamageAndCustomName(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 8; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        helper.setBlock(new BlockPos(4, 1, 1), Blocks.CHEST);
+        BlockPos chestPos = helper.absolutePos(new BlockPos(4, 1, 1));
+        helper.assertTrue(level.getBlockEntity(chestPos) instanceof Container,
+            "The fixture chest must be a real container before a transfer can be measured.");
+        Container chest = (Container) level.getBlockEntity(chestPos);
+
+        // Exactly what a player leaves in the village chest: a worn, named tool.
+        ItemStack worn = new ItemStack(Items.SHEARS);
+        worn.setDamageValue(17);
+        worn.set(DataComponents.CUSTOM_NAME, Component.literal("Ножницы старосты"));
+        chest.setItem(0, worn.copy());
+        chest.setChanged();
+
+        Villager worker = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        worker.setNoAi(true);
+
+        int moved = VillageItemTransfers.moveRealItems(chest, worker.getInventory(), Items.SHEARS, 1, worker);
+        helper.assertTrue(moved == 1, "One real pair of shears must move from the chest to the worker.");
+        ItemStack carried = ItemStack.EMPTY;
+        int leftInChest = 0;
+        for (int slot = 0; slot < worker.getInventory().getContainerSize(); slot++) {
+            if (worker.getInventory().getItem(slot).is(Items.SHEARS)) carried = worker.getInventory().getItem(slot);
+        }
+        for (int slot = 0; slot < chest.getContainerSize(); slot++) {
+            if (chest.getItem(slot).is(Items.SHEARS)) leftInChest += chest.getItem(slot).getCount();
+        }
+        helper.assertTrue(leftInChest == 0, "The chest must hand the tool over instead of keeping a copy.");
+        helper.assertTrue(carried.getDamageValue() == 17,
+            "A worn tool must stay worn: taking it out of the chest may not repair it out of nothing.");
+        helper.assertTrue(Component.literal("Ножницы старосты").equals(carried.get(DataComponents.CUSTOM_NAME)),
+            "A custom name must survive the transfer instead of being rebuilt as a plain stack.");
+
+        // A worker with no free slot must give the same real stack back to the chest, not drop a fresh one.
+        for (int slot = 1; slot < worker.getInventory().getContainerSize(); slot++) {
+            worker.getInventory().setItem(slot, new ItemStack(Items.OAK_PLANKS, 64));
+        }
+        ItemStack second = new ItemStack(Items.SHEARS);
+        second.setDamageValue(9);
+        chest.setItem(3, second.copy());
+        chest.setChanged();
+        int rejected = VillageItemTransfers.moveRealItems(chest, worker.getInventory(), Items.SHEARS, 1, worker);
+        helper.assertTrue(rejected == 0, "A worker without a free slot must not take the tool at all.");
+        ItemStack returned = ItemStack.EMPTY;
+        for (int slot = 0; slot < chest.getContainerSize(); slot++) {
+            if (chest.getItem(slot).is(Items.SHEARS)) returned = chest.getItem(slot);
+        }
+        helper.assertTrue(returned.getDamageValue() == 9,
+            "The rejected tool must return to the chest with the damage it really had.");
+        helper.assertTrue(level.getEntitiesOfClass(ItemEntity.class,
+                new AABB(worker.blockPosition()).inflate(6.0D)).isEmpty(),
+            "Nothing may be dropped on the ground while the chest can take the tool back.");
+
+        worker.discard();
         helper.succeed();
     }
 

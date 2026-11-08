@@ -1625,20 +1625,13 @@ public final class VillageLivestock {
         return false;
     }
 
+    /**
+     * Takes real stacks out of a settlement storage: a worn pair of shears must reach the herder still
+     * worn, with its enchantments and name, instead of being rebuilt as a brand-new tool.
+     */
     private static void transferFromStorage(Villager worker, Container storage, Item item, int amount) {
         if (worker == null || storage == null || amount <= 0) return;
-        int removed = removeItem(storage, item, amount);
-        if (removed <= 0) return;
-        ItemStack remainder = worker.getInventory().addItem(new ItemStack(item, removed));
-        if (!remainder.isEmpty()) {
-            ItemStack returned = remainder.copy();
-            int inserted = insert(storage, returned);
-            if (inserted < remainder.getCount()) {
-                worker.spawnAtLocation(new ItemStack(item, remainder.getCount() - inserted));
-            }
-        }
-        storage.setChanged();
-        worker.getInventory().setChanged();
+        VillageItemTransfers.moveRealItems(storage, worker.getInventory(), item, amount, worker);
     }
 
     private static void finishTask(Villager villager, CompoundTag data, long retryAt) {
@@ -1684,19 +1677,6 @@ public final class VillageLivestock {
             if (stack.is(item)) total += stack.getCount();
         }
         return total;
-    }
-
-    private static int removeItem(Container container, Item item, int amount) {
-        int remaining = amount;
-        for (int slot = 0; slot < container.getContainerSize() && remaining > 0; slot++) {
-            ItemStack stack = container.getItem(slot);
-            if (!stack.is(item)) continue;
-            int take = Math.min(remaining, stack.getCount());
-            container.removeItem(slot, take);
-            remaining -= take;
-        }
-        if (remaining != amount) container.setChanged();
-        return amount - remaining;
     }
 
     private static int inventoryCapacityFor(Container inventory, Item item) {
