@@ -1513,34 +1513,68 @@ public final class VillageLivestock {
         });
     }
 
+    /**
+     * Nearest settlement storage that really holds {@code item} and can be reached.
+     *
+     * <p>The candidate set is unchanged - the storage box around the ownership center - but the walk
+     * goes outward in rings from the worker and stops at the first usable storage, instead of reading
+     * all 33x33x13 = 14,157 positions and building up to four paths per candidate.</p>
+     */
     private static StorageTarget findNearestStorageWithItem(Villager worker, ServerLevel level, Item item) {
-        List<StorageRef> refs = findStorages(level, ownershipCenter(worker), worker);
-        refs.sort(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
-        for (StorageRef ref : refs) {
-            if (countItem(ref.container(), item) <= 0) continue;
-            BlockPos stand = findSafeStand(level, worker, ref.pos());
-            if (stand != null) return new StorageTarget(ref.pos(), stand);
-        }
-        return null;
+        BlockPos center = ownershipCenter(worker);
+        BlockPos[] standOut = new BlockPos[1];
+        BlockPos storage = VillageScanRings.nearestInBox(worker.blockPosition(), center, storageRadius(), 6, 6,
+            pos -> acceptsStorageWithItem(level, center, worker, pos, item, standOut));
+        return storage == null || standOut[0] == null ? null : new StorageTarget(storage, standOut[0]);
     }
 
+    /** Nearest settlement storage with real room for the wool this worker carries. */
     private static StorageTarget findNearestStorageWithWoolRoom(Villager worker, ServerLevel level) {
-        List<StorageRef> refs = findStorages(level, ownershipCenter(worker), worker);
-        refs.sort(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
-        for (StorageRef ref : refs) {
-            boolean room = false;
-            for (int slot = 0; slot < worker.getInventory().getContainerSize(); slot++) {
-                ItemStack stack = worker.getInventory().getItem(slot);
-                if (!stack.isEmpty() && isWool(stack.getItem()) && canInsert(ref.container(), stack)) {
-                    room = true;
-                    break;
-                }
-            }
-            if (!room) continue;
-            BlockPos stand = findSafeStand(level, worker, ref.pos());
-            if (stand != null) return new StorageTarget(ref.pos(), stand);
+        BlockPos center = ownershipCenter(worker);
+        BlockPos[] standOut = new BlockPos[1];
+        BlockPos storage = VillageScanRings.nearestInBox(worker.blockPosition(), center, storageRadius(), 6, 6,
+            pos -> acceptsStorageWithWoolRoom(level, center, worker, pos, standOut));
+        return storage == null || standOut[0] == null ? null : new StorageTarget(storage, standOut[0]);
+    }
+
+    private static int storageRadius() {
+        return Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+    }
+
+    /** One storage candidate: owned, unreserved, a real container holding {@code item}, reachable. */
+    private static boolean acceptsStorageWithItem(ServerLevel level, BlockPos center, Villager worker,
+                                                  BlockPos pos, Item item, BlockPos[] standOut) {
+        if (!(level.getBlockEntity(pos) instanceof Container container) || countItem(container, item) <= 0) {
+            return false;
         }
-        return null;
+        return acceptsStorage(level, center, worker, pos, standOut);
+    }
+
+    /** One storage candidate: owned, unreserved, a real container with room for carried wool, reachable. */
+    private static boolean acceptsStorageWithWoolRoom(ServerLevel level, BlockPos center, Villager worker,
+                                                      BlockPos pos, BlockPos[] standOut) {
+        if (!(level.getBlockEntity(pos) instanceof Container container)) return false;
+        boolean room = false;
+        for (int slot = 0; slot < worker.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = worker.getInventory().getItem(slot);
+            if (!stack.isEmpty() && isWool(stack.getItem()) && canInsert(container, stack)) {
+                room = true;
+                break;
+            }
+        }
+        return room && acceptsStorage(level, center, worker, pos, standOut);
+    }
+
+    /** The cheap world tests every storage candidate shares; the stand is remembered for the winner. */
+    private static boolean acceptsStorage(ServerLevel level, BlockPos center, Villager worker,
+                                          BlockPos pos, BlockPos[] standOut) {
+        if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+            || !VillageRegistry.isStorageForVillage(level, center, pos)
+            || !VillageReservations.isStorageAvailable(level, pos, worker)) return false;
+        BlockPos stand = findSafeStand(level, worker, pos);
+        if (stand == null) return false;
+        standOut[0] = stand;
+        return true;
     }
 
     private static List<StorageRef> findStorages(ServerLevel level, BlockPos center, Villager owner) {
@@ -1562,16 +1596,25 @@ public final class VillageLivestock {
         return found;
     }
 
+    /**
+     * Nearest safe standing position next to {@code target} that the worker can actually path to.
+     *
+     * <p>Pathfinding is the expensive part, so the safe sides are ordered by distance first and the
+     * search stops at the first reachable one: the result is the same nearest reachable stand, but a
+     * worker next to an open chest builds one path instead of four.</p>
+     */
     private static BlockPos findSafeStand(ServerLevel level, Villager worker, BlockPos target) {
-        List<BlockPos> stands = new ArrayList<>();
+        List<BlockPos> stands = new ArrayList<>(4);
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos stand = target.relative(direction);
-            if (!isSafeStand(level, stand)) continue;
-            var path = worker.getNavigation().createPath(stand, 0);
-            if (path != null && path.canReach()) stands.add(stand.immutable());
+            if (isSafeStand(level, stand)) stands.add(stand.immutable());
         }
         stands.sort(Comparator.comparingDouble(pos -> worker.distanceToSqr(Vec3.atCenterOf(pos))));
-        return stands.isEmpty() ? null : stands.get(0);
+        for (BlockPos stand : stands) {
+            var path = worker.getNavigation().createPath(stand, 0);
+            if (path != null && path.canReach()) return stand;
+        }
+        return null;
     }
 
     private static void depositWool(Container inventory, Container storage) {

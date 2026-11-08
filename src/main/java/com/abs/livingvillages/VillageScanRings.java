@@ -5,6 +5,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.function.Predicate;
+
 /**
  * Ring-ordered block scans shared by the settlement subsystems.
  *
@@ -90,6 +92,48 @@ final class VillageScanRings {
         });
         VillageScanStats.recordScan(scanned[0]);
         return found;
+    }
+
+    /**
+     * Nearest position to {@code origin} that {@code accept} allows, or {@code null}.
+     *
+     * <p>Candidates are restricted to the box around {@code boundsCenter} ({@code boundsRadius}
+     * horizontally, {@code downReach}/{@code upReach} vertically), so the accepted set is exactly the
+     * set the plain nested loops covered — even when {@code origin} sits far outside that box. Rings
+     * are walked outward from {@code origin}, therefore the first match is a nearest one in ring order,
+     * and columns outside the box cost an integer comparison instead of a chunk and block-state read.</p>
+     *
+     * <p>{@code accept} performs the world reads and decides the whole question (block kind, ownership,
+     * free space, a reachable standing position), which is why the scan can stop at the first match.</p>
+     */
+    static BlockPos nearestInBox(BlockPos origin, BlockPos boundsCenter, int boundsRadius,
+                                 int downReach, int upReach, Predicate<BlockPos> accept) {
+        if (origin == null || boundsCenter == null || accept == null || boundsRadius < 0) return null;
+        int minY = boundsCenter.getY() - downReach;
+        int maxY = boundsCenter.getY() + upReach;
+        // Far enough to reach every column of the box even when the worker stands outside it.
+        int reach = boundsRadius + Math.max(Math.abs(origin.getX() - boundsCenter.getX()),
+            Math.abs(origin.getZ() - boundsCenter.getZ()));
+        int[] scanned = new int[1];
+        BlockPos[] found = new BlockPos[1];
+        walk(reach, (dx, dz) -> {
+            int x = origin.getX() + dx;
+            int z = origin.getZ() + dz;
+            if (Math.max(Math.abs(x - boundsCenter.getX()), Math.abs(z - boundsCenter.getZ())) > boundsRadius) {
+                return false;
+            }
+            for (int y = minY; y <= maxY; y++) {
+                BlockPos pos = new BlockPos(x, y, z);
+                scanned[0]++;
+                if (accept.test(pos)) {
+                    found[0] = pos.immutable();
+                    return true;
+                }
+            }
+            return false;
+        });
+        VillageScanStats.recordScan(scanned[0]);
+        return found[0];
     }
 
     /**

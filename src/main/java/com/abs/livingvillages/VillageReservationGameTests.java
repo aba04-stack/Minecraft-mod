@@ -2460,6 +2460,60 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "scan_budget_storage")
+    public static void nearbyDeliveryStorageIsFoundWithoutWalkingTheWholeStorageBox(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 12; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        // Ring 2 from the courier: close enough that an outward walk must find it almost immediately.
+        helper.setBlock(new BlockPos(4, 1, 1), Blocks.CHEST);
+        BlockPos chest = helper.absolutePos(new BlockPos(4, 1, 1));
+
+        Villager courier = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        courier.setNoAi(true);
+        residentB.setNoAi(true);
+        courier.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeB));
+        // A courier only looks for a delivery target when it really carries something to deliver.
+        courier.getInventory().addItem(new ItemStack(Items.OAK_LOG, 8));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        helper.assertTrue(VillageRegistry.villageId(level, center) != null,
+            "The fixture must resolve a settlement identity before a scan budget can be attributed to it.");
+        helper.assertTrue(VillageRegistry.isStorageForVillage(level, center, chest),
+            "The fixture chest must belong to the settlement, otherwise the delivery scan skips it by design.");
+
+        int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        long fullBox = (2L * radius + 1) * (2L * radius + 1) * 9L;
+
+        BlockPos[] nearby = new BlockPos[1];
+        VillageScanStats.ScanReport near = VillageScanStats.measure(
+            () -> nearby[0] = VillageLogistics.findCourierStorage(courier, level));
+        helper.assertTrue(chest.equals(nearby[0]), "The chest two blocks away must be chosen for the delivery.");
+        helper.assertTrue(near.blockPositions() > 0 && near.blockPositions() < fullBox / 8,
+            "A nearby delivery chest must be found without walking the whole storage box: read "
+                + near.blockPositions() + " of " + fullBox + " positions.");
+
+        // Proof that the early exit did not narrow the search: with no usable chest left, the same scan
+        // must still read every position of the box it is allowed to read.
+        helper.setBlock(new BlockPos(4, 1, 1), Blocks.AIR);
+        BlockPos[] none = new BlockPos[1];
+        VillageScanStats.ScanReport absent = VillageScanStats.measure(
+            () -> none[0] = VillageLogistics.findCourierStorage(courier, level));
+        helper.assertTrue(none[0] == null, "Without a real chest there must be no delivery target.");
+        helper.assertTrue(absent.blockPositions() == fullBox,
+            "Proving that no storage exists must still cover the whole box, but read "
+                + absent.blockPositions() + " of " + fullBox + " positions.");
+
+        courier.discard();
+        residentB.discard();
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "tool_identity")
     public static void workerTransfersKeepToolDamageAndCustomName(GameTestHelper helper) {
         var level = helper.getLevel();

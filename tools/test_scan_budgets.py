@@ -228,5 +228,40 @@ assert len(re.findall(r"VillageScanStats\.measure\(", GAME_TESTS)) >= 6, (
     "both budget tests must measure each phase separately"
 )
 
+# 10. Storage searches: bounded ring walk with an early exit, one path per winning storage.
+LOGISTICS = (JAVA / "VillageLogistics.java").read_text(encoding="utf-8")
+LIVESTOCK = (JAVA / "VillageLivestock.java").read_text(encoding="utf-8")
+assert "static BlockPos nearestInBox(BlockPos origin, BlockPos boundsCenter, int boundsRadius," in RINGS, (
+    "the bounded ring walk must stay available to every storage search"
+)
+assert "if (Math.max(Math.abs(x - boundsCenter.getX()), Math.abs(z - boundsCenter.getZ())) > boundsRadius) {" in RINGS, (
+    "the candidate set must stay exactly the box around the ownership center, never a wider ring"
+)
+assert "int reach = boundsRadius + Math.max(Math.abs(origin.getX() - boundsCenter.getX())," in RINGS, (
+    "rings must stay wide enough to cover the whole box when the worker stands outside it"
+)
+assert "VillageScanRings.nearestInBox(origin, origin, radius, 4, 4, pos -> {" in LOGISTICS, (
+    "the courier delivery search must stop at the first usable storage"
+)
+assert "storagePositions.sort(" not in LOGISTICS, (
+    "a delivery target must not require collecting and sorting every storage of the box first"
+)
+assert "static BlockPos findCourierStorage(Villager villager, ServerLevel level)" in LOGISTICS, (
+    "the delivery search needs a test seam: a GameTest cannot fire an entity tick event"
+)
+assert LIVESTOCK.count("VillageScanRings.nearestInBox(worker.blockPosition(), center, storageRadius(), 6, 6,") == 2, (
+    "both herder storage searches (fetch item, deliver wool) must walk rings instead of the full box"
+)
+assert "refs.sort(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))));" not in LIVESTOCK, (
+    "the herder must not collect and sort every storage of the box to pick one"
+)
+# Pathfinding dominates a stand search: order the safe sides by distance and stop at the reachable one.
+assert "stands.sort(Comparator.comparingDouble(pos -> worker.distanceToSqr(Vec3.atCenterOf(pos))));" in LIVESTOCK
+assert "            if (path != null && path.canReach()) return stand;" in LIVESTOCK, (
+    "the nearest reachable stand must end the path search instead of building a path for all four sides"
+)
+assert "if (isSafeStand(level, stand)) stands.add(stand.immutable());" in LIVESTOCK
+
 print("SCAN BUDGETS PASSED: ring-ordered early-exit scans, bounded presence caches, shared tool and "
-      "crop passes, membership refusal cache, per-tick settlement scan quota, deterministic GameTest budgets")
+      "crop passes, membership refusal cache, per-tick settlement scan quota, bounded storage searches, "
+      "deterministic GameTest budgets")

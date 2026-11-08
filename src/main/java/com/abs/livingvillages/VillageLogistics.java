@@ -24,7 +24,6 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -240,32 +239,49 @@ public final class VillageLogistics {
         return probe.getShort("PickupDelay") <= 0;
     }
 
+    /**
+     * Nearest settlement storage this courier may deliver to, with a safe place to stand next to it.
+     *
+     * <p>The candidate box is the same one the previous scan covered - {@code radius} horizontally and
+     * four blocks vertically around the courier - but the walk goes outward in rings and stops at the
+     * first storage that is owned, reserved for this courier, has room and has a safe stand. Collecting
+     * every candidate first used to read all 33x33x9 = 9,801 positions even when the chest was two
+     * blocks away. Between exactly equidistant storages the chosen one may differ from the old sorted
+     * order; a courier treats them as interchangeable.</p>
+     */
     private static StorageTarget findNearestStorageWithRoom(Villager villager, ServerLevel level) {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
         BlockPos ownershipCenter = VillagerRoles.getHome(villager);
         if (ownershipCenter == null) ownershipCenter = origin;
-        List<BlockPos> storagePositions = new ArrayList<>();
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                for (int dy = -4; dy <= 4; dy++) {
-                    BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
-                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
-                        || !VillageReservations.isStorageAvailable(level, pos, villager)) continue;
-                    if (!(level.getBlockEntity(pos) instanceof Container container) || !hasAnySpace(villager, container)) continue;
-                    storagePositions.add(pos.immutable());
+        BlockPos[] standOut = new BlockPos[1];
+        BlockPos storage = VillageScanRings.nearestInBox(origin, origin, radius, 4, 4, pos -> {
+            if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
+                || !VillageReservations.isStorageAvailable(level, pos, villager)) return false;
+            if (!(level.getBlockEntity(pos) instanceof Container container) || !hasAnySpace(villager, container)) {
+                return false;
+            }
+            for (Direction direction : HORIZONTAL) {
+                BlockPos stand = pos.relative(direction);
+                if (isSafeStand(level, stand)) {
+                    standOut[0] = stand.immutable();
+                    return true;
                 }
             }
-        }
-        storagePositions.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
-        for (BlockPos storage : storagePositions) {
-            for (Direction direction : HORIZONTAL) {
-                BlockPos stand = storage.relative(direction);
-                if (isSafeStand(level, stand)) return new StorageTarget(storage, stand.immutable());
-            }
-        }
-        return null;
+            return false;
+        });
+        return storage == null || standOut[0] == null ? null : new StorageTarget(storage, standOut[0]);
+    }
+
+    /**
+     * The storage a courier would deliver to, or {@code null}. Visible for in-world tests: the delivery
+     * route itself is driven by an entity tick event, which a GameTest cannot fire directly.
+     */
+    static BlockPos findCourierStorage(Villager villager, ServerLevel level) {
+        if (villager == null || level == null) return null;
+        StorageTarget target = findNearestStorageWithRoom(villager, level);
+        return target == null ? null : target.storage();
     }
 
     private static boolean hasAnySpace(Villager villager, Container container) {
