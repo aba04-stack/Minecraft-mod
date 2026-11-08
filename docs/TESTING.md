@@ -50,6 +50,17 @@
 - **Ограничения:** этот CI не заменяет длительное интерактивное тестирование в обычном мире, проверку больших/нестандартных деревьев и глубоких жил, а также профилирование MSPT/TPS/RAM. Производительность на слабом ПК остаётся `UNVERIFIED`.
 - **Границы изменений:** проверка выполнена в `feature/demand-driven-village-economy`, PR #2 нацелен на `arena/fbf16766-minecraft-mod`; автоматического слияния в `arena` или `main` не было.
 
+### 2.2. Итоговая CI-проверка ветки `0.17.0` (`TESTED` — automated)
+
+- **Проверенный коммит:** `be9bf26140d0f6300bc0a0fb5783fef2ef7bda1c` (цепочка `2991947` → `88aef84` → `be9bf26`).
+- **GitHub Actions run:** [42448849073](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42448849073).
+- **Статическая проверка:** `PASS` (`tools/validate_project.py`, 17 скриптов `tools/test_*.py`, включая новый `tools/test_resource_demand_precision.py`).
+- **Полная сборка:** `./gradlew build` — `BUILD SUCCESSFUL`, артефакт `livingvillages-0.17.0` (ID `13604438958`, 561 027 байт).
+- **Игровые тесты:** `./gradlew runGameTestServer` — **51/51 GameTest passed**, включая новые `reservedMaterialsAndConcreteDeficitsDrivePreciseWorkerDemand` и `plannerMeasuresRealFuelSaplingsAndSubtractsReservedOrderMaterials`.
+- **Выделенный сервер и headless-клиент:** оба smoke-теста `PASS`; раскладка панели старосты с семью кнопками не изменилась после добавления страничной сводки.
+- **Урок изоляции тестов (уровень 3/4):** все `GameTest` выполняются в одном мире, поэтому `SavedData` (`VillageWorkOrders`, `VillageRegistry`) общий для всех тестов. Прогон [42411520494](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42411520494) справедливо упал на `workOrdersAreDeduplicatedClaimedReservedAndPersisted`, который сравнивал глобальное число записей борда после NBT-цикла. Правило для новых тестов: проверять только записи своего поселения (по UUID деревни) и освобождать занятое состояние в конце теста.
+- **Ограничения:** полевая проверка приоритетной добычи угля/железа, восстановления леса саженцами и кликов по страничной сводке в обычном клиенте не выполнена; числовые показатели MSPT/TPS/RAM не замерены, хотя стоимость снимка ресурсов теперь уходит в телеметрию `VillageTickBudget`.
+
 ---
 
 ## 3. Обязательный каталог проверок по подсистемам
