@@ -3067,6 +3067,210 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    /**
+     * A workshop three blocks from the village center must be found by walking outward rings, not the
+     * whole village box, and the resolved answer must then be served from cache. The final assertion
+     * pins the exhaustive case: when nothing is found, the ring walk reads exactly as many positions as
+     * the old nested {@code dx}/{@code dz}/{@code dy} loops did, so the optimization changed the order
+     * of the scan and nothing else.
+     */
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "scan_budget_workshop")
+    public static void nearbyWorkshopIsFoundWithoutWalkingTheWholeVillageBox(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 12; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        // Ring 3 from the center: close enough that an outward walk must find it almost immediately.
+        BlockPos workshop = helper.absolutePos(new BlockPos(5, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CRAFTING_TABLE);
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        for (Villager villager : List.of(residentA, residentB)) villager.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        helper.assertTrue(VillageRegistry.villageId(level, center) != null,
+            "The fixture must resolve a settlement identity before scan budgets can be attributed to it.");
+        helper.assertTrue(VillageRegistry.isWorkBlockForVillage(level, center, workshop),
+            "The fixture workshop must be owned by the settlement, otherwise scans skip it by design.");
+
+        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
+        long fullBox = (2L * radius + 1) * (2L * radius + 1) * 17L;
+
+        VillageIndustry.invalidateWorkBlocks(level, center);
+        boolean[] nearbyAnswer = new boolean[1];
+        VillageScanStats.ScanReport nearby = VillageScanStats.measure(
+            () -> nearbyAnswer[0] = VillageIndustry.hasCraftingTable(level, center));
+        helper.assertTrue(nearbyAnswer[0], "A workshop three blocks away must be found.");
+        helper.assertTrue(nearby.blockPositions() > 0 && nearby.blockPositions() < fullBox / 8,
+            "A nearby workshop must be found without walking the whole village box: read "
+                + nearby.blockPositions() + " of " + fullBox + " positions.");
+
+        boolean[] cachedAnswer = new boolean[1];
+        VillageScanStats.ScanReport cached = VillageScanStats.measure(
+            () -> cachedAnswer[0] = VillageIndustry.hasCraftingTable(level, center));
+        helper.assertTrue(cachedAnswer[0] && cached.blockPositions() == 0L,
+            "The resolved answer must be served from cache inside its TTL, but read "
+                + cached.blockPositions() + " positions.");
+
+        level.removeBlock(workshop, false);
+        VillageIndustry.invalidateWorkBlocks(level, center);
+        boolean[] absentAnswer = new boolean[1];
+        VillageScanStats.ScanReport absent = VillageScanStats.measure(
+            () -> absentAnswer[0] = VillageIndustry.hasCraftingTable(level, center));
+        helper.assertTrue(!absentAnswer[0], "After the workshop is gone the answer must flip.");
+        helper.assertTrue(absent.blockPositions() == fullBox,
+            "Proving absence must read exactly the village box (" + fullBox + " positions), got "
+                + absent.blockPositions() + " — the ring walk changed order, not coverage.");
+
+        boolean[] absentCached = new boolean[1];
+        VillageScanStats.ScanReport absenceServedFromCache = VillageScanStats.measure(
+            () -> absentCached[0] = VillageIndustry.hasCraftingTable(level, center));
+        helper.assertTrue(!absentCached[0] && absenceServedFromCache.blockPositions() == 0L,
+            "The absence answer must also be cached, so a settlement without a workshop stops paying a"
+                + " full box scan every second; got " + absenceServedFromCache.blockPositions() + " reads.");
+        helper.succeed();
+    }
+
+    /**
+     * Deciding whether an asset belongs to a settlement costs two wide resident-group entity queries.
+     * A refusal used to be recomputed on every scan that asked again — storage, tools, planner, beds —
+     * several times per tick. This pins the budget: the same question in the same tick is paid once.
+     */
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "scan_budget_ownership")
+    public static void assetOwnershipDecisionsAreNotRepeatedWithinATick(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 30; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        BlockPos homeOneA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeOneB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos homeTwoA = helper.absolutePos(new BlockPos(25, 1, 1));
+        BlockPos homeTwoB = helper.absolutePos(new BlockPos(27, 1, 1));
+        BlockPos ownStorage = helper.absolutePos(new BlockPos(5, 1, 1));
+        BlockPos foreignStorage = helper.absolutePos(new BlockPos(23, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(23, 1, 1), Blocks.CHEST);
+
+        Villager ownerOne = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager partnerOne = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        Villager ownerTwo = helper.spawn(EntityType.VILLAGER, 25, 1, 1);
+        Villager partnerTwo = helper.spawn(EntityType.VILLAGER, 27, 1, 1);
+        for (Villager villager : List.of(ownerOne, partnerOne, ownerTwo, partnerTwo)) villager.setNoAi(true);
+        ownerOne.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeOneA));
+        partnerOne.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeOneB));
+        ownerTwo.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeTwoA));
+        partnerTwo.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeTwoB));
+
+        BlockPos centerOne = helper.absolutePos(new BlockPos(2, 1, 1));
+        java.util.UUID villageOneId = VillageRegistry.villageId(level, centerOne);
+        java.util.UUID villageTwoId = VillageRegistry.villageId(level, helper.absolutePos(new BlockPos(26, 1, 1)));
+        helper.assertTrue(villageOneId != null && villageTwoId != null && !villageOneId.equals(villageTwoId),
+            "The fixture must contain two distinct settlements before ownership budgets mean anything.");
+
+        boolean[] ownsOwn = new boolean[1];
+        VillageScanStats.ScanReport firstOwnQuestion = VillageScanStats.measure(
+            () -> ownsOwn[0] = VillageRegistry.isStorageForVillage(level, centerOne, ownStorage));
+        helper.assertTrue(ownsOwn[0], "The first settlement must own the chest next to its own residents.");
+        helper.assertTrue(firstOwnQuestion.membershipTests() <= 1,
+            "One ownership question must resolve resident-group membership at most once, got "
+                + firstOwnQuestion.membershipTests() + ".");
+
+        boolean[] ownsOwnAgain = new boolean[1];
+        VillageScanStats.ScanReport repeatedOwnQuestion = VillageScanStats.measure(
+            () -> ownsOwnAgain[0] = VillageRegistry.isStorageForVillage(level, centerOne, ownStorage));
+        helper.assertTrue(ownsOwnAgain[0] && repeatedOwnQuestion.membershipTests() == 0,
+            "A settled ownership answer must come from the registry, not from another membership test.");
+
+        boolean[] ownsForeign = new boolean[1];
+        VillageScanStats.ScanReport firstForeignQuestion = VillageScanStats.measure(
+            () -> ownsForeign[0] = VillageRegistry.isStorageForVillage(level, centerOne, foreignStorage));
+        helper.assertTrue(!ownsForeign[0], "The first settlement must not own the second settlement's chest.");
+        helper.assertTrue(firstForeignQuestion.membershipTests() == 1,
+            "Refusing a foreign chest must resolve membership exactly once, got "
+                + firstForeignQuestion.membershipTests() + ".");
+        helper.assertTrue(firstForeignQuestion.entityAreaScans() >= 2,
+            "One membership test is two resident-group entity queries; counted "
+                + firstForeignQuestion.entityAreaScans() + ".");
+
+        boolean[] ownsForeignAgain = new boolean[1];
+        VillageScanStats.ScanReport repeatedForeignQuestion = VillageScanStats.measure(
+            () -> ownsForeignAgain[0] = VillageRegistry.isStorageForVillage(level, centerOne, foreignStorage));
+        helper.assertTrue(!ownsForeignAgain[0], "The refusal must stay a refusal within the same tick.");
+        helper.assertTrue(repeatedForeignQuestion.membershipTests() == 0
+                && repeatedForeignQuestion.entityAreaScans() == 0,
+            "A refusal decided this tick must not be paid again: membershipTests="
+                + repeatedForeignQuestion.membershipTests()
+                + ", entityAreaScans=" + repeatedForeignQuestion.entityAreaScans() + ".");
+        helper.succeed();
+    }
+
+    /**
+     * The per-tick settlement scan quota exists to smooth spikes, so it must never starve a settlement:
+     * once a plan expires, the next question gets a freshly measured answer that includes stock added
+     * since the previous plan, and the rest of that tick is served from cache.
+     *
+     * <p>The re-measure count is asserted as "at most one" because villager tick listeners may ask for
+     * the same settlement plan during the wait; what matters is that the answer is never stale and that
+     * one tick never pays for the same settlement twice.</p>
+     */
+    @GameTest(template = "empty", timeoutTicks = 200, batch = "scan_budget_quota")
+    public static void expiredSettlementPlanRefreshesOnceAndSeesNewStock(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 12; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos storage = helper.absolutePos(new BlockPos(5, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        for (Villager villager : List.of(residentA, residentB)) villager.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        helper.assertTrue(VillageRegistry.isStorageForVillage(level, center, storage),
+            "The fixture chest must belong to the settlement before the planner can measure it.");
+        helper.assertTrue(level.getBlockEntity(storage) instanceof Container,
+            "The fixture chest must be a real container before the planner can read it.");
+        Container chest = (Container) level.getBlockEntity(storage);
+        chest.setItem(0, new ItemStack(Items.OAK_PLANKS, 64));
+        chest.setChanged();
+
+        VillageResourcePlanner.invalidate(level, center);
+        int firstWood = VillageResourcePlanner.getPlan(level, center).freeWoodUnits();
+        helper.assertTrue(firstWood == 64,
+            "The first plan must see the chest's planks, but reported " + firstWood + " free wood units.");
+        // Stock added after the plan was taken may only become visible through a real re-measure.
+        chest.setItem(1, new ItemStack(Items.OAK_PLANKS, 64));
+        chest.setChanged();
+        long scansAfterFirstPlan = VillageTickBudget.totalSettlementScans(level);
+
+        helper.runAfterDelay(120, () -> {
+            long before = VillageTickBudget.totalSettlementScans(level);
+            int refreshedWood = VillageResourcePlanner.getPlan(level, center).freeWoodUnits();
+            long after = VillageTickBudget.totalSettlementScans(level);
+            helper.assertTrue(after - before <= 1,
+                "One settlement must not be re-measured twice in the same tick, got " + (after - before) + ".");
+            helper.assertTrue(after > scansAfterFirstPlan,
+                "The scan quota must not starve a settlement: its expired plan was never re-measured.");
+            helper.assertTrue(refreshedWood == 128,
+                "The re-measured plan must include stock added after the previous plan, got "
+                    + refreshedWood + " free wood units.");
+            VillageResourcePlanner.getPlan(level, center);
+            helper.assertTrue(VillageTickBudget.totalSettlementScans(level) == after,
+                "A plan measured this tick must be served from cache for the rest of the tick.");
+            helper.succeed();
+        });
+    }
+
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;

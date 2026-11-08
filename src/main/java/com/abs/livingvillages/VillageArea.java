@@ -9,10 +9,14 @@ import net.minecraft.world.phys.AABB;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Shared best-effort boundary for currently loaded village residents.
@@ -40,8 +44,9 @@ public final class VillageArea {
         int radius = Math.max(0, horizontalRadius);
         int height = Math.max(0, verticalRadius);
         AABB area = new AABB(center).inflate(radius, height, radius);
+        VillageScanStats.recordEntityAreaScan();
         List<Villager> candidates = level.getEntitiesOfClass(Villager.class, area, Villager::isAlive);
-        candidates.sort(Comparator.comparing(v -> v.getUUID().toString()));
+        candidates.sort(byStableId(candidates, Villager::getUUID));
         if (candidates.size() <= 1) return List.copyOf(candidates);
 
         List<Resident> withHome = new ArrayList<>();
@@ -135,6 +140,7 @@ public final class VillageArea {
         int radius = storageGroupLookupRadius();
         List<Villager> requestedGroup = findVillagers(level, groupCenter, radius, 32);
         if (requestedGroup.isEmpty()) return false;
+        VillageScanStats.recordMembershipTest();
         List<Villager> locationGroup = findVillagers(level, location, radius, 32);
         for (Villager resident : locationGroup) {
             for (Villager requested : requestedGroup) {
@@ -147,6 +153,39 @@ public final class VillageArea {
     /** Backward-compatible name retained for storage-related callers. */
     public static boolean isStorageInResidentGroup(ServerLevel level, BlockPos groupCenter, BlockPos storage) {
         return isBlockInResidentGroup(level, groupCenter, storage);
+    }
+
+    /**
+     * Counts how many of {@code locations} belong to the resident group of {@code groupCenter}.
+     *
+     * <p>Scanners (crop fields, work-order boards, bed checks) ask this question for dozens of blocks
+     * with the same group center, and each question costs two entity area queries over a wide box plus
+     * clustering. Resolving the center group once and reusing it for every location halves that work.
+     * The answer for each location is identical to {@link #isBlockInResidentGroup}: a location counts
+     * when at least one of its own group members is also a member of the requested group.</p>
+     *
+     * @param locations positions to test; {@code null} entries are skipped
+     * @return how many tested positions belong to the group
+     */
+    public static int countInResidentGroup(ServerLevel level, BlockPos groupCenter, List<BlockPos> locations) {
+        if (groupCenter == null || locations == null || locations.isEmpty()) return 0;
+        int radius = storageGroupLookupRadius();
+        List<Villager> requestedGroup = findVillagers(level, groupCenter, radius, 32);
+        if (requestedGroup.isEmpty()) return 0;
+        Set<UUID> requestedIds = new HashSet<>(Math.max(8, requestedGroup.size() * 2));
+        for (Villager villager : requestedGroup) requestedIds.add(villager.getUUID());
+        int count = 0;
+        for (BlockPos location : locations) {
+            if (location == null) continue;
+            VillageScanStats.recordMembershipTest();
+            for (Villager resident : findVillagers(level, location, radius, 32)) {
+                if (requestedIds.contains(resident.getUUID())) {
+                    count++;
+                    break;
+                }
+            }
+        }
+        return count;
     }
 
     private static int storageGroupLookupRadius() {
@@ -202,10 +241,29 @@ public final class VillageArea {
                     }
                 }
             }
-            component.sort(Comparator.comparing(r -> r.villager().getUUID().toString()));
+            component.sort(byStableId(component, resident -> resident.villager().getUUID()));
             components.add(component);
         }
         return components;
+    }
+
+    /**
+     * Deterministic ordering by villager UUID text — the same order the code has always produced.
+     *
+     * <p>Comparing {@code getUUID().toString()} inline allocates two strings per comparison, and these
+     * sorts run inside every resident lookup (several per tick per settlement). Resolving each key once
+     * keeps the ordering identical while allocating one string per villager instead of O(n log n).</p>
+     *
+     * @param items the list that is about to be sorted; every element must be present here
+     * @param idOf  reads the stable identity of one element
+     */
+    private static <T> Comparator<T> byStableId(List<T> items, Function<T, UUID> idOf) {
+        Map<UUID, String> keys = new HashMap<>(Math.max(8, items.size() * 2));
+        for (T item : items) {
+            UUID id = idOf.apply(item);
+            if (!keys.containsKey(id)) keys.put(id, id.toString());
+        }
+        return (left, right) -> keys.get(idOf.apply(left)).compareTo(keys.get(idOf.apply(right)));
     }
 
     private static BlockPos anchor(Resident resident, boolean useHomeAnchors) {

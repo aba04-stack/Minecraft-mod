@@ -97,8 +97,9 @@ public final class VillagerRoles {
         List<Villager> all = VillageArea.findVillagers(level, center);
         if (all.isEmpty()) return;
 
-        int availablePickaxes = VillageIndustry.countAvailablePickaxes(level, center);
-        int availableSwords = VillageIndustry.countAvailableSwords(level, center);
+        VillageIndustry.AvailableTools tools = VillageIndustry.countAvailableTools(level, center);
+        int availablePickaxes = tools.pickaxes();
+        int availableSwords = tools.swords();
         boolean workshopExists = LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()
             && VillageIndustry.hasCraftingTable(level, center);
         boolean housingNeeded = LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()

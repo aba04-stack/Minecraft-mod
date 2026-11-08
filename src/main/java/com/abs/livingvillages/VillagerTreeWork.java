@@ -587,6 +587,10 @@ public final class VillagerTreeWork {
                     setTargetLog(data, nextLog);
                     data.putLong(STARTED_AT, level.getGameTime());
                 } else {
+                    // The trunk is gone. The planner keeps its forest answer longer than the rest of the
+                    // plan, so a finished tree drops it explicitly: lumberjack quotas must react to real
+                    // logging instead of waiting for that TTL to expire.
+                    VillageResourcePlanner.invalidate(level, target);
                     BlockPos treeBase = data.contains(TREE_BASE_X)
                         ? new BlockPos(data.getInt(TREE_BASE_X), data.getInt(TREE_BASE_Y), data.getInt(TREE_BASE_Z))
                         : target;

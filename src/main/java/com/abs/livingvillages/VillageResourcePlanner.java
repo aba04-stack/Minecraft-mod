@@ -17,6 +17,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,20 @@ import java.util.WeakHashMap;
  */
 public final class VillageResourcePlanner {
     private static final long CACHE_TICKS = 100L;
+    /**
+     * A forest does not appear or disappear within five seconds, so the tree scan lives longer than the
+     * rest of the plan. Felling a tree invalidates the settlement plan explicitly
+     * ({@code VillagerTreeWork} calls {@link #invalidate} when a trunk runs out), so lumberjack quotas
+     * still react immediately to real logging instead of waiting for this to expire.
+     */
+    private static final long TREE_CACHE_TICKS = 200L;
+    /**
+     * How many settlements may run a full re-measure in one tick. Every cache expires on the same
+     * 100-tick boundary, so without a quota a server with many settlements would pay all of their scans
+     * in a single tick. A settlement that does not get the quota keeps serving its previous plan (at
+     * most {@code CACHE_TICKS} old) and retries on the next tick.
+     */
+    private static final int MAX_REFRESHES_PER_TICK = 2;
     private static final Map<ServerLevel, Map<UUID, CachedPlan>> CACHE = new WeakHashMap<>();
 
     private VillageResourcePlanner() {}
@@ -61,13 +76,21 @@ public final class VillageResourcePlanner {
         Map<UUID, CachedPlan> byVillage = CACHE.computeIfAbsent(level, ignored -> new HashMap<>());
         CachedPlan cached = byVillage.get(villageId);
         if (cached != null && now < cached.expiresAtTick()) return cached.plan();
+        if (cached != null && !VillageTickBudget.tryConsumeSettlementScan(level, MAX_REFRESHES_PER_TICK)) {
+            // This tick's scan quota is spent: keep the previous plan instead of stacking every
+            // settlement's re-measure into the same tick. The entry stays expired, so the settlement
+            // retries next tick rather than waiting another full cache interval.
+            return cached.plan();
+        }
 
         long startedNanos = System.nanoTime();
         List<Villager> villagers = residents == null ? VillageArea.findVillagers(level, center) : residents;
-        VillageResourceDemandModel.Stock stock = measure(level, center, villagers, now);
+        boolean treesReused = cached != null && now < cached.treesExpiresAtTick();
+        VillageResourceDemandModel.Stock stock = measure(level, center, villagers, now, treesReused ? cached : null);
         VillageResourceDemandModel.Plan plan = VillageResourceDemandModel.evaluate(stock);
         VillageTickBudget.recordSubsystemNanos(level, System.nanoTime() - startedNanos);
-        byVillage.put(villageId, new CachedPlan(plan, now + CACHE_TICKS));
+        byVillage.put(villageId, new CachedPlan(plan, now + CACHE_TICKS, stock.treesAvailable(),
+            treesReused ? cached.treesExpiresAtTick() : now + TREE_CACHE_TICKS));
 
         if (byVillage.size() > 64) {
             byVillage.entrySet().removeIf(entry -> now >= entry.getValue().expiresAtTick());
@@ -82,22 +105,30 @@ public final class VillageResourcePlanner {
      */
     public static void invalidate(ServerLevel level, BlockPos center) {
         if (level == null || center == null) return;
+        // Workshop presence is cached on the industry side and feeds this planner, so one invalidation
+        // point keeps both views consistent after a real change to the settlement.
+        VillageIndustry.invalidateWorkBlocks(level, center);
         Map<UUID, CachedPlan> byVillage = CACHE.get(level);
         if (byVillage == null || byVillage.isEmpty()) return;
         UUID villageId = VillageRegistry.villageId(level, center);
         if (villageId != null) byVillage.remove(villageId);
     }
 
+    /**
+     * @param treeSource a previous entry whose tree answer is still fresh, or {@code null} to rescan
+     */
     private static VillageResourceDemandModel.Stock measure(
-            ServerLevel level, BlockPos center, List<Villager> villagers, long now) {
+            ServerLevel level, BlockPos center, List<Villager> villagers, long now, CachedPlan treeSource) {
         Totals totals = new Totals();
         int adults = 0;
 
         int storageRadius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        int scanned = 0;
         for (int dx = -storageRadius; dx <= storageRadius; dx++) {
             for (int dz = -storageRadius; dz <= storageRadius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
+                    scanned++;
                     if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
                         || !VillageRegistry.isStorageForVillage(level, center, pos)
                         || !(level.getBlockEntity(pos) instanceof Container container)) continue;
@@ -107,6 +138,7 @@ public final class VillageResourcePlanner {
                 }
             }
         }
+        VillageScanStats.recordScan(scanned);
 
         if (villagers != null) {
             for (Villager villager : villagers) {
@@ -121,7 +153,7 @@ public final class VillageResourcePlanner {
         }
 
         CropScan crops = countCropFields(level, center);
-        boolean treesAvailable = hasHarvestableTree(level, center);
+        boolean treesAvailable = treeSource != null ? treeSource.treesAvailable() : hasHarvestableTree(level, center);
         int pickaxes = VillageIndustry.countAvailablePickaxes(level, center);
         boolean furnaceAvailable = VillageIndustry.hasFurnace(level, center);
         Totals reserved = measureReserved(level, center, now);
@@ -204,10 +236,12 @@ public final class VillageResourcePlanner {
 
     private static boolean hasHarvestableTree(ServerLevel level, BlockPos center) {
         int radius = Math.min(12, LivingVillagesConfig.TREE_SEARCH_RADIUS_BLOCKS.get());
+        int scanned = 0;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -2; dy <= 16; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
+                    scanned++;
                     if (!level.hasChunkAt(pos) || !level.getBlockState(pos).is(BlockTags.LOGS)) continue;
                     int logs = 0;
                     int leaves = 0;
@@ -228,43 +262,55 @@ public final class VillageResourcePlanner {
                             }
                         }
                     }
-                    if (leaves >= 3) return true;
+                    if (leaves >= 3) {
+                        VillageScanStats.recordScan(scanned);
+                        return true;
+                    }
                 }
             }
         }
+        VillageScanStats.recordScan(scanned);
         return false;
     }
 
     /**
      * Counts ripe crops and empty owned farmland in a single pass over the same volume.
      * Both counters used to walk the whole village box separately, doubling the block reads.
+     * Candidate tiles are collected first and their resident-group membership is then decided in one
+     * batch, which resolves the village center group once instead of once per tile.
      */
     private static CropScan countCropFields(ServerLevel level, BlockPos center) {
-        int mature = 0;
-        int plantable = 0;
         int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
+        List<BlockPos> matureCandidates = new ArrayList<>();
+        List<BlockPos> plantableCandidates = new ArrayList<>();
+        int scanned = 0;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
+                    scanned++;
                     if (!level.hasChunkAt(pos)) continue;
                     BlockState state = level.getBlockState(pos);
-                    if (state.getBlock() instanceof CropBlock crop && crop.isMaxAge(state)
-                        && VillageArea.isBlockInResidentGroup(level, center, pos)) {
-                        mature++;
+                    if (state.getBlock() instanceof CropBlock crop && crop.isMaxAge(state)) {
+                        matureCandidates.add(pos.immutable());
                         continue;
                     }
                     if (!state.isAir() || !level.hasChunkAt(pos.below())) continue;
                     BlockPos soil = pos.below();
+                    scanned++;
                     if (level.getBlockState(soil).is(Blocks.FARMLAND)
-                        && level.getMaxLocalRawBrightness(pos) >= 8
-                        && VillageArea.isBlockInResidentGroup(level, center, soil)) {
-                        plantable++;
+                        && level.getMaxLocalRawBrightness(pos) >= 8) {
+                        plantableCandidates.add(soil.immutable());
                     }
                 }
             }
         }
-        return new CropScan(mature, plantable);
+        VillageScanStats.recordScan(scanned);
+        // Membership is decided in one batch: every tile asks about the same village center, and each
+        // separate question costs two wide entity area queries.
+        return new CropScan(
+            VillageArea.countInResidentGroup(level, center, matureCandidates),
+            VillageArea.countInResidentGroup(level, center, plantableCandidates));
     }
 
     private static boolean isStorage(BlockState state) {
@@ -317,5 +363,10 @@ public final class VillageResourcePlanner {
 
     private record CropScan(int matureCrops, int plantableFarmland) {}
 
-    private record CachedPlan(VillageResourceDemandModel.Plan plan, long expiresAtTick) {}
+    /**
+     * @param treesAvailable     the tree answer carried over while it is still fresh
+     * @param treesExpiresAtTick when the forest must be rescanned, which outlives {@code expiresAtTick}
+     */
+    private record CachedPlan(VillageResourceDemandModel.Plan plan, long expiresAtTick,
+                              boolean treesAvailable, long treesExpiresAtTick) {}
 }

@@ -109,15 +109,26 @@ public final class VillageRegistry extends SavedData {
         return found;
     }
 
-    /** A query center is evaluated at most once per game tick. */
-    public static UUID villageId(ServerLevel level, BlockPos center) {
-        if (level == null || center == null) return null;
+    /** Asset kinds, so a refusal for one ownership map can never suppress another kind. */
+    private static final long ASSET_STORAGE = 1L;
+    private static final long ASSET_BED = 2L;
+    private static final long ASSET_WORK_BLOCK = 3L;
+
+    /** Per-tick identity scratch space: resolved centers and refused asset claims. */
+    private static IdentityCache identityCacheFor(ServerLevel level) {
         long now = level.getGameTime();
         IdentityCache cache = ID_CACHE.get(level);
         if (cache == null || cache.gameTime != now) {
             cache = new IdentityCache(now);
             ID_CACHE.put(level, cache);
         }
+        return cache;
+    }
+
+    /** A query center is evaluated at most once per game tick. */
+    public static UUID villageId(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return null;
+        IdentityCache cache = identityCacheFor(level);
         long centerKey = center.asLong();
         CachedId cached = cache.ids.get(centerKey);
         if (cached != null) return cached.id();
@@ -280,7 +291,7 @@ public final class VillageRegistry extends SavedData {
             removeStaleOwner(registry, storage, registry.storageOwners);
             return false;
         }
-        return claimAsset(level, groupCenter, storage, registry.storageOwners);
+        return claimAsset(level, groupCenter, storage, registry.storageOwners, ASSET_STORAGE);
     }
 
     /** Bed-foot ownership API for housing and population checks. */
@@ -292,7 +303,7 @@ public final class VillageRegistry extends SavedData {
             removeStaleOwner(registry, bedFoot, registry.bedOwners);
             return false;
         }
-        return claimAsset(level, groupCenter, bedFoot, registry.bedOwners);
+        return claimAsset(level, groupCenter, bedFoot, registry.bedOwners, ASSET_BED);
     }
 
     /** Workstation ownership API for production and crafting scans. */
@@ -303,21 +314,38 @@ public final class VillageRegistry extends SavedData {
             removeStaleOwner(registry, workBlock, registry.workBlockOwners);
             return false;
         }
-        return claimAsset(level, groupCenter, workBlock, registry.workBlockOwners);
+        return claimAsset(level, groupCenter, workBlock, registry.workBlockOwners, ASSET_WORK_BLOCK);
     }
 
     private static boolean claimAsset(ServerLevel level, BlockPos groupCenter, BlockPos location,
-                                      Map<Long, UUID> ownership) {
+                                      Map<Long, UUID> ownership, long assetKind) {
         UUID villageId = villageId(level, groupCenter);
         if (villageId == null) return false;
         VillageRegistry registry = get(level);
         long key = location.asLong();
         UUID existing = ownership.get(key);
         if (existing != null) return existing.equals(villageId);
+        // A refusal is remembered until the next tick. Deciding membership costs two resident-group
+        // entity area queries over a wide box, while storage, tool, planner and bed scans ask about the
+        // same unclaimed asset several times per tick. Nothing can become claimable mid-tick, so the
+        // cached refusal cannot hide an asset: villagers only move between ticks.
+        if (!identityCacheFor(level).claimRefusals.add(claimRefusalKey(key, groupCenter, assetKind))) {
+            return false;
+        }
+        VillageScanStats.recordMembershipTest();
         if (!VillageArea.isBlockInResidentGroup(level, groupCenter, location)) return false;
         ownership.put(key, villageId);
         registry.setDirty();
         return true;
+    }
+
+    /**
+     * Distinguishes refusals of the same block for different group centers and different asset kinds
+     * (storage, bed, workstation), which live in separate ownership maps but share block positions.
+     */
+    private static long claimRefusalKey(long locationKey, BlockPos groupCenter, long assetKind) {
+        long mixed = locationKey * 0x9E3779B97F4A7C15L + groupCenter.asLong();
+        return mixed ^ (assetKind * 0x517CC1B727220A95L);
     }
 
     private static void removeStaleOwner(VillageRegistry registry, BlockPos location, Map<Long, UUID> ownership) {
@@ -1341,6 +1369,8 @@ public final class VillageRegistry extends SavedData {
         private final long gameTime;
         private final Map<Long, CachedId> ids = new HashMap<>();
         private final Map<UUID, List<IdentitySignature>> groupsByVillage = new HashMap<>();
+        /** Assets already refused membership this tick, keyed by {@link #claimRefusalKey}. */
+        private final Set<Long> claimRefusals = new HashSet<>();
 
         private IdentityCache(long gameTime) { this.gameTime = gameTime; }
 

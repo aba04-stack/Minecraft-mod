@@ -69,7 +69,13 @@ assert "public static boolean isWorkBlockState(BlockState state)" in registry
 industry = (JAVA / "VillageIndustry.java").read_text(encoding="utf-8")
 assert "VillageRegistry.isWorkBlockForVillage(level, center, pos)" in industry, "industry must only use village-owned furnaces/tables"
 crafting = (JAVA / "VillageCraftingJobs.java").read_text(encoding="utf-8")
-assert "VillageRegistry.isWorkBlockForVillage(level, center, pos)" in crafting, "crafting jobs must use village-owned tables"
+# Crafting jobs resolve their workstation through the shared ring-ordered scan, which applies the same
+# ownership filter industry has always applied; the filter itself lives in VillageScanRings now.
+assert "VillageScanRings.nearestOwned(level, center, block, radius, 6, 6)" in crafting, \
+    "crafting jobs must resolve tables through the shared owned-block scan"
+scan_rings = (JAVA / "VillageScanRings.java").read_text(encoding="utf-8")
+assert scan_rings.count("VillageRegistry.isWorkBlockForVillage(level, center, pos)") == 2, \
+    "both shared scan queries must skip workstations owned by another settlement"
 assert "cleanupInvalidAssets(level, villageCenter, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())" in (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
 assert "VillageRegistry.isBedForVillage(level, center, pos)" in (JAVA / "LivingVillages.java").read_text(encoding="utf-8")
 assert "VillageRegistry.isBedForVillage(level, center, pos)" in (JAVA / "VillageBuilder.java").read_text(encoding="utf-8")

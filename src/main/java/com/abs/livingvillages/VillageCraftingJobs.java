@@ -1208,24 +1208,15 @@ public final class VillageCraftingJobs {
         return found;
     }
 
+    /**
+     * Nearest workstation for one idle craftsman, sharing the ring-ordered scan.
+     *
+     * <p>An idle craftsman retries every {@code RETRY_TICKS}; the previous full-box walk read the whole
+     * 33x33x13 volume on each retry even when the workshop stood two blocks away, and it ran before the
+     * cheap "is there anything to craft" checks.</p>
+     */
     private static BlockPos findNearestBlock(ServerLevel level, BlockPos center, Block block, int radius) {
-        BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                for (int dy = -6; dy <= 6; dy++) {
-                    BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos)) continue;
-                    net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
-                    if (!state.is(block)) continue;
-                    if (VillageRegistry.isWorkBlockState(state)
-                        && !VillageRegistry.isWorkBlockForVillage(level, center, pos)) continue;
-                    double distance = pos.distSqr(center);
-                    if (distance < bestDistance) { bestDistance = distance; best = pos.immutable(); }
-                }
-            }
-        }
-        return best;
+        return VillageScanRings.nearestOwned(level, center, block, radius, 6, 6);
     }
 
     private static BlockPos findStandNear(ServerLevel level, Villager villager, BlockPos target) {
