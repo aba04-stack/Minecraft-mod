@@ -252,8 +252,9 @@ public final class VillageLogistics {
     private static StorageTarget findNearestStorageWithRoom(Villager villager, ServerLevel level) {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
-        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
-        if (ownershipCenter == null) ownershipCenter = origin;
+        BlockPos home = VillagerRoles.getHome(villager);
+        // Captured by the scan predicate below, so it is bound once and never reassigned.
+        final BlockPos ownershipCenter = home == null ? origin : home;
         BlockPos[] standOut = new BlockPos[1];
         BlockPos storage = VillageScanRings.nearestInBox(origin, origin, radius, 4, 4, pos -> {
             if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
