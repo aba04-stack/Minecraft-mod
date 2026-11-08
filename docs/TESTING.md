@@ -63,8 +63,8 @@
 
 ### 2.3. CI-проверка perf-цикла `0.17.0` (`TESTED` — automated, бюджеты сканирования)
 
-- **Проверенный коммит:** `b38993035dec383d39a2c78fb47e1285c48becd6` (цепочка `9ddf086` → `b389930`).
-- **GitHub Actions run:** [42457328996](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42457328996) (push) и [42457332387](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42457332387) (pull_request); артефакт `livingvillages-0.17.0` (ID `13607714309`, 575 998 байт).
+- **Проверенный коммит:** `d73a954cd50d393e09aff1015046567c0239b451` (цепочка `9ddf086` → `b389930` → `583255b` → `d73a954`).
+- **GitHub Actions run:** [42459225366](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42459225366) (push) и [42459229360](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42459229360) (pull_request); артефакт `livingvillages-0.17.0` (ID `13609057308`, 576 051 байт). Для `b389930` — [42457328996](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42457328996) и [42457332387](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42457332387) (артефакт `13607714309`, 575 998 байт).
 - **Статическая проверка:** `PASS` — 18 скриптов `tools/test_*.py`, включая новый `tools/test_scan_budgets.py` и обновлённый `tools/test_village_registry.py`.
 - **Игровые тесты:** `./gradlew runGameTestServer` — 54 `@GameTest`-метода, все прошли; из них три новых проверяют стоимость сканирования: `nearbyWorkshopIsFoundWithoutWalkingTheWholeVillageBox`, `assetOwnershipDecisionsAreNotRepeatedWithinATick`, `expiredSettlementPlanRefreshesOnceAndSeesNewStock`.
 - **Методика бюджетных тестов (обязательная для следующих):** утверждения строятся на детерминированных счётчиках `VillageScanStats` (прочитанные позиции блока, проверки принадлежности к группе жителей, запросы сущностей), а не на миллисекундах. Измерение выполняется обёрткой `VillageScanStats.measure(() -> ...)`, которая сбрасывает счётчики даже при падении утверждения. Каждый бюджетный тест вынесен в собственный `batch`, чтобы его измерения не пересекались с чужими фикстурами.
