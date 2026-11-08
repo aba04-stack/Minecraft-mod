@@ -5,12 +5,13 @@
 ## Последняя успешная проверка feature-ветки 0.17.0
 
 - Ветка: `arena/5eb85e16-minecraft-mod`, ответвление от `main` (`414fdca`). Ветка `main` не изменялась; GitHub Release не публиковался.
-- Проверенный коммит: `be9bf26140d0f6300bc0a0fb5783fef2ef7bda1c` — `fix: keep the shared-world work-order board assertions settlement-scoped` (в цепочке также `88aef84` и `2991947`).
-- GitHub Actions CI: [run 42448849073](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42448849073). Успешны: `python3 tools/validate_project.py`, `./gradlew build`, `./gradlew runGameTestServer`, smoke-test dedicated server (состояние `Done!`) и headless-клиент с software OpenGL (раскладка панели старосты).
-- **51/51 внутриигровых `@GameTest` прошли** (было 49 в `0.16.0`). Добавлены `reservedMaterialsAndConcreteDeficitsDrivePreciseWorkerDemand` (доменные правила) и `plannerMeasuresRealFuelSaplingsAndSubtractsReservedOrderMaterials` (измерение в реальном мире).
+- Проверенный коммит: `b38993035dec383d39a2c78fb47e1285c48becd6` — `fix: remember only real claim refusals and count membership once` (в цепочке также `2991947`, `88aef84`, `be9bf26`, `b2d62c1`, `9ddf086`).
+- GitHub Actions CI: [run 42457328996](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42457328996) (push) и [run 42457332387](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42457332387) (pull_request). Успешны: `python3 tools/validate_project.py`, `./gradlew build`, `./gradlew runGameTestServer`, smoke-test dedicated server (состояние `Done!`) и headless-клиент с software OpenGL (раскладка панели старосты).
+- **54 внутриигровых `@GameTest` прошли** (было 51 до perf-цикла, 49 в `0.16.0`). Добавлены `nearbyWorkshopIsFoundWithoutWalkingTheWholeVillageBox`, `assetOwnershipDecisionsAreNotRepeatedWithinATick` и `expiredSettlementPlanRefreshesOnceAndSeesNewStock` — все три проверяют стоимость сканирования, а не время выполнения.
+- Промежуточный прогон [run 42456430777](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42456430777) для commit `9ddf086` **упал** на двух тестах: `removedChestDoesNotKeepAStaleReservation` (кэш отказов запоминал ключ до проверки, и успешное заявление блокировало повторное заявление заменённого сундука в том же тике) и новый `assetOwnershipDecisionsAreNotRepeatedWithinATick` (одна проверка принадлежности учитывалась дважды). Оба дефекта относятся к самой оптимизации и устранены в `b389930` — это пример того, как бюджетный тест ловит регрессию, невидимую на глаз.
 - Промежуточный прогон [run 42411520494](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42411520494) для commit `88aef84` **упал** на `workOrdersAreDeduplicatedClaimedReservedAndPersisted`: все `GameTest` выполняются в одном мире, борд заказов — общий `SavedData`, и новый заказ тестового поселения сделал глобальную проверку `orders size == 1` невыполнимой. Ошибка устранена в `be9bf26` подсчётом записей по UUID поселения и отменой тестового заказа; это реальная находка о связи тестов, а не о логике мода.
-- Локально в песочнице без JDK выполнены только статические проверки: 17 скриптов `tools/test_*.py` (включая новый `tools/test_resource_demand_precision.py`) и `tools/validate_project.py` без шага `JavaSyntaxCheck` — бинарник `java` в контейнере отсутствует. Компиляция и игровые тесты подтверждены исключительно в CI.
-- CI-артефакт `livingvillages-0.17.0`: ID `13604438958`, 561 027 байт. Это проверочная сборка, не опубликованный GitHub Release; SHA-256 в этой песочнице не вычислялся, потому что артефакт загружается с хоста вне разрешённого списка.
+- Локально в песочнице без JDK выполнены только статические проверки: 18 скриптов `tools/test_*.py` (включая новые `tools/test_resource_demand_precision.py` и `tools/test_scan_budgets.py`) и `tools/validate_project.py` без шага `JavaSyntaxCheck` — бинарник `java` в контейнере отсутствует. Компиляция и игровые тесты подтверждены исключительно в CI.
+- CI-артефакт `livingvillages-0.17.0`: ID `13607714309`, 575 998 байт. Это проверочная сборка, не опубликованный GitHub Release; SHA-256 в этой песочнице не вычислялся, потому что артефакт загружается с хоста вне разрешённого списка.
 
 ### Что именно проверялось в этом цикле
 
@@ -28,6 +29,12 @@
 | Сброс кэша плана после реальной сдачи материалов курьером | Компиляция + статический контракт | Полевая проверка не выполнена |
 | Страничная сводка старосты (2 строки на страницу, клик и автолистание) | Headless-клиент: раскладка семи кнопок, границы панели | Клики и чтение в обычном мире не проверены |
 | Дефицитные подсказки топлива/железа/саженцев в стартовом статусе | Компиляция + статический контракт | Полевая проверка не выполнена |
+| Кольцевой обход с точным ранним выходом (`VillageScanRings`) | GameTest в мире: верстак в 3 блоках находится менее чем за 1/8 коробки; при отсутствии читается ровно 71 825 позиций (покрытие не сузилось) | `PASS` (автоматически) |
+| Кэш присутствия верстака/печи (100 тиков, отдельно на тип блока) | GameTest в мире: повторный вопрос читает 0 позиций; сброс при установке блока поселением | `PASS` (автоматически) |
+| Кэш отказов принадлежности актива в пределах тика | GameTest в мире: первый вопрос о чужом сундуке — 1 проверка и 2 запроса сущностей, повторный — 0 | `PASS` (автоматически) |
+| Квота полного пересчёта плана (не более 2 поселений за тик) | GameTest в мире: истёкший план пересчитывается в тот же тик и видит новый запас, повторный вопрос — из кэша | `PASS` (автоматически) |
+| Один проход подсчёта кирок и мечей; пакетная проверка грядок | Компиляция + статический контракт `tools/test_scan_budgets.py` | Полевая проверка не выполнена |
+| Отказ от повторяющихся проверок принадлежности при замене сундука в том же тике | Существующий GameTest `removedChestDoesNotKeepAStaleReservation` | `PASS` (автоматически) |
 
 ### Обязательная оставшаяся проверка в обычном survival-мире
 

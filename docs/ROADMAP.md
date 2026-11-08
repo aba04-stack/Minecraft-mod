@@ -41,6 +41,8 @@
 ### Подэтап 1.4. Базовое профилирование и телеметрия нагрузки (`TESTED`)
 - **Результат:** реализованы `TickBudgetModel.TickTelemetrySnapshot`, `VillageTickBudget.recordSubsystemNanos` и `VillageTickBudget.snapshotTelemetry`, подключённые к `LivingVillages.onServerTick` и `VillageMonsterAI.onEntityTick`.
 - **Проверка:** внутриигровые тесты `tacticalMonsterAiRespectsHonestLineOfSightAndTickBudget` и `orphanedFarmProjectResumesAndParallelCraftingTelemetryAndTradeRulesHold`.
+- **Дополнено в perf-цикле `0.17.0` (`TESTED` по объёму работы, `OPEN` по стоимости на железе):** общий кольцевой сканер `VillageScanRings` с точным ранним выходом, детерминированные счётчики `VillageScanStats`, кэши присутствия рабочих блоков (100 тиков), один проход подсчёта инструментов, пакетная проверка принадлежности грядок, кэш отказов принадлежности актива в пределах тика, снимок леса на 200 тиков с немедленным сбросом при дорубленном стволе и квота полного пересчёта плана (не более двух поселений за тик). Бюджеты в позициях блока, проверках принадлежности и запросах сущностей зафиксированы в `docs/PERFORMANCE_BUDGETS.md`, раздел 3.2.
+- **Проверка perf-цикла:** CI run [42457328996](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42457328996) и [42457332387](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42457332387) для commit `b38993035dec383d39a2c78fb47e1285c48becd6` — сборка, все внутриигровые тесты (54 `@GameTest`, из них три новых бюджетных), dedicated-server и headless-client smoke. Промежуточный прогон [42456430777](https://github.com/aba04-stack/Minecraft-mod/actions/runs/42456430777) поймал два дефекта оптимизации, исправленных до слияния.
 
 ---
 
