@@ -137,17 +137,25 @@ assert "Comparator.comparing(v -> v.getUUID().toString())" not in AREA, (
 )
 for marker in (
     "private final Set<Long> claimRefusals = new HashSet<>();",
-    "identityCacheFor(level).claimRefusals.add(claimRefusalKey(key, groupCenter, assetKind))",
-    "private static long claimRefusalKey(long locationKey, BlockPos groupCenter, long assetKind)",
-    "VillageScanStats.recordMembershipTest();",
+    "long refusalKey = claimRefusalKey(key, groupCenter, assetKind, villageId);",
+    "if (cache.claimRefusals.contains(refusalKey)) return false;",
+    "cache.claimRefusals.add(refusalKey);",
+    "private static long claimRefusalKey(long locationKey, BlockPos groupCenter, long assetKind, UUID villageId)",
 ):
     assert marker in REGISTRY, f"the claim refusal cache must keep {marker!r}"
 refusal_region = REGISTRY.split("private static boolean claimAsset", 1)[1].split("private static long claimRefusalKey", 1)[0]
-assert "long assetKind" in REGISTRY.split("private static boolean claimAsset", 1)[1][:200], (
+assert "long assetKind" in refusal_region[:300], (
     "asset kinds must be part of the refusal key so one ownership map cannot suppress another"
 )
-assert refusal_region.index("claimRefusals.add") < refusal_region.index("VillageArea.isBlockInResidentGroup"), (
+assert refusal_region.index("claimRefusals.contains") < refusal_region.index("VillageArea.isBlockInResidentGroup"), (
     "a remembered refusal must be checked before paying for another membership test"
+)
+assert refusal_region.index("VillageArea.isBlockInResidentGroup") < refusal_region.index("claimRefusals.add"), (
+    "only an actual refusal may be remembered, so an asset replaced in the same tick stays claimable"
+)
+# Membership cost is counted once, inside the shared group check, never a second time by its callers.
+assert "VillageScanStats.recordMembershipTest()" not in REGISTRY, (
+    "callers must not count a membership test twice; VillageArea.isBlockInResidentGroup owns the counter"
 )
 
 # 6. Planner: longer tree TTL, per-tick refresh quota, shared invalidation, batched crop membership.

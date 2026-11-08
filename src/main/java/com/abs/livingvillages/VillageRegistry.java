@@ -327,25 +327,30 @@ public final class VillageRegistry extends SavedData {
         if (existing != null) return existing.equals(villageId);
         // A refusal is remembered until the next tick. Deciding membership costs two resident-group
         // entity area queries over a wide box, while storage, tool, planner and bed scans ask about the
-        // same unclaimed asset several times per tick. Nothing can become claimable mid-tick, so the
-        // cached refusal cannot hide an asset: villagers only move between ticks.
-        if (!identityCacheFor(level).claimRefusals.add(claimRefusalKey(key, groupCenter, assetKind))) {
+        // same unclaimed asset several times per tick. Only refusals are remembered: a successful claim
+        // is answered from the ownership map afterwards, and an asset whose claim was cleared during the
+        // same tick (a player replacing a chest) must stay claimable immediately.
+        IdentityCache cache = identityCacheFor(level);
+        long refusalKey = claimRefusalKey(key, groupCenter, assetKind, villageId);
+        if (cache.claimRefusals.contains(refusalKey)) return false;
+        if (!VillageArea.isBlockInResidentGroup(level, groupCenter, location)) {
+            cache.claimRefusals.add(refusalKey);
             return false;
         }
-        VillageScanStats.recordMembershipTest();
-        if (!VillageArea.isBlockInResidentGroup(level, groupCenter, location)) return false;
         ownership.put(key, villageId);
         registry.setDirty();
         return true;
     }
 
     /**
-     * Distinguishes refusals of the same block for different group centers and different asset kinds
-     * (storage, bed, workstation), which live in separate ownership maps but share block positions.
+     * Distinguishes refusals of the same block for different group centers, asset kinds (storage, bed,
+     * workstation — separate ownership maps sharing block positions) and resolved settlement identities,
+     * so a refusal can never leak into a different question.
      */
-    private static long claimRefusalKey(long locationKey, BlockPos groupCenter, long assetKind) {
+    private static long claimRefusalKey(long locationKey, BlockPos groupCenter, long assetKind, UUID villageId) {
         long mixed = locationKey * 0x9E3779B97F4A7C15L + groupCenter.asLong();
-        return mixed ^ (assetKind * 0x517CC1B727220A95L);
+        mixed ^= assetKind * 0x517CC1B727220A95L;
+        return mixed ^ (villageId.getMostSignificantBits() + 31L * villageId.getLeastSignificantBits());
     }
 
     private static void removeStaleOwner(VillageRegistry registry, BlockPos location, Map<Long, UUID> ownership) {
