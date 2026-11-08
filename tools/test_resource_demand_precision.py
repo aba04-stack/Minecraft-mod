@@ -104,8 +104,11 @@ assert "return deficits == null ? null : new HashMap<>(deficits);" in LOGISTICS,
 assert "public static int collectPendingMaterials(Villager villager, ServerLevel level)" in LOGISTICS, (
     "the pickup route needs a test seam: a GameTest cannot fire an entity tick event"
 )
-assert "item.pickupDelay <= 0" in LOGISTICS, (
+assert "pickupDelayHasExpired(item));" in LOGISTICS, (
     "a courier must respect the vanilla pickup delay instead of stealing player-dropped items"
+)
+assert 'return probe.getShort("PickupDelay") <= 0;' in LOGISTICS, (
+    "ItemEntity keeps the delay private with no getter, so it is read from the entity save data"
 )
 
 # 6. Roles/mining: a concrete coal or iron deficit releases and steers a miner.

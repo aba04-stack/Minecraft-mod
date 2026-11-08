@@ -189,13 +189,11 @@ public final class VillageLogistics {
         Map<String, Integer> materialDeficits
     ) {
         AABB area = villager.getBoundingBox().inflate(PICKUP_RADIUS, 1.5D, PICKUP_RADIUS);
-        // Respect the vanilla pickup delay (a public field on ItemEntity in these mappings; there is no
-        // getter): a player gets 40 ticks to take a dropped stack back, and the mod's own food handoff
-        // delays its drops by 10. A courier must not bypass either rule, otherwise loose resources
-        // vanish from under the player's cursor.
+        // The delay check runs after the cheap item-kind test so only relevant drops pay for it.
         List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, area,
-            item -> item.isAlive() && item.pickupDelay <= 0 && isRawResource(item.getItem())
-                && villager.distanceToSqr(item) <= (double) PICKUP_RADIUS * PICKUP_RADIUS);
+            item -> item.isAlive() && isRawResource(item.getItem())
+                && villager.distanceToSqr(item) <= (double) PICKUP_RADIUS * PICKUP_RADIUS
+                && pickupDelayHasExpired(item));
         drops.sort(Comparator
             .comparingInt((ItemEntity entity) -> materialDeficits == null ? 0
                 : -materialDeficits.getOrDefault(BuiltInRegistries.ITEM.getKey(entity.getItem().getItem()).toString(), 0))
@@ -224,6 +222,22 @@ public final class VillageLogistics {
             villager.getInventory().setChanged();
         }
         return collected;
+    }
+
+    /**
+     * Respects the vanilla pickup delay: a player gets 40 ticks to take a dropped stack back, and this
+     * mod's own food handoff delays its drops by 10 ticks. A courier must wait its turn like everybody
+     * else, otherwise loose resources vanish from under the player's cursor.
+     *
+     * <p>{@code ItemEntity} keeps the delay in a private field and these mappings publish no getter for
+     * it (only {@code setPickUpDelay}/{@code setNoPickUpDelay}), so the value is read from the entity's
+     * own save data, where vanilla writes it under {@code PickupDelay}. The probe costs one small
+     * compound tag per candidate drop and never touches the world.</p>
+     */
+    private static boolean pickupDelayHasExpired(ItemEntity entity) {
+        CompoundTag probe = new CompoundTag();
+        entity.saveWithoutId(probe);
+        return probe.getShort("PickupDelay") <= 0;
     }
 
     private static StorageTarget findNearestStorageWithRoom(Villager villager, ServerLevel level) {
