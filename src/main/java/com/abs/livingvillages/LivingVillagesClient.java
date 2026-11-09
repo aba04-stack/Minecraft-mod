@@ -103,9 +103,13 @@ public final class LivingVillagesClient {
         private static final int PANEL_WIDTH = 340;
         private static final int PANEL_HEIGHT = 220;
         private static final int BUTTON_WIDTH = 300;
+        private static final int NOTICE_LINES_PER_PAGE = 2;
+        private static final long NOTICE_PAGE_MILLIS = 5_000L;
         private final VillageElder.ElderPanelData data;
         private int panelLeft;
         private int panelTop;
+        private int noticePage;
+        private long noticePageShownAtMillis = -1L;
 
         private ElderScreen(VillageElder.ElderPanelData data) {
             super(Component.translatable("livingvillages.elder.screen_title"));
@@ -183,17 +187,68 @@ public final class LivingVillagesClient {
                 panelLeft + 20, panelTop + 58, 0xFFFFFFFF);
             graphics.drawString(font, Component.translatable("livingvillages.elder.status_heading"),
                 panelLeft + 20, panelTop + 72, 0xFFFFD16D);
-            Component notice = Component.literal(data.notice() == null ? "" : data.notice());
-            var noticeLines = font.split(notice, PANEL_WIDTH - 40);
-            for (int line = 0; line < Math.min(2, noticeLines.size()); line++) {
-                graphics.drawString(font, noticeLines.get(line), panelLeft + 20,
+            var noticeLines = font.split(noticeComponent(), PANEL_WIDTH - 40);
+            int pages = noticePages(noticeLines.size());
+            rotateNoticePage(pages);
+            int firstLine = noticePage * NOTICE_LINES_PER_PAGE;
+            for (int line = 0; line < NOTICE_LINES_PER_PAGE && firstLine + line < noticeLines.size(); line++) {
+                graphics.drawString(font, noticeLines.get(firstLine + line), panelLeft + 20,
                     panelTop + 84 + line * 10, 0xFFB8D7C8);
+            }
+            if (pages > 1) {
+                Component indicator = Component.translatable(
+                    "livingvillages.elder.notice_page", noticePage + 1, pages);
+                graphics.drawString(font, indicator,
+                    panelLeft + PANEL_WIDTH - 20 - font.width(indicator), panelTop + 72, 0xFF8CA3B5);
             }
             graphics.fill(panelLeft + 16, panelTop + 117, panelLeft + PANEL_WIDTH - 16,
                 panelTop + 118, 0x668CA3B5);
             graphics.drawString(font, Component.translatable("livingvillages.elder.actions_heading"),
                 panelLeft + 20, panelTop + 108, 0xFFFFD16D);
             super.render(graphics, mouseX, mouseY, partialTick);
+        }
+
+        /**
+         * The summary carries the bootstrap hint, master levels, livestock state and diagnostics, so
+         * it no longer fits in two lines. It is paged instead of being silently cut off.
+         */
+        private Component noticeComponent() {
+            return Component.literal(data.notice() == null ? "" : data.notice());
+        }
+
+        private int noticePages(int lineCount) {
+            return Math.max(1, (lineCount + NOTICE_LINES_PER_PAGE - 1) / NOTICE_LINES_PER_PAGE);
+        }
+
+        private void rotateNoticePage(int pages) {
+            long now = System.currentTimeMillis();
+            if (noticePageShownAtMillis < 0L) {
+                noticePageShownAtMillis = now;
+                noticePage = 0;
+            } else if (pages > 1 && now - noticePageShownAtMillis >= NOTICE_PAGE_MILLIS) {
+                noticePageShownAtMillis = now;
+                noticePage = (noticePage + 1) % pages;
+            }
+            if (noticePage >= pages) noticePage = 0;
+        }
+
+        /** Clicking the summary area advances it manually; buttons keep their own click handling. */
+        @Override
+        public boolean mouseClicked(double mouseX, double mouseY, int button) {
+            if (isInsideNoticeArea(mouseX, mouseY)) {
+                int pages = noticePages(font.split(noticeComponent(), PANEL_WIDTH - 40).size());
+                if (pages > 1) {
+                    noticePage = (noticePage + 1) % pages;
+                    noticePageShownAtMillis = System.currentTimeMillis();
+                    return true;
+                }
+            }
+            return super.mouseClicked(mouseX, mouseY, button);
+        }
+
+        private boolean isInsideNoticeArea(double mouseX, double mouseY) {
+            return mouseX >= panelLeft + 16 && mouseX <= panelLeft + PANEL_WIDTH - 16
+                && mouseY >= panelTop + 68 && mouseY <= panelTop + 116;
         }
 
         private static String priorityLabel(int priority) {

@@ -38,6 +38,34 @@ public final class VillageTickBudget {
         return true;
     }
 
+    /**
+     * Consumes one settlement scan slot for this tick.
+     *
+     * <p>Every settlement's plan cache expires on the same interval, so without a slot limit all of them
+     * would re-measure the world in one tick. Callers that do not get a slot keep serving their previous
+     * (bounded-age) result and ask again next tick; the slot is never borrowed from the AI check quota,
+     * which protects a different kind of work.</p>
+     *
+     * @param maxPerTick caller-defined limit; the shared quota rule raises anything below one to one
+     * @return {@code true} when the caller may run its full re-measure now
+     */
+    public static boolean tryConsumeSettlementScan(ServerLevel level, int maxPerTick) {
+        if (level == null) return false;
+        LevelTickState state = stateFor(level, level.getGameTime());
+        if (!TickBudgetModel.canConsumeQuota(state.settlementScansUsedThisTick, maxPerTick)) {
+            return false;
+        }
+        state.settlementScansUsedThisTick++;
+        state.totalSettlementScans++;
+        return true;
+    }
+
+    /** Total full settlement re-measures performed since the level was loaded. */
+    public static long totalSettlementScans(ServerLevel level) {
+        if (level == null) return 0L;
+        return stateFor(level, level.getGameTime()).totalSettlementScans;
+    }
+
     public static void recordSubsystemNanos(ServerLevel level, long elapsedNanos) {
         if (level == null || elapsedNanos <= 0L) return;
         long now = level.getGameTime();
@@ -95,6 +123,7 @@ public final class VillageTickBudget {
         if (state.gameTime != now) {
             state.gameTime = now;
             state.checksUsedThisTick = 0;
+            state.settlementScansUsedThisTick = 0;
             state.nanosThisTick = 0L;
             state.observedTicks++;
         }
@@ -114,6 +143,8 @@ public final class VillageTickBudget {
     private static final class LevelTickState {
         private long gameTime = -1L;
         private int checksUsedThisTick = 0;
+        private int settlementScansUsedThisTick = 0;
+        private long totalSettlementScans = 0L;
         private long observedTicks = 0L;
         private long totalAiChecks = 0L;
         private long nanosThisTick = 0L;

@@ -97,8 +97,9 @@ public final class VillagerRoles {
         List<Villager> all = VillageArea.findVillagers(level, center);
         if (all.isEmpty()) return;
 
-        int availablePickaxes = VillageIndustry.countAvailablePickaxes(level, center);
-        int availableSwords = VillageIndustry.countAvailableSwords(level, center);
+        VillageIndustry.AvailableTools tools = VillageIndustry.countAvailableTools(level, center);
+        int availablePickaxes = tools.pickaxes();
+        int availableSwords = tools.swords();
         boolean workshopExists = LivingVillagesConfig.ENABLE_VILLAGE_INDUSTRY.get()
             && VillageIndustry.hasCraftingTable(level, center);
         boolean housingNeeded = LivingVillagesConfig.ENABLE_VILLAGE_BUILDER.get()
@@ -117,8 +118,10 @@ public final class VillagerRoles {
         int desiredLumberjacksForQueue = desiredLumberjackSlots(
             LivingVillagesConfig.ENABLE_VILLAGER_TREE_WORK.get(),
             resourcePlan.treesAvailable(), resourcePlan.desiredLumberjacks(), pendingWoodDemand);
-        int desiredMinersForQueue = LivingVillagesConfig.ENABLE_MINER_ROLE.get() && availablePickaxes > 0
-            ? Math.max(resourcePlan.desiredMiners(), pendingQuarryDemand ? 1 : 0) : 0;
+        int desiredMinersForQueue = desiredMinerSlots(
+            LivingVillagesConfig.ENABLE_MINER_ROLE.get(), availablePickaxes,
+            resourcePlan.desiredMiners(), pendingQuarryDemand,
+            resourcePlan.needsFuel(), resourcePlan.needsIron());
         int desiredHerders = LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()
             && VillageLivestock.hasHerderWorkAvailable(level, center) ? 1 : 0;
         int excessLumberjacks = Math.max(0, (int) all.stream().filter(VillagerRoles::isLumberjack).count()
@@ -302,6 +305,20 @@ public final class VillagerRoles {
                                       int plannedWorkers, boolean pendingWoodDemand) {
         if (!enabled || !treesAvailable) return 0;
         return Math.max(Math.max(0, plannedWorkers), pendingWoodDemand ? 1 : 0);
+    }
+
+    /**
+     * A miner is also released for a concrete ore deficit that the coarse ore bucket hides:
+     * a chest full of redstone must not stop the village from mining coal for its furnace or
+     * iron for tools. The extra slot never exceeds the number of real reachable pickaxes.
+     */
+    static int desiredMinerSlots(boolean enabled, int availablePickaxes, int plannedWorkers,
+                                 boolean pendingQuarryDemand, boolean needsFuel, boolean needsIron) {
+        if (!enabled || availablePickaxes <= 0) return 0;
+        int slots = Math.max(0, plannedWorkers);
+        if (pendingQuarryDemand) slots = Math.max(slots, 1);
+        if (needsFuel || needsIron) slots = Math.max(slots, 1);
+        return Math.min(slots, availablePickaxes);
     }
 
     /** A worker is not reserved as builder until a real house or pen bill is ready to be spent. */

@@ -659,16 +659,8 @@ public final class VillageBuilder {
             int room = inventoryCapacityFor(inventory, item);
             int amount = Math.min(needed, Math.min(available, room));
             if (amount > 0) {
-                int removed = removeItem(storage, item, amount);
-                if (removed > 0) {
-                    ItemStack remainder = inventory.addItem(new ItemStack(item, removed));
-                    if (!remainder.isEmpty()) {
-                        int returned = insertStack(storage, remainder.copy());
-                        if (returned < remainder.getCount()) villager.spawnAtLocation(new ItemStack(item, remainder.getCount() - returned));
-                    }
-                    inventory.setChanged();
-                    storage.setChanged();
-                }
+                // Real stacks only: what the builder cannot carry goes back as the same stack.
+                VillageItemTransfers.moveRealItems(storage, inventory, item, amount, villager);
             }
             clearOwnedRoute(villager, data);
             data.putLong(NEXT_ACTION, now + 10L);
@@ -1357,26 +1349,6 @@ public final class VillageBuilder {
             remaining -= amount;
         }
         return remaining == 0;
-    }
-
-    private static int insertStack(Container container, ItemStack offered) {
-        int initial = offered.getCount();
-        for (int pass = 0; pass < 2 && !offered.isEmpty(); pass++) {
-            for (int slot = 0; slot < container.getContainerSize() && !offered.isEmpty(); slot++) {
-                if (!container.canPlaceItem(slot, offered)) continue;
-                ItemStack existing = container.getItem(slot);
-                if (pass == 0) {
-                    if (existing.isEmpty() || !ItemStack.isSameItemSameComponents(existing, offered)) continue;
-                    int room = Math.min(existing.getMaxStackSize(), container.getMaxStackSize()) - existing.getCount();
-                    int move = Math.min(Math.max(0, room), offered.getCount());
-                    if (move > 0) { existing.grow(move); offered.shrink(move); }
-                } else if (existing.isEmpty()) {
-                    int move = Math.min(offered.getCount(), Math.min(offered.getMaxStackSize(), container.getMaxStackSize()));
-                    if (move > 0) container.setItem(slot, offered.split(move));
-                }
-            }
-        }
-        return initial - offered.getCount();
     }
 
     private record StorageTarget(BlockPos storage, BlockPos stand) {}

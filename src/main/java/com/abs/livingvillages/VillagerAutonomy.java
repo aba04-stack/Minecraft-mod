@@ -650,7 +650,7 @@ public final class VillagerAutonomy {
         }
 
         if (villager.distanceToSqr(Vec3.atCenterOf(stand)) <= 2.8D * 2.8D) {
-            int moved = withdrawPlantingItems(villager.getInventory(), container, 16);
+            int moved = withdrawPlantingItems(villager, container, 16);
             cancelSeedFetch(villager, data);
             data.putLong(NEXT_SEARCH, nowTick + (moved > 0 ? 20L : RETRY_DELAY_TICKS));
             if (moved <= 0) data.putBoolean(HARVEST_CYCLE_KEY, false);
@@ -664,24 +664,19 @@ public final class VillagerAutonomy {
         }
     }
 
-    private static int withdrawPlantingItems(Container inventory, Container storage, int limit) {
+    /**
+     * Takes up to {@code limit} real planting items out of the settlement storage.
+     *
+     * <p>Moves the stacks themselves: seeds a player renamed keep their name, and whatever the farmer
+     * cannot carry returns to the same storage as the same stack instead of being rebuilt.</p>
+     */
+    private static int withdrawPlantingItems(Villager villager, Container storage, int limit) {
+        Container inventory = villager.getInventory();
         int movedTotal = 0;
         for (net.minecraft.world.item.Item item : List.of(
             Items.WHEAT_SEEDS, Items.CARROT, Items.POTATO, Items.BEETROOT_SEEDS)) {
-            for (int slot = 0; slot < storage.getContainerSize() && movedTotal < limit; slot++) {
-                ItemStack stored = storage.getItem(slot);
-                if (!stored.is(item)) continue;
-                int offeredCount = Math.min(stored.getCount(), limit - movedTotal);
-                ItemStack offered = new ItemStack(item, offeredCount);
-                int moved = insertInto(inventory, offered, offeredCount);
-                if (moved > 0) {
-                    stored.shrink(moved);
-                    if (stored.isEmpty()) storage.setItem(slot, ItemStack.EMPTY);
-                    movedTotal += moved;
-                    storage.setChanged();
-                    inventory.setChanged();
-                }
-            }
+            if (movedTotal >= limit) break;
+            movedTotal += VillageItemTransfers.moveRealItems(storage, inventory, item, limit - movedTotal, villager);
         }
         return movedTotal;
     }
@@ -822,14 +817,20 @@ public final class VillagerAutonomy {
             if (movable <= 0) {
                 continue;
             }
-            int moved = insertInto(destination, source, movable);
-            if (moved <= 0) {
+            // Real stacks: surplus food a player named keeps its data, and the old component-blind
+            // insert merged stacks vanilla would never merge (same item, different components).
+            ItemStack taken = inventory.removeItem(slot, movable);
+            if (taken.isEmpty()) {
                 continue;
             }
-
-            source.shrink(moved);
-            if (source.isEmpty()) {
-                inventory.setItem(slot, ItemStack.EMPTY);
+            ItemStack rejected = VillageItemTransfers.insertReal(destination, taken);
+            int moved = movable - rejected.getCount();
+            if (!rejected.isEmpty()) {
+                ItemStack back = VillageItemTransfers.insertReal(inventory, rejected);
+                if (!back.isEmpty()) villager.spawnAtLocation(back);
+            }
+            if (moved <= 0) {
+                continue;
             }
             remainingFoodPoints -= moved * value;
             movedTotal += moved;
@@ -840,36 +841,6 @@ public final class VillagerAutonomy {
             destination.setChanged();
         }
         return movedTotal;
-    }
-
-    /** Inserts only vanilla food/crops that this feature knows how to reserve safely. */
-    private static int insertInto(Container destination, ItemStack source, int limit) {
-        int remaining = limit;
-        for (int pass = 0; pass < 2 && remaining > 0; pass++) {
-            for (int slot = 0; slot < destination.getContainerSize() && remaining > 0; slot++) {
-                if (!destination.canPlaceItem(slot, source)) {
-                    continue;
-                }
-                ItemStack existing = destination.getItem(slot);
-                if (pass == 0) {
-                    if (existing.isEmpty() || existing.getItem() != source.getItem()
-                        || existing.getCount() >= existing.getMaxStackSize()) {
-                        continue;
-                    }
-                    int moved = Math.min(remaining, existing.getMaxStackSize() - existing.getCount());
-                    existing.grow(moved);
-                    remaining -= moved;
-                } else {
-                    if (!existing.isEmpty()) {
-                        continue;
-                    }
-                    int moved = Math.min(remaining, source.getMaxStackSize());
-                    destination.setItem(slot, new ItemStack(source.getItem(), moved));
-                    remaining -= moved;
-                }
-            }
-        }
-        return limit - remaining;
     }
 
     private static int foodPoints(Villager villager) {

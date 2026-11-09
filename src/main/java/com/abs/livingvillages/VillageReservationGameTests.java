@@ -2,14 +2,17 @@ package com.abs.livingvillages;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.Item;
@@ -20,6 +23,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
@@ -2231,6 +2235,402 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "resource_demand_precision")
+    public static void reservedMaterialsAndConcreteDeficitsDrivePreciseWorkerDemand(GameTestHelper helper) {
+        // A full wood stock that is already committed to an active house project is not free stock.
+        var committed = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, 0, 0, true, 3, false,
+                4, 0, 0, true, 200, 0, 0, 0));
+        helper.assertTrue(committed.freeWoodUnits() == 56 && committed.needsWood()
+                && committed.freeStoneUnits() == 160 && !committed.needsStone(),
+            "Materials reserved by an active order must keep counting as a shortage instead of idling the lumberjacks.");
+
+        var uncommitted = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, 0, 0, true, 3));
+        helper.assertTrue(uncommitted.freeWoodUnits() == 256 && !uncommitted.needsWood(),
+            "Without reservations the measured stock must stay fully available to the village.");
+
+        // The coarse ore bucket hides a concrete fuel/metal deficit; the precise buckets expose it.
+        helper.assertTrue(committed.needsFuel() && committed.needsIron() && committed.needsOreWork()
+                && committed.targetFuelUnits() == 8 && committed.targetIronUnits() == 8,
+            "Coal and iron must be tracked separately from the coarse ore bucket.");
+
+        var fueled = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, 0, 0, true, 3, false,
+                16, 12, 6, true, 0, 0, 0, 0));
+        helper.assertTrue(!fueled.needsFuel() && !fueled.needsIron() && !fueled.needsSaplings()
+                && !fueled.needsOreWork() && fueled.shortageCount() == 0,
+            "A settlement holding real fuel, iron and saplings must report no shortage at all.");
+
+        // Forest stewardship: a harvested village without saplings keeps a visible regeneration deficit.
+        var bareForest = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, 0, 0, true, 3, false,
+                16, 12, 0, true, 0, 0, 0, 0));
+        helper.assertTrue(bareForest.needsSaplings() && bareForest.targetSaplings() == 6
+                && bareForest.shortageCount() == 1,
+            "A standing forest without stored saplings must report exactly one regeneration deficit.");
+        var treelessVillage = com.abs.livingvillages.domain.VillageResourceDemandModel.evaluate(
+            new com.abs.livingvillages.domain.VillageResourceDemandModel.Stock(
+                8, 256, 160, 32, 256, 0, 0, 0, false, 3, false,
+                16, 12, 0, true, 0, 0, 0, 0));
+        helper.assertTrue(!treelessVillage.needsSaplings(),
+            "Sapling demand must disappear together with the local trees it would replant.");
+
+        // Role quota: a concrete coal/iron deficit releases one miner even when bulk stone is full.
+        helper.assertTrue(
+            VillagerRoles.desiredMinerSlots(true, 2, 0, false, true, false) == 1
+                && VillagerRoles.desiredMinerSlots(true, 2, 0, false, false, false) == 0
+                && VillagerRoles.desiredMinerSlots(false, 2, 3, true, true, true) == 0
+                && VillagerRoles.desiredMinerSlots(true, 0, 3, true, true, true) == 0
+                && VillagerRoles.desiredMinerSlots(true, 1, 3, false, true, true) == 1
+                && VillagerRoles.desiredMinerSlots(true, 3, 2, true, false, false) == 2,
+            "A miner slot must follow real pickaxes and a concrete ore deficit, never a disabled role.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40, batch = "resource_demand_precision")
+    public static void plannerMeasuresRealFuelSaplingsAndSubtractsReservedOrderMaterials(GameTestHelper helper) {
+        for (int x = 0; x <= 12; x++) {
+            helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 0, 1)),
+                Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(6, 1, 1), Blocks.FURNACE);
+        BlockPos storage = helper.absolutePos(new BlockPos(5, 1, 1));
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        for (Villager villager : List.of(residentA, residentB)) villager.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(helper.getLevel().dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        List<Villager> residents = List.of(residentA, residentB);
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), center, storage),
+            "The planner may only measure the settlement's own physical storage.");
+        helper.assertTrue(helper.getLevel().getBlockEntity(storage) instanceof Container,
+            "The fixture chest must be a real container before the planner can read it.");
+
+        Container chest = (Container) helper.getLevel().getBlockEntity(storage);
+        for (int slot = 0; slot < 4; slot++) chest.setItem(slot, new ItemStack(Items.OAK_PLANKS, 64));
+        chest.setChanged();
+
+        var stocked = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(stocked.freeWoodUnits() == 256 && !stocked.needsWood()
+                && stocked.needsFuel() && !stocked.needsSaplings(),
+            "A real chest of 256 planks must count as free wood, while a real furnace without coal stays a fuel deficit.");
+
+        chest.setItem(4, new ItemStack(Items.COAL, 8));
+        chest.setItem(5, new ItemStack(Items.RAW_IRON, 4));
+        chest.setChanged();
+        VillageResourcePlanner.invalidate(helper.getLevel(), center);
+        var fueled = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(!fueled.needsFuel() && !fueled.needsIron() && fueled.freeWoodUnits() == 256,
+            "Real coal and iron in the settlement chest must clear the concrete fuel and metal deficits.");
+
+        // A real tree makes the regeneration target measurable: no saplings means the forest dies out.
+        helper.setBlock(new BlockPos(9, 1, 1), Blocks.OAK_LOG);
+        helper.setBlock(new BlockPos(9, 2, 1), Blocks.OAK_LOG);
+        helper.setBlock(new BlockPos(9, 3, 1), Blocks.OAK_LOG);
+        helper.setBlock(new BlockPos(9, 4, 1), Blocks.OAK_LEAVES);
+        helper.setBlock(new BlockPos(10, 3, 1), Blocks.OAK_LEAVES);
+        helper.setBlock(new BlockPos(8, 3, 1), Blocks.OAK_LEAVES);
+        VillageResourcePlanner.invalidate(helper.getLevel(), center);
+        var bareForest = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(bareForest.treesAvailable() && bareForest.needsSaplings(),
+            "A standing real tree without stored saplings must expose the regeneration deficit.");
+
+        chest.setItem(6, new ItemStack(Items.OAK_SAPLING, bareForest.targetSaplings()));
+        chest.setChanged();
+        VillageResourcePlanner.invalidate(helper.getLevel(), center);
+        var regenerating = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(regenerating.treesAvailable() && !regenerating.needsSaplings(),
+            "Real saplings in the settlement chest must satisfy the regeneration target.");
+
+        // Committing the same planks to a real house order must reopen the wood deficit immediately.
+        long now = helper.getLevel().getGameTime();
+        var order = VillageWorkOrders.enqueue(helper.getLevel(), center, "house", "house", 55, now, 10000L,
+            List.of(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:oak_planks", 200)));
+        helper.assertTrue(order != null, "The persistent board must accept the real house order.");
+        helper.assertTrue(VillageWorkOrders.setState(helper.getLevel(), center, order.id(),
+                com.abs.livingvillages.domain.VillageWorkOrderModel.READY, now) != null,
+            "The house order must reach the reserved state before its materials count as committed.");
+        VillageResourcePlanner.invalidate(helper.getLevel(), center);
+        var committed = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(committed.freeWoodUnits() == 56 && committed.needsWood()
+                && !committed.needsFuel() && !committed.needsSaplings(),
+            "Materials committed to a real order must stop counting as free stock and reopen the wood deficit.");
+
+        // The board is level-wide SavedData shared with every other test in this world: leave it tidy.
+        helper.assertTrue(VillageWorkOrders.setState(helper.getLevel(), center, order.id(),
+                com.abs.livingvillages.domain.VillageWorkOrderModel.CANCELLED, now + 1L) != null,
+            "The fixture order must be cancellable so it stops reserving materials after the check.");
+        VillageResourcePlanner.invalidate(helper.getLevel(), center);
+        var released = VillageResourcePlanner.getPlan(helper.getLevel(), center, residents);
+        helper.assertTrue(released.freeWoodUnits() == 256 && !released.needsWood(),
+            "A cancelled order must give its materials back to the settlement's free stock.");
+        residentA.discard();
+        residentB.discard();
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "logistics_pickup")
+    public static void courierCollectsOnlyUnmetPendingMaterialsAndRespectsPickupDelay(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 8; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        Villager courier = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        courier.setNoAi(true);
+        residentB.setNoAi(true);
+        courier.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        long now = level.getGameTime();
+
+        // Real demand: a house bill for forty planks the settlement owns nowhere. Industry turns one log
+        // into four planks, so the pickup demand is published in logs.
+        var order = VillageWorkOrders.enqueue(level, center, "house", "logistics_pickup", 55, now, 10000L,
+            List.of(new com.abs.livingvillages.domain.VillageWorkOrderModel.Requirement("minecraft:oak_planks", 40)));
+        helper.assertTrue(order != null, "The persistent board must accept the fixture house order.");
+        Map<String, Integer> deficits = VillageWorkOrders.pendingMaterialPickupDeficits(level, center);
+        helper.assertTrue(deficits != null && deficits.getOrDefault("minecraft:oak_log", 0) == 10,
+            "Forty missing planks must translate into exactly ten missing logs, four planks per log.");
+
+        // The board publishes an immutable snapshot. The pickup loop decrements what it really collected,
+        // and doing that on the snapshot itself used to throw inside the entity tick - a server crash the
+        // first time a courier picked up a drop that a pending order was waiting for.
+        ItemEntity firstDrop = helper.spawn(EntityType.ITEM, 2, 1, 1);
+        firstDrop.setItem(new ItemStack(Items.OAK_LOG, 4));
+        helper.assertTrue(VillageLogistics.collectPendingMaterials(courier, level) == 4,
+            "A courier must collect the four loose logs the pending bill is waiting for.");
+        helper.assertTrue(firstDrop.isRemoved(), "A fully collected drop must leave the world.");
+
+        // A drop still inside its vanilla pickup delay belongs to whoever dropped it: a player gets forty
+        // ticks to take the stack back, and the mod's own food handoff delays its drops by ten.
+        ItemEntity delayedDrop = helper.spawn(EntityType.ITEM, 2, 1, 1);
+        delayedDrop.setItem(new ItemStack(Items.OAK_LOG, 4));
+        delayedDrop.setPickUpDelay(40);
+        helper.assertTrue(VillageLogistics.collectPendingMaterials(courier, level) == 0,
+            "A courier must not steal a drop that is still inside its pickup delay.");
+        helper.assertTrue(!delayedDrop.isRemoved() && delayedDrop.getItem().getCount() == 4,
+            "The delayed drop must stay untouched on the ground.");
+
+        // Once the delay expires the courier takes exactly what the bill is still missing, never more:
+        // eight of the forty planks are covered, so two more logs close the gap.
+        delayedDrop.setPickUpDelay(0);
+        helper.assertTrue(VillageLogistics.collectPendingMaterials(courier, level) == 2,
+            "With eight logs already accounted for, the courier must take two more and leave the rest.");
+        helper.assertTrue(!delayedDrop.isRemoved() && delayedDrop.getItem().getCount() == 2,
+            "The surplus logs must stay on the ground for the next trip.");
+        helper.assertTrue(VillageLogistics.collectPendingMaterials(courier, level) == 2,
+            "The remaining two logs must be collected once the bill still misses them.");
+        helper.assertTrue(delayedDrop.isRemoved(), "A fully collected drop must leave the world.");
+        helper.assertTrue(VillageLogistics.collectPendingMaterials(courier, level) == 0,
+            "With no loose material left the pickup route must be a no-op instead of inventing cargo.");
+
+        int carriedLogs = 0;
+        for (int slot = 0; slot < courier.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = courier.getInventory().getItem(slot);
+            if (stack.is(Items.OAK_LOG)) carriedLogs += stack.getCount();
+        }
+        helper.assertTrue(carriedLogs == 8,
+            "All eight dropped logs must end up carried by the courier: nothing created, nothing lost.");
+
+        // The board is level-wide SavedData shared with every other test in this world: leave it tidy.
+        helper.assertTrue(VillageWorkOrders.setState(level, center, order.id(),
+                com.abs.livingvillages.domain.VillageWorkOrderModel.CANCELLED, now + 1L) != null,
+            "The fixture order must be cancellable so it stops creating pickup demand.");
+        VillageWorkOrders.invalidateMaterialDemandCache(level, center);
+        VillageResourcePlanner.invalidate(level, center);
+        courier.discard();
+        residentB.discard();
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "insert_components")
+    public static void realStackInsertsNeverMergeDifferentComponents(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 8; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        helper.setBlock(new BlockPos(2, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(4, 1, 1), Blocks.CHEST);
+        BlockPos sourcePos = helper.absolutePos(new BlockPos(2, 1, 1));
+        BlockPos storagePos = helper.absolutePos(new BlockPos(4, 1, 1));
+        helper.assertTrue(level.getBlockEntity(sourcePos) instanceof Container
+                && level.getBlockEntity(storagePos) instanceof Container,
+            "Both fixture chests must be real containers before a transfer can be measured.");
+        Container source = (Container) level.getBlockEntity(sourcePos);
+        Container storage = (Container) level.getBlockEntity(storagePos);
+
+        // What a player leaves in the village: named seeds to plant and a named wheat stack in storage.
+        ItemStack namedWheat = new ItemStack(Items.WHEAT, 32);
+        namedWheat.set(DataComponents.CUSTOM_NAME, Component.literal("Пшеница старосты"));
+        storage.setItem(0, namedWheat.copy());
+        ItemStack namedSeeds = new ItemStack(Items.WHEAT_SEEDS, 24);
+        namedSeeds.set(DataComponents.CUSTOM_NAME, Component.literal("Семена на посев"));
+        source.setItem(0, namedSeeds.copy());
+        storage.setChanged();
+        source.setChanged();
+
+        int planted = VillageItemTransfers.moveRealItems(source, storage, Items.WHEAT_SEEDS, 16, null);
+        helper.assertTrue(planted == 16, "Sixteen real seeds must move from the source chest into the storage.");
+        ItemStack arrived = ItemStack.EMPTY;
+        for (int slot = 0; slot < storage.getContainerSize(); slot++) {
+            if (storage.getItem(slot).is(Items.WHEAT_SEEDS)) arrived = storage.getItem(slot);
+        }
+        helper.assertTrue(Component.literal("Семена на посев").equals(arrived.get(DataComponents.CUSTOM_NAME)),
+            "Planting items must keep their components: they used to be rebuilt as a plain stack.");
+        helper.assertTrue(Component.literal("Пшеница старосты").equals(storage.getItem(0).get(DataComponents.CUSTOM_NAME))
+                && storage.getItem(0).getCount() == 32,
+            "A named stack already in the storage must keep its name and count.");
+
+        // The same rule for a plain insert: vanilla never merges stacks with different components.
+        ItemStack rejected = VillageItemTransfers.insertReal(storage, new ItemStack(Items.WHEAT, 32));
+        helper.assertTrue(rejected.isEmpty(), "The plain wheat must fit into a free slot of the chest.");
+        helper.assertTrue(storage.getItem(0).getCount() == 32
+                && Component.literal("Пшеница старосты").equals(storage.getItem(0).get(DataComponents.CUSTOM_NAME)),
+            "Inserting plain wheat may not grow or rename the stored named stack.");
+        int plainSlots = 0;
+        for (int slot = 0; slot < storage.getContainerSize(); slot++) {
+            ItemStack stack = storage.getItem(slot);
+            if (stack.is(Items.WHEAT) && !stack.has(DataComponents.CUSTOM_NAME)) plainSlots++;
+        }
+        helper.assertTrue(plainSlots == 1,
+            "Plain wheat must land in its own slot instead of being merged into the named stack.");
+
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "scan_budget_storage")
+    public static void nearbyDeliveryStorageIsFoundWithoutWalkingTheWholeStorageBox(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 12; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        // Ring 2 from the courier: close enough that an outward walk must find it almost immediately.
+        helper.setBlock(new BlockPos(4, 1, 1), Blocks.CHEST);
+        BlockPos chest = helper.absolutePos(new BlockPos(4, 1, 1));
+
+        Villager courier = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        courier.setNoAi(true);
+        residentB.setNoAi(true);
+        courier.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeB));
+        // A courier only looks for a delivery target when it really carries something to deliver.
+        courier.getInventory().addItem(new ItemStack(Items.OAK_LOG, 8));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        helper.assertTrue(VillageRegistry.villageId(level, center) != null,
+            "The fixture must resolve a settlement identity before a scan budget can be attributed to it.");
+        helper.assertTrue(VillageRegistry.isStorageForVillage(level, center, chest),
+            "The fixture chest must belong to the settlement, otherwise the delivery scan skips it by design.");
+
+        int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        long fullBox = (2L * radius + 1) * (2L * radius + 1) * 9L;
+
+        BlockPos[] nearby = new BlockPos[1];
+        VillageScanStats.ScanReport near = VillageScanStats.measure(
+            () -> nearby[0] = VillageLogistics.findCourierStorage(courier, level));
+        helper.assertTrue(chest.equals(nearby[0]), "The chest two blocks away must be chosen for the delivery.");
+        helper.assertTrue(near.blockPositions() > 0 && near.blockPositions() < fullBox / 8,
+            "A nearby delivery chest must be found without walking the whole storage box: read "
+                + near.blockPositions() + " of " + fullBox + " positions.");
+
+        // Proof that the early exit did not narrow the search: with no usable chest left, the same scan
+        // must still read every position of the box it is allowed to read.
+        helper.setBlock(new BlockPos(4, 1, 1), Blocks.AIR);
+        BlockPos[] none = new BlockPos[1];
+        VillageScanStats.ScanReport absent = VillageScanStats.measure(
+            () -> none[0] = VillageLogistics.findCourierStorage(courier, level));
+        helper.assertTrue(none[0] == null, "Without a real chest there must be no delivery target.");
+        helper.assertTrue(absent.blockPositions() == fullBox,
+            "Proving that no storage exists must still cover the whole box, but read "
+                + absent.blockPositions() + " of " + fullBox + " positions.");
+
+        courier.discard();
+        residentB.discard();
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "tool_identity")
+    public static void workerTransfersKeepToolDamageAndCustomName(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 8; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        helper.setBlock(new BlockPos(4, 1, 1), Blocks.CHEST);
+        BlockPos chestPos = helper.absolutePos(new BlockPos(4, 1, 1));
+        helper.assertTrue(level.getBlockEntity(chestPos) instanceof Container,
+            "The fixture chest must be a real container before a transfer can be measured.");
+        Container chest = (Container) level.getBlockEntity(chestPos);
+
+        // Exactly what a player leaves in the village chest: a worn, named tool.
+        ItemStack worn = new ItemStack(Items.SHEARS);
+        worn.setDamageValue(17);
+        worn.set(DataComponents.CUSTOM_NAME, Component.literal("Ножницы старосты"));
+        chest.setItem(0, worn.copy());
+        chest.setChanged();
+
+        Villager worker = helper.spawn(EntityType.VILLAGER, 2, 1, 1);
+        worker.setNoAi(true);
+
+        int moved = VillageItemTransfers.moveRealItems(chest, worker.getInventory(), Items.SHEARS, 1, worker);
+        helper.assertTrue(moved == 1, "One real pair of shears must move from the chest to the worker.");
+        ItemStack carried = ItemStack.EMPTY;
+        int leftInChest = 0;
+        for (int slot = 0; slot < worker.getInventory().getContainerSize(); slot++) {
+            if (worker.getInventory().getItem(slot).is(Items.SHEARS)) carried = worker.getInventory().getItem(slot);
+        }
+        for (int slot = 0; slot < chest.getContainerSize(); slot++) {
+            if (chest.getItem(slot).is(Items.SHEARS)) leftInChest += chest.getItem(slot).getCount();
+        }
+        helper.assertTrue(leftInChest == 0, "The chest must hand the tool over instead of keeping a copy.");
+        helper.assertTrue(carried.getDamageValue() == 17,
+            "A worn tool must stay worn: taking it out of the chest may not repair it out of nothing.");
+        helper.assertTrue(Component.literal("Ножницы старосты").equals(carried.get(DataComponents.CUSTOM_NAME)),
+            "A custom name must survive the transfer instead of being rebuilt as a plain stack.");
+
+        // A worker with no free slot must give the same real stack back to the chest, not drop a fresh one.
+        for (int slot = 1; slot < worker.getInventory().getContainerSize(); slot++) {
+            worker.getInventory().setItem(slot, new ItemStack(Items.OAK_PLANKS, 64));
+        }
+        ItemStack second = new ItemStack(Items.SHEARS);
+        second.setDamageValue(9);
+        chest.setItem(3, second.copy());
+        chest.setChanged();
+        int rejected = VillageItemTransfers.moveRealItems(chest, worker.getInventory(), Items.SHEARS, 1, worker);
+        helper.assertTrue(rejected == 0, "A worker without a free slot must not take the tool at all.");
+        ItemStack returned = ItemStack.EMPTY;
+        for (int slot = 0; slot < chest.getContainerSize(); slot++) {
+            if (chest.getItem(slot).is(Items.SHEARS)) returned = chest.getItem(slot);
+        }
+        helper.assertTrue(returned.getDamageValue() == 9,
+            "The rejected tool must return to the chest with the damage it really had.");
+        helper.assertTrue(level.getEntitiesOfClass(ItemEntity.class,
+                new AABB(worker.blockPosition()).inflate(6.0D)).isEmpty(),
+            "Nothing may be dropped on the ground while the chest can take the tool back.");
+
+        worker.discard();
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "farm_expansion")
     public static void farmExpansionStopsWhenFoodOrAcreageTargetIsSatisfied(GameTestHelper helper) {
         helper.assertTrue(LivingVillages.shouldExpandFarm(true, 19, 8)
@@ -2435,8 +2835,19 @@ public final class VillageReservationGameTests {
             new CompoundTag(), helper.getLevel().registryAccess());
         VillageWorkOrders restored = VillageWorkOrders.load(saved, helper.getLevel().registryAccess());
         CompoundTag roundTrip = restored.save(new CompoundTag(), helper.getLevel().registryAccess());
-        helper.assertTrue(roundTrip.getList("orders", Tag.TAG_COMPOUND).size() == 1,
-            "The village work-order board must survive an NBT save/load round trip.");
+        // The board is level-wide SavedData, so other settlements tested in the same world may own
+        // orders too. Persistence is verified for this settlement's order, not for a global count.
+        java.util.UUID boardVillage = VillageRegistry.villageId(helper.getLevel(), center);
+        ListTag persistedOrders = roundTrip.getList("orders", Tag.TAG_COMPOUND);
+        int ownPersistedOrders = 0;
+        for (int i = 0; i < persistedOrders.size(); i++) {
+            CompoundTag entry = persistedOrders.getCompound(i);
+            if (boardVillage != null && entry.getString("village").equals(boardVillage.toString())) {
+                ownPersistedOrders++;
+            }
+        }
+        helper.assertTrue(persistedOrders.size() >= 1 && ownPersistedOrders == 1,
+            "The village work-order board must survive an NBT save/load round trip with exactly this settlement's order.");
 
         var released = VillageWorkOrders.releaseExpiredClaim(
             helper.getLevel(), center, first.id(), now + 44L);
@@ -2907,6 +3318,373 @@ public final class VillageReservationGameTests {
         helper.assertTrue(villager.getCustomName().getString().equals("Renamed by player")
                 && villager.isCustomNameVisible() && !VillagerNameplates.isManaged(villager),
             "Disabling nameplates must restore the newest player name and visibility state.");
+        helper.succeed();
+    }
+
+    /**
+     * A workshop three blocks from the village center must be found by walking outward rings, not the
+     * whole village box, and the resolved answer must then be served from cache. The final assertion
+     * pins the exhaustive case: when nothing is found, the ring walk reads exactly as many positions as
+     * the old nested {@code dx}/{@code dz}/{@code dy} loops did, so the optimization changed the order
+     * of the scan and nothing else.
+     */
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "scan_budget_workshop")
+    public static void nearbyWorkshopIsFoundWithoutWalkingTheWholeVillageBox(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 12; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        // Ring 3 from the center: close enough that an outward walk must find it almost immediately.
+        BlockPos workshop = helper.absolutePos(new BlockPos(5, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CRAFTING_TABLE);
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        for (Villager villager : List.of(residentA, residentB)) villager.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        helper.assertTrue(VillageRegistry.villageId(level, center) != null,
+            "The fixture must resolve a settlement identity before scan budgets can be attributed to it.");
+        helper.assertTrue(VillageRegistry.isWorkBlockForVillage(level, center, workshop),
+            "The fixture workshop must be owned by the settlement, otherwise scans skip it by design.");
+
+        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
+        long fullBox = (2L * radius + 1) * (2L * radius + 1) * 17L;
+
+        VillageIndustry.invalidateWorkBlocks(level, center);
+        boolean[] nearbyAnswer = new boolean[1];
+        VillageScanStats.ScanReport nearby = VillageScanStats.measure(
+            () -> nearbyAnswer[0] = VillageIndustry.hasCraftingTable(level, center));
+        helper.assertTrue(nearbyAnswer[0], "A workshop three blocks away must be found.");
+        helper.assertTrue(nearby.blockPositions() > 0 && nearby.blockPositions() < fullBox / 8,
+            "A nearby workshop must be found without walking the whole village box: read "
+                + nearby.blockPositions() + " of " + fullBox + " positions.");
+
+        boolean[] cachedAnswer = new boolean[1];
+        VillageScanStats.ScanReport cached = VillageScanStats.measure(
+            () -> cachedAnswer[0] = VillageIndustry.hasCraftingTable(level, center));
+        helper.assertTrue(cachedAnswer[0] && cached.blockPositions() == 0L,
+            "The resolved answer must be served from cache inside its TTL, but read "
+                + cached.blockPositions() + " positions.");
+
+        level.removeBlock(workshop, false);
+        VillageIndustry.invalidateWorkBlocks(level, center);
+        boolean[] absentAnswer = new boolean[1];
+        VillageScanStats.ScanReport absent = VillageScanStats.measure(
+            () -> absentAnswer[0] = VillageIndustry.hasCraftingTable(level, center));
+        helper.assertTrue(!absentAnswer[0], "After the workshop is gone the answer must flip.");
+        helper.assertTrue(absent.blockPositions() == fullBox,
+            "Proving absence must read exactly the village box (" + fullBox + " positions), got "
+                + absent.blockPositions() + " — the ring walk changed order, not coverage.");
+
+        boolean[] absentCached = new boolean[1];
+        VillageScanStats.ScanReport absenceServedFromCache = VillageScanStats.measure(
+            () -> absentCached[0] = VillageIndustry.hasCraftingTable(level, center));
+        helper.assertTrue(!absentCached[0] && absenceServedFromCache.blockPositions() == 0L,
+            "The absence answer must also be cached, so a settlement without a workshop stops paying a"
+                + " full box scan every second; got " + absenceServedFromCache.blockPositions() + " reads.");
+        helper.succeed();
+    }
+
+    /**
+     * Deciding whether an asset belongs to a settlement costs two wide resident-group entity queries.
+     * A refusal used to be recomputed on every scan that asked again — storage, tools, planner, beds —
+     * several times per tick. This pins the budget: the same question in the same tick is paid once.
+     */
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "scan_budget_ownership")
+    public static void assetOwnershipDecisionsAreNotRepeatedWithinATick(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 30; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        BlockPos homeOneA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeOneB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos homeTwoA = helper.absolutePos(new BlockPos(25, 1, 1));
+        BlockPos homeTwoB = helper.absolutePos(new BlockPos(27, 1, 1));
+        BlockPos ownStorage = helper.absolutePos(new BlockPos(5, 1, 1));
+        BlockPos foreignStorage = helper.absolutePos(new BlockPos(23, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(23, 1, 1), Blocks.CHEST);
+
+        Villager ownerOne = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager partnerOne = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        Villager ownerTwo = helper.spawn(EntityType.VILLAGER, 25, 1, 1);
+        Villager partnerTwo = helper.spawn(EntityType.VILLAGER, 27, 1, 1);
+        for (Villager villager : List.of(ownerOne, partnerOne, ownerTwo, partnerTwo)) villager.setNoAi(true);
+        ownerOne.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeOneA));
+        partnerOne.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeOneB));
+        ownerTwo.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeTwoA));
+        partnerTwo.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeTwoB));
+
+        BlockPos centerOne = helper.absolutePos(new BlockPos(2, 1, 1));
+        java.util.UUID villageOneId = VillageRegistry.villageId(level, centerOne);
+        java.util.UUID villageTwoId = VillageRegistry.villageId(level, helper.absolutePos(new BlockPos(26, 1, 1)));
+        helper.assertTrue(villageOneId != null && villageTwoId != null && !villageOneId.equals(villageTwoId),
+            "The fixture must contain two distinct settlements before ownership budgets mean anything.");
+
+        boolean[] ownsOwn = new boolean[1];
+        VillageScanStats.ScanReport firstOwnQuestion = VillageScanStats.measure(
+            () -> ownsOwn[0] = VillageRegistry.isStorageForVillage(level, centerOne, ownStorage));
+        helper.assertTrue(ownsOwn[0], "The first settlement must own the chest next to its own residents.");
+        helper.assertTrue(firstOwnQuestion.membershipTests() <= 1,
+            "One ownership question must resolve resident-group membership at most once, got "
+                + firstOwnQuestion.membershipTests() + ".");
+
+        boolean[] ownsOwnAgain = new boolean[1];
+        VillageScanStats.ScanReport repeatedOwnQuestion = VillageScanStats.measure(
+            () -> ownsOwnAgain[0] = VillageRegistry.isStorageForVillage(level, centerOne, ownStorage));
+        helper.assertTrue(ownsOwnAgain[0] && repeatedOwnQuestion.membershipTests() == 0,
+            "A settled ownership answer must come from the registry, not from another membership test.");
+
+        boolean[] ownsForeign = new boolean[1];
+        VillageScanStats.ScanReport firstForeignQuestion = VillageScanStats.measure(
+            () -> ownsForeign[0] = VillageRegistry.isStorageForVillage(level, centerOne, foreignStorage));
+        helper.assertTrue(!ownsForeign[0], "The first settlement must not own the second settlement's chest.");
+        helper.assertTrue(firstForeignQuestion.membershipTests() == 1,
+            "Refusing a foreign chest must resolve membership exactly once, got "
+                + firstForeignQuestion.membershipTests() + ".");
+        helper.assertTrue(firstForeignQuestion.entityAreaScans() >= 2,
+            "One membership test is two resident-group entity queries; counted "
+                + firstForeignQuestion.entityAreaScans() + ".");
+
+        boolean[] ownsForeignAgain = new boolean[1];
+        VillageScanStats.ScanReport repeatedForeignQuestion = VillageScanStats.measure(
+            () -> ownsForeignAgain[0] = VillageRegistry.isStorageForVillage(level, centerOne, foreignStorage));
+        helper.assertTrue(!ownsForeignAgain[0], "The refusal must stay a refusal within the same tick.");
+        helper.assertTrue(repeatedForeignQuestion.membershipTests() == 0
+                && repeatedForeignQuestion.entityAreaScans() == 0,
+            "A refusal decided this tick must not be paid again: membershipTests="
+                + repeatedForeignQuestion.membershipTests()
+                + ", entityAreaScans=" + repeatedForeignQuestion.entityAreaScans() + ".");
+        helper.succeed();
+    }
+
+    /**
+     * The per-tick settlement scan quota exists to smooth spikes, so it must never starve a settlement:
+     * once a plan expires, the next question gets a freshly measured answer that includes stock added
+     * since the previous plan, and the rest of that tick is served from cache.
+     *
+     * <p>The re-measure count is asserted as "at most one" because villager tick listeners may ask for
+     * the same settlement plan during the wait; what matters is that the answer is never stale and that
+     * one tick never pays for the same settlement twice.</p>
+     */
+    @GameTest(template = "empty", timeoutTicks = 200, batch = "scan_budget_quota")
+    public static void expiredSettlementPlanRefreshesOnceAndSeesNewStock(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 12; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        BlockPos homeA = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos homeB = helper.absolutePos(new BlockPos(3, 1, 1));
+        BlockPos storage = helper.absolutePos(new BlockPos(5, 1, 1));
+        helper.setBlock(new BlockPos(5, 1, 1), Blocks.CHEST);
+
+        Villager residentA = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager residentB = helper.spawn(EntityType.VILLAGER, 3, 1, 1);
+        for (Villager villager : List.of(residentA, residentB)) villager.setNoAi(true);
+        residentA.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeA));
+        residentB.getBrain().setMemory(MemoryModuleType.HOME, GlobalPos.of(level.dimension(), homeB));
+
+        BlockPos center = helper.absolutePos(new BlockPos(2, 1, 1));
+        helper.assertTrue(VillageRegistry.isStorageForVillage(level, center, storage),
+            "The fixture chest must belong to the settlement before the planner can measure it.");
+        helper.assertTrue(level.getBlockEntity(storage) instanceof Container,
+            "The fixture chest must be a real container before the planner can read it.");
+        Container chest = (Container) level.getBlockEntity(storage);
+        chest.setItem(0, new ItemStack(Items.OAK_PLANKS, 64));
+        chest.setChanged();
+
+        VillageResourcePlanner.invalidate(level, center);
+        int firstWood = VillageResourcePlanner.getPlan(level, center).freeWoodUnits();
+        helper.assertTrue(firstWood == 64,
+            "The first plan must see the chest's planks, but reported " + firstWood + " free wood units.");
+        // Stock added after the plan was taken may only become visible through a real re-measure.
+        chest.setItem(1, new ItemStack(Items.OAK_PLANKS, 64));
+        chest.setChanged();
+        long scansAfterFirstPlan = VillageTickBudget.totalSettlementScans(level);
+
+        helper.runAfterDelay(120, () -> {
+            long before = VillageTickBudget.totalSettlementScans(level);
+            int refreshedWood = VillageResourcePlanner.getPlan(level, center).freeWoodUnits();
+            long after = VillageTickBudget.totalSettlementScans(level);
+            helper.assertTrue(after - before <= 1,
+                "One settlement must not be re-measured twice in the same tick, got " + (after - before) + ".");
+            helper.assertTrue(after > scansAfterFirstPlan,
+                "The scan quota must not starve a settlement: its expired plan was never re-measured.");
+            helper.assertTrue(refreshedWood == 128,
+                "The re-measured plan must include stock added after the previous plan, got "
+                    + refreshedWood + " free wood units.");
+            VillageResourcePlanner.getPlan(level, center);
+            helper.assertTrue(VillageTickBudget.totalSettlementScans(level) == after,
+                "A plan measured this tick must be served from cache for the rest of the tick.");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "miner_search_budget")
+    public static void minerOreSearchResolvesRivalTargetsOnceAndStillHonoursThem(GameTestHelper helper) {
+        var level = helper.getLevel();
+        // The fixture is built for the default search radius of eight blocks: the row reaches seven
+        // blocks to each side of the miner, so the outermost ore is still inside the search circle
+        // (the circle culls columns by dx*dx + dz*dz, not by a square box).
+        int searchRadius = LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get();
+        helper.assertTrue(searchRadius >= 7,
+            "This fixture needs a miner search radius of at least seven blocks, got " + searchRadius + ".");
+        for (int x = 0; x <= 14; x++) {
+            for (int z = 0; z <= 3; z++) {
+                helper.setBlock(x, 0, z, Blocks.STONE);
+                helper.setBlock(x, 1, z, Blocks.AIR);
+                helper.setBlock(x, 2, z, Blocks.AIR);
+            }
+        }
+        // Thirteen exposed iron ores in one row: every one of them used to pay its own entity area
+        // scan while the search asked "is another miner already working here?".
+        List<BlockPos> ores = new ArrayList<>();
+        for (int x = 1; x <= 13; x++) {
+            helper.setBlock(x, 1, 1, Blocks.IRON_ORE);
+            ores.add(helper.absolutePos(new BlockPos(x, 1, 1)));
+        }
+        Villager miner = helper.spawn(EntityType.VILLAGER, 6, 1, 3);
+        miner.setNoAi(true);
+        miner.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_MINER);
+        ItemStack pickaxe = new ItemStack(Items.IRON_PICKAXE);
+        BlockPos ownRow = ores.get(5);
+        helper.assertTrue(ownRow.getX() == miner.blockPosition().getX(),
+            "The fixture must put the miner opposite the middle ore of the row.");
+
+        BlockPos[] nearest = new BlockPos[1];
+        VillageScanStats.ScanReport report = VillageScanStats.measure(
+            () -> nearest[0] = VillagerMining.findNearestOre(level, miner, pickaxe, null));
+        helper.assertTrue(report.entityAreaScans() == 1,
+            "One ore search must resolve the other miners once, not once per exposed ore; got "
+                + report.entityAreaScans() + " entity area scans for thirteen candidates.");
+        helper.assertTrue(report.blockPositions() > 0,
+            "The miner search must report the positions it reads, it runs on its own retry timer.");
+        helper.assertTrue(nearest[0] != null && nearest[0].equals(ownRow),
+            "The shared reservation lookup must still return the nearest mineable ore, got " + nearest[0] + ".");
+
+        // A rival miner holding the nearest ore also keeps every ore within six blocks of it, so only
+        // the far end of the row, seven blocks away, stays available.
+        Villager rival = helper.spawn(EntityType.VILLAGER, 6, 1, 2);
+        rival.setNoAi(true);
+        CompoundTag rivalData = rival.getPersistentData();
+        rivalData.putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_MINER);
+        rivalData.putBoolean(VillagerMining.ACTIVE, true);
+        rivalData.putInt(VillagerMining.ORE_X, nearest[0].getX());
+        rivalData.putInt(VillagerMining.ORE_Y, nearest[0].getY());
+        rivalData.putInt(VillagerMining.ORE_Z, nearest[0].getZ());
+
+        BlockPos[] afterRival = new BlockPos[1];
+        VillageScanStats.ScanReport rivalReport = VillageScanStats.measure(
+            () -> afterRival[0] = VillagerMining.findNearestOre(level, miner, pickaxe, null));
+        helper.assertTrue(rivalReport.entityAreaScans() == 1,
+            "The rival lookup must stay a single entity area scan, got " + rivalReport.entityAreaScans() + ".");
+        helper.assertTrue(afterRival[0] != null && afterRival[0].equals(ores.get(12)),
+            "Only the ore farther than six blocks from the rival's target may be taken, got " + afterRival[0]
+                + " while the row ends at " + ores.get(12) + ".");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "miner_store_identity")
+    public static void minerStoresRealDropsWithoutMergingDifferentComponents(GameTestHelper helper) {
+        placeFloor(helper);
+        Villager miner = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        miner.setNoAi(true);
+        var inventory = miner.getInventory();
+        int lastSlot = inventory.getContainerSize() - 1;
+        ItemStack elderOre = new ItemStack(Items.IRON_ORE, 64);
+        elderOre.set(DataComponents.CUSTOM_NAME, Component.literal("Руда старосты"));
+        inventory.setItem(0, elderOre);
+        for (int slot = 1; slot < lastSlot; slot++) {
+            inventory.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+        }
+        helper.assertTrue(inventory.getItem(lastSlot).isEmpty(),
+            "The fixture must leave exactly one free inventory slot.");
+
+        ItemStack minedOre = new ItemStack(Items.IRON_ORE, 10);
+        minedOre.set(DataComponents.CUSTOM_NAME, Component.literal("Руда шахтёра"));
+        VillagerMining.storeOrDrop(miner, helper.getLevel(), miner.blockPosition(), minedOre);
+
+        ItemStack stored = inventory.getItem(lastSlot);
+        helper.assertTrue(stored.getCount() == 10
+                && Component.literal("Руда шахтёра").equals(stored.get(DataComponents.CUSTOM_NAME)),
+            "A mined stack must be stored as itself, with its own name, in the free slot.");
+        helper.assertTrue(inventory.getItem(0).getCount() == 64
+                && Component.literal("Руда старосты").equals(inventory.getItem(0).get(DataComponents.CUSTOM_NAME)),
+            "Storing a differently named ore must never merge into the elder's named stack.");
+
+        // Same name, same components: vanilla merges, and only what does not fit hits the ground as the
+        // very same stack instead of being rebuilt out of a count.
+        int room = 64 - stored.getCount();
+        ItemStack overflow = new ItemStack(Items.IRON_ORE, room + 32);
+        overflow.set(DataComponents.CUSTOM_NAME, Component.literal("Руда шахтёра"));
+        VillagerMining.storeOrDrop(miner, helper.getLevel(), miner.blockPosition(), overflow);
+        List<ItemEntity> dropped = helper.getLevel().getEntitiesOfClass(ItemEntity.class,
+            new AABB(miner.blockPosition()).inflate(3.0D));
+        helper.assertTrue(dropped.size() == 1 && dropped.get(0).getItem().getCount() == 32
+                && Component.literal("Руда шахтёра").equals(dropped.get(0).getItem().get(DataComponents.CUSTOM_NAME)),
+            "What the miner cannot carry must hit the ground as the same named stack, got " + dropped.size()
+                + " drops.");
+        helper.assertTrue(inventory.getItem(lastSlot).getCount() == 64
+                && inventory.getItem(0).getCount() == 64,
+            "The merge must fill the matching stack to its limit and leave every other stack alone.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "torch_restock")
+    public static void torchRestockKeepsTheStorageReserveTheStackNameAndReportsItsBox(GameTestHelper helper) {
+        placeFloor(helper);
+        BlockPos chestRelative = new BlockPos(1, 1, 1);
+        helper.setBlock(chestRelative, Blocks.CHEST);
+        BlockPos chest = helper.absolutePos(chestRelative);
+        helper.assertTrue(helper.getLevel().getBlockEntity(chest) instanceof Container,
+            "The fixture chest must be a real container.");
+        Container storage = (Container) helper.getLevel().getBlockEntity(chest);
+        ItemStack torches = new ItemStack(Items.TORCH, 20);
+        torches.set(DataComponents.CUSTOM_NAME, Component.literal("Факелы стражи"));
+        storage.setItem(0, torches);
+        storage.setChanged();
+
+        Villager guard = helper.spawn(EntityType.VILLAGER, 0, 1, 2);
+        guard.setNoAi(true);
+        CompoundTag data = guard.getPersistentData();
+        data.putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_GUARD);
+        BlockPos home = helper.absolutePos(new BlockPos(0, 1, 2));
+        data.putInt(VillagerRoles.HOME_X, home.getX());
+        data.putInt(VillagerRoles.HOME_Y, home.getY());
+        data.putInt(VillagerRoles.HOME_Z, home.getZ());
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), home, chest),
+            "The fixture chest must belong to the guard's settlement before the restock runs.");
+
+        int radius = Math.min(12, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        long box = (long) (2 * radius + 1) * (2 * radius + 1) * 9L;
+        VillageScanStats.ScanReport report = VillageScanStats.measure(
+            () -> VillagerCaveSupport.restockTorches(guard, helper.getLevel(), data, 0L));
+        helper.assertTrue(report.blockPositions() == box,
+            "One torch restock must report the whole box it walks exactly once: expected " + box
+                + ", got " + report.blockPositions() + ".");
+
+        int carried = 0;
+        for (int slot = 0; slot < guard.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = guard.getInventory().getItem(slot);
+            if (!stack.is(Items.TORCH)) continue;
+            carried += stack.getCount();
+            helper.assertTrue(Component.literal("Факелы стражи").equals(stack.get(DataComponents.CUSTOM_NAME)),
+                "Taken torches must keep the components of the stored stack.");
+        }
+        helper.assertTrue(carried == 12 && storage.getItem(0).getCount() == 8,
+            "The worker must stop at sixteen torches and the storage must keep its reserve of eight;"
+                + " carried " + carried + ", left " + storage.getItem(0).getCount() + ".");
+        helper.assertTrue(Component.literal("Факелы стражи").equals(storage.getItem(0).get(DataComponents.CUSTOM_NAME)),
+            "The reserve left in the chest must stay the same named stack.");
+        helper.assertTrue(helper.getLevel().getEntitiesOfClass(ItemEntity.class, new AABB(home).inflate(4.0D)).isEmpty(),
+            "A restock that fits into the worker's inventory must not drop torches on the ground.");
+        helper.assertTrue(data.getLong("livingvillages_cave_next_torch_restock") == 400L,
+            "The restock must schedule its next attempt 400 ticks ahead.");
         helper.succeed();
     }
 

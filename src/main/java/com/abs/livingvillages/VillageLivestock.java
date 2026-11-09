@@ -811,7 +811,8 @@ public final class VillageLivestock {
         }
 
         ItemStack shears = firstShears(herder.getInventory());
-        UUID villageId = VillageRegistry.villageId(level, center);
+        // Ownership is re-checked inside shearManagedSheep; resolving the settlement identity here too
+        // was a dead lookup on every shearing attempt.
         boolean sheared = shears != null && shearManagedSheep(level, target, shears, center);
         if (sheared) {
             collectNearbyWool(herder, level, target);
@@ -872,6 +873,15 @@ public final class VillageLivestock {
             || !(sheep.level() instanceof ServerLevel level)) return;
         if (!LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()) return;
 
+        CompoundTag sheepData = sheep.getPersistentData();
+        long now = level.getGameTime();
+        // The 20-tick lure throttle used to be the very last check, behind an entity query with a
+        // predicate over every nearby villager, a resident-group resolve, the pen geometry
+        // (isInsideVillagePen and isInsideExistingFencePen) and a line-of-sight raytrace. A sheep that
+        // is already following a fresh lure order needs none of it, and nothing above this line writes
+        // to the world, so answering early changes no decision - it only skips the work.
+        if (now - sheepData.getLong(SHEEP_LAST_LURE_TICK) < 20L) return;
+
         AABB area = sheep.getBoundingBox().inflate(10.0D, 4.0D, 10.0D);
         List<Villager> herders = level.getEntitiesOfClass(Villager.class, area,
             villager -> isCurrentHerdTarget(villager, sheep));
@@ -881,9 +891,7 @@ public final class VillageLivestock {
         if (!isCurrentHerdTarget(herder, sheep)) return;
         BlockPos center = ownershipCenter(herder);
         UUID villageId = VillageRegistry.villageId(level, center);
-        String owner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
-        CompoundTag sheepData = sheep.getPersistentData();
-        long now = level.getGameTime();
+        String owner = sheepData.getString(SHEEP_OWNER_KEY);
         String lureOwner = sheepData.getString(SHEEP_LURE_OWNER);
         long lastLure = sheepData.getLong(SHEEP_LAST_LURE_TICK);
         // Herding never overrides the animal controller's danger response, parental protection,
@@ -900,7 +908,6 @@ public final class VillageLivestock {
             || sheep.distanceToSqr(herder) > SHEEP_LURE_RADIUS_SQR
             || !canSeeSheep(level, sheep, herder)) return;
 
-        if (now - lastLure < 20L) return;
         sheep.getNavigation().moveTo(herder, SHEEP_FOLLOW_SPEED);
         sheep.getPersistentData().putLong(SHEEP_LAST_LURE_TICK, now);
         sheep.getPersistentData().putString(SHEEP_LURE_OWNER, villageId.toString());
@@ -1513,34 +1520,68 @@ public final class VillageLivestock {
         });
     }
 
+    /**
+     * Nearest settlement storage that really holds {@code item} and can be reached.
+     *
+     * <p>The candidate set is unchanged - the storage box around the ownership center - but the walk
+     * goes outward in rings from the worker and stops at the first usable storage, instead of reading
+     * all 33x33x13 = 14,157 positions and building up to four paths per candidate.</p>
+     */
     private static StorageTarget findNearestStorageWithItem(Villager worker, ServerLevel level, Item item) {
-        List<StorageRef> refs = findStorages(level, ownershipCenter(worker), worker);
-        refs.sort(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
-        for (StorageRef ref : refs) {
-            if (countItem(ref.container(), item) <= 0) continue;
-            BlockPos stand = findSafeStand(level, worker, ref.pos());
-            if (stand != null) return new StorageTarget(ref.pos(), stand);
-        }
-        return null;
+        BlockPos center = ownershipCenter(worker);
+        BlockPos[] standOut = new BlockPos[1];
+        BlockPos storage = VillageScanRings.nearestInBox(worker.blockPosition(), center, storageRadius(), 6, 6,
+            pos -> acceptsStorageWithItem(level, center, worker, pos, item, standOut));
+        return storage == null || standOut[0] == null ? null : new StorageTarget(storage, standOut[0]);
     }
 
+    /** Nearest settlement storage with real room for the wool this worker carries. */
     private static StorageTarget findNearestStorageWithWoolRoom(Villager worker, ServerLevel level) {
-        List<StorageRef> refs = findStorages(level, ownershipCenter(worker), worker);
-        refs.sort(Comparator.comparingDouble(ref -> worker.distanceToSqr(Vec3.atCenterOf(ref.pos()))));
-        for (StorageRef ref : refs) {
-            boolean room = false;
-            for (int slot = 0; slot < worker.getInventory().getContainerSize(); slot++) {
-                ItemStack stack = worker.getInventory().getItem(slot);
-                if (!stack.isEmpty() && isWool(stack.getItem()) && canInsert(ref.container(), stack)) {
-                    room = true;
-                    break;
-                }
-            }
-            if (!room) continue;
-            BlockPos stand = findSafeStand(level, worker, ref.pos());
-            if (stand != null) return new StorageTarget(ref.pos(), stand);
+        BlockPos center = ownershipCenter(worker);
+        BlockPos[] standOut = new BlockPos[1];
+        BlockPos storage = VillageScanRings.nearestInBox(worker.blockPosition(), center, storageRadius(), 6, 6,
+            pos -> acceptsStorageWithWoolRoom(level, center, worker, pos, standOut));
+        return storage == null || standOut[0] == null ? null : new StorageTarget(storage, standOut[0]);
+    }
+
+    private static int storageRadius() {
+        return Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+    }
+
+    /** One storage candidate: owned, unreserved, a real container holding {@code item}, reachable. */
+    private static boolean acceptsStorageWithItem(ServerLevel level, BlockPos center, Villager worker,
+                                                  BlockPos pos, Item item, BlockPos[] standOut) {
+        if (!(level.getBlockEntity(pos) instanceof Container container) || countItem(container, item) <= 0) {
+            return false;
         }
-        return null;
+        return acceptsStorage(level, center, worker, pos, standOut);
+    }
+
+    /** One storage candidate: owned, unreserved, a real container with room for carried wool, reachable. */
+    private static boolean acceptsStorageWithWoolRoom(ServerLevel level, BlockPos center, Villager worker,
+                                                      BlockPos pos, BlockPos[] standOut) {
+        if (!(level.getBlockEntity(pos) instanceof Container container)) return false;
+        boolean room = false;
+        for (int slot = 0; slot < worker.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = worker.getInventory().getItem(slot);
+            if (!stack.isEmpty() && isWool(stack.getItem()) && canInsert(container, stack)) {
+                room = true;
+                break;
+            }
+        }
+        return room && acceptsStorage(level, center, worker, pos, standOut);
+    }
+
+    /** The cheap world tests every storage candidate shares; the stand is remembered for the winner. */
+    private static boolean acceptsStorage(ServerLevel level, BlockPos center, Villager worker,
+                                          BlockPos pos, BlockPos[] standOut) {
+        if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+            || !VillageRegistry.isStorageForVillage(level, center, pos)
+            || !VillageReservations.isStorageAvailable(level, pos, worker)) return false;
+        BlockPos stand = findSafeStand(level, worker, pos);
+        if (stand == null) return false;
+        standOut[0] = stand;
+        return true;
     }
 
     private static List<StorageRef> findStorages(ServerLevel level, BlockPos center, Villager owner) {
@@ -1562,16 +1603,25 @@ public final class VillageLivestock {
         return found;
     }
 
+    /**
+     * Nearest safe standing position next to {@code target} that the worker can actually path to.
+     *
+     * <p>Pathfinding is the expensive part, so the safe sides are ordered by distance first and the
+     * search stops at the first reachable one: the result is the same nearest reachable stand, but a
+     * worker next to an open chest builds one path instead of four.</p>
+     */
     private static BlockPos findSafeStand(ServerLevel level, Villager worker, BlockPos target) {
-        List<BlockPos> stands = new ArrayList<>();
+        List<BlockPos> stands = new ArrayList<>(4);
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos stand = target.relative(direction);
-            if (!isSafeStand(level, stand)) continue;
-            var path = worker.getNavigation().createPath(stand, 0);
-            if (path != null && path.canReach()) stands.add(stand.immutable());
+            if (isSafeStand(level, stand)) stands.add(stand.immutable());
         }
         stands.sort(Comparator.comparingDouble(pos -> worker.distanceToSqr(Vec3.atCenterOf(pos))));
-        return stands.isEmpty() ? null : stands.get(0);
+        for (BlockPos stand : stands) {
+            var path = worker.getNavigation().createPath(stand, 0);
+            if (path != null && path.canReach()) return stand;
+        }
+        return null;
     }
 
     private static void depositWool(Container inventory, Container storage) {
@@ -1625,20 +1675,13 @@ public final class VillageLivestock {
         return false;
     }
 
+    /**
+     * Takes real stacks out of a settlement storage: a worn pair of shears must reach the herder still
+     * worn, with its enchantments and name, instead of being rebuilt as a brand-new tool.
+     */
     private static void transferFromStorage(Villager worker, Container storage, Item item, int amount) {
         if (worker == null || storage == null || amount <= 0) return;
-        int removed = removeItem(storage, item, amount);
-        if (removed <= 0) return;
-        ItemStack remainder = worker.getInventory().addItem(new ItemStack(item, removed));
-        if (!remainder.isEmpty()) {
-            ItemStack returned = remainder.copy();
-            int inserted = insert(storage, returned);
-            if (inserted < remainder.getCount()) {
-                worker.spawnAtLocation(new ItemStack(item, remainder.getCount() - inserted));
-            }
-        }
-        storage.setChanged();
-        worker.getInventory().setChanged();
+        VillageItemTransfers.moveRealItems(storage, worker.getInventory(), item, amount, worker);
     }
 
     private static void finishTask(Villager villager, CompoundTag data, long retryAt) {
@@ -1684,19 +1727,6 @@ public final class VillageLivestock {
             if (stack.is(item)) total += stack.getCount();
         }
         return total;
-    }
-
-    private static int removeItem(Container container, Item item, int amount) {
-        int remaining = amount;
-        for (int slot = 0; slot < container.getContainerSize() && remaining > 0; slot++) {
-            ItemStack stack = container.getItem(slot);
-            if (!stack.is(item)) continue;
-            int take = Math.min(remaining, stack.getCount());
-            container.removeItem(slot, take);
-            remaining -= take;
-        }
-        if (remaining != amount) container.setChanged();
-        return amount - remaining;
     }
 
     private static int inventoryCapacityFor(Container inventory, Item item) {

@@ -189,7 +189,7 @@ public final class VillagerCaveSupport {
 
         BlockPos home = VillagerRoles.getHome(villager);
         if (home == null) home = villager.blockPosition();
-        if (!VillageResourcePlanner.getPlan(level, home).needsOre()) {
+        if (!VillageResourcePlanner.getPlan(level, home).needsOreWork()) {
             data.putLong(NEXT_SCOUT, now + SCOUT_EMPTY_RETRY_TICKS);
             return;
         }
@@ -474,44 +474,52 @@ public final class VillagerCaveSupport {
         return next;
     }
 
-    private static void restockTorches(Villager villager, ServerLevel level, CompoundTag data, long now) {
+    /**
+     * Takes torches from the nearest owned storage, leaving eight behind. Package-private as a
+     * GameTest seam: the reserve, the stack identity and the reported scan are asserted in world.
+     */
+    static void restockTorches(Villager villager, ServerLevel level, CompoundTag data, long now) {
         if (now < data.getLong(NEXT_TORCH_RESTOCK)) return;
         // The storage scan is deliberately much slower than the miner's work tick.
         data.putLong(NEXT_TORCH_RESTOCK, now + 400L);
         SimpleContainer inventory = villager.getInventory();
         if (countTorches(villager) >= 8) return;
 
-        BlockPos center = VillagerRoles.getHome(villager);
-        if (center == null) center = villager.blockPosition();
+        BlockPos home = VillagerRoles.getHome(villager);
+        // Captured by the storage predicate, so it is bound once and never reassigned.
+        final BlockPos center = home == null ? villager.blockPosition() : home;
         int radius = Math.min(12, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                for (int dy = -4; dy <= 4; dy++) {
-                    BlockPos storagePos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(storagePos) || !isStorage(level.getBlockState(storagePos))
-                        || !VillageRegistry.isStorageForVillage(level, center, storagePos)
-                        || !VillageReservations.isStorageAvailable(level, storagePos, villager)
-                        || !(level.getBlockEntity(storagePos) instanceof Container storage)) continue;
-
-                    for (int slot = 0; slot < storage.getContainerSize(); slot++) {
-                        ItemStack stored = storage.getItem(slot);
-                        if (!stored.is(Items.TORCH) || stored.getCount() <= 8) continue;
-                        int requested = Math.min(16 - countTorches(villager), stored.getCount() - 8);
-                        if (requested <= 0) return;
-                        ItemStack offered = new ItemStack(Items.TORCH, requested);
-                        ItemStack remainder = inventory.addItem(offered);
-                        int moved = requested - remainder.getCount();
-                        if (moved > 0) {
-                            stored.shrink(moved);
-                            if (stored.isEmpty()) storage.setItem(slot, ItemStack.EMPTY);
-                            storage.setChanged();
-                            inventory.setChanged();
-                        }
-                        if (countTorches(villager) >= 8) return;
-                    }
+        // Same box as the old nested loops (25x25x9 = 5 625 positions at the default radius), but in
+        // ring order - the nearest storage gives its torches first - and reported once per restock.
+        for (BlockPos storagePos : VillageScanRings.collectInBox(center, radius, 4, 4,
+            candidate -> isAvailableTorchStorage(level, center, villager, candidate))) {
+            if (!(level.getBlockEntity(storagePos) instanceof Container storage)) continue;
+            for (int slot = 0; slot < storage.getContainerSize(); slot++) {
+                ItemStack stored = storage.getItem(slot);
+                if (!stored.is(Items.TORCH) || stored.getCount() <= 8) continue;
+                int requested = Math.min(16 - countTorches(villager), stored.getCount() - 8);
+                if (requested <= 0) return;
+                // Real stacks: a player-renamed torch stack keeps its name, and whatever the worker
+                // cannot carry goes back into the same storage as the same stack. The storage keeps
+                // the reserve of eight torches this slot had before.
+                ItemStack taken = storage.removeItem(slot, requested);
+                if (taken.isEmpty()) continue;
+                ItemStack rejected = VillageItemTransfers.insertReal(inventory, taken);
+                if (!rejected.isEmpty()) {
+                    ItemStack back = VillageItemTransfers.insertReal(storage, rejected);
+                    if (!back.isEmpty()) villager.spawnAtLocation(back);
                 }
+                storage.setChanged();
+                if (countTorches(villager) >= 8) return;
             }
         }
+    }
+
+    /** One torch-storage candidate: loaded, a real container, owned by the settlement, not reserved. */
+    private static boolean isAvailableTorchStorage(ServerLevel level, BlockPos center, Villager villager, BlockPos pos) {
+        return level.hasChunkAt(pos) && isStorage(level.getBlockState(pos))
+            && VillageRegistry.isStorageForVillage(level, center, pos)
+            && VillageReservations.isStorageAvailable(level, pos, villager);
     }
 
     private static int countTorches(Villager villager) {

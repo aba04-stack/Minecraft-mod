@@ -2,11 +2,14 @@ package com.abs.livingvillages;
 
 import com.abs.livingvillages.domain.VillageResourceDemandModel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BiomeTags;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
@@ -14,6 +17,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,9 +27,28 @@ import java.util.WeakHashMap;
 /**
  * Server adapter that measures real village stock and caches a demand plan.
  * It never creates items and only scans already-loaded chunks.
+ *
+ * <p>The scan reports reserved quantities separately from measured stock so the domain model can
+ * decide shortages from the material the village is actually free to spend. Every refresh also
+ * records its own wall-clock cost into {@link VillageTickBudget} so planner load stays measurable
+ * instead of assumed.</p>
  */
 public final class VillageResourcePlanner {
     private static final long CACHE_TICKS = 100L;
+    /**
+     * A forest does not appear or disappear within five seconds, so the tree scan lives longer than the
+     * rest of the plan. Felling a tree invalidates the settlement plan explicitly
+     * ({@code VillagerTreeWork} calls {@link #invalidate} when a trunk runs out), so lumberjack quotas
+     * still react immediately to real logging instead of waiting for this to expire.
+     */
+    private static final long TREE_CACHE_TICKS = 200L;
+    /**
+     * How many settlements may run a full re-measure in one tick. Every cache expires on the same
+     * 100-tick boundary, so without a quota a server with many settlements would pay all of their scans
+     * in a single tick. A settlement that does not get the quota keeps serving its previous plan (at
+     * most {@code CACHE_TICKS} old) and retries on the next tick.
+     */
+    private static final int MAX_REFRESHES_PER_TICK = 2;
     private static final Map<ServerLevel, Map<UUID, CachedPlan>> CACHE = new WeakHashMap<>();
 
     private VillageResourcePlanner() {}
@@ -53,11 +76,21 @@ public final class VillageResourcePlanner {
         Map<UUID, CachedPlan> byVillage = CACHE.computeIfAbsent(level, ignored -> new HashMap<>());
         CachedPlan cached = byVillage.get(villageId);
         if (cached != null && now < cached.expiresAtTick()) return cached.plan();
+        if (cached != null && !VillageTickBudget.tryConsumeSettlementScan(level, MAX_REFRESHES_PER_TICK)) {
+            // This tick's scan quota is spent: keep the previous plan instead of stacking every
+            // settlement's re-measure into the same tick. The entry stays expired, so the settlement
+            // retries next tick rather than waiting another full cache interval.
+            return cached.plan();
+        }
 
+        long startedNanos = System.nanoTime();
         List<Villager> villagers = residents == null ? VillageArea.findVillagers(level, center) : residents;
-        VillageResourceDemandModel.Stock stock = measure(level, center, villagers);
+        boolean treesReused = cached != null && now < cached.treesExpiresAtTick();
+        VillageResourceDemandModel.Stock stock = measure(level, center, villagers, now, treesReused ? cached : null);
         VillageResourceDemandModel.Plan plan = VillageResourceDemandModel.evaluate(stock);
-        byVillage.put(villageId, new CachedPlan(plan, now + CACHE_TICKS));
+        VillageTickBudget.recordSubsystemNanos(level, System.nanoTime() - startedNanos);
+        byVillage.put(villageId, new CachedPlan(plan, now + CACHE_TICKS, stock.treesAvailable(),
+            treesReused ? cached.treesExpiresAtTick() : now + TREE_CACHE_TICKS));
 
         if (byVillage.size() > 64) {
             byVillage.entrySet().removeIf(entry -> now >= entry.getValue().expiresAtTick());
@@ -66,35 +99,46 @@ public final class VillageResourcePlanner {
         return plan;
     }
 
+    /**
+     * Drops the cached plan after a real transfer so quotas react on the next assignment pass
+     * instead of up to five seconds later. Cheap: only the affected village is re-measured.
+     */
+    public static void invalidate(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return;
+        // Workshop presence is cached on the industry side and feeds this planner, so one invalidation
+        // point keeps both views consistent after a real change to the settlement.
+        VillageIndustry.invalidateWorkBlocks(level, center);
+        Map<UUID, CachedPlan> byVillage = CACHE.get(level);
+        if (byVillage == null || byVillage.isEmpty()) return;
+        UUID villageId = VillageRegistry.villageId(level, center);
+        if (villageId != null) byVillage.remove(villageId);
+    }
+
+    /**
+     * @param treeSource a previous entry whose tree answer is still fresh, or {@code null} to rescan
+     */
     private static VillageResourceDemandModel.Stock measure(
-            ServerLevel level, BlockPos center, List<Villager> villagers) {
-        int woodUnits = 0;
-        int stoneUnits = 0;
-        int oreUnits = 0;
-        int foodPoints = 0;
-        int seedUnits = 0;
+            ServerLevel level, BlockPos center, List<Villager> villagers, long now, CachedPlan treeSource) {
+        Totals totals = new Totals();
         int adults = 0;
 
         int storageRadius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        int scanned = 0;
         for (int dx = -storageRadius; dx <= storageRadius; dx++) {
             for (int dz = -storageRadius; dz <= storageRadius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
+                    scanned++;
                     if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
                         || !VillageRegistry.isStorageForVillage(level, center, pos)
                         || !(level.getBlockEntity(pos) instanceof Container container)) continue;
                     for (int slot = 0; slot < container.getContainerSize(); slot++) {
-                        ItemStack stored = container.getItem(slot);
-                        seedUnits += countPlantingItems(stored);
-                        int[] totals = addStack(stored, woodUnits, stoneUnits, oreUnits, foodPoints);
-                        woodUnits = totals[0];
-                        stoneUnits = totals[1];
-                        oreUnits = totals[2];
-                        foodPoints = totals[3];
+                        accumulate(totals, container.getItem(slot));
                     }
                 }
             }
         }
+        VillageScanStats.recordScan(scanned);
 
         if (villagers != null) {
             for (Villager villager : villagers) {
@@ -102,71 +146,102 @@ public final class VillageResourcePlanner {
                 if (!villager.isBaby()) adults++;
                 Container inventory = villager.getInventory();
                 for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-                    ItemStack carried = inventory.getItem(slot);
-                    seedUnits += countPlantingItems(carried);
-                    int[] totals = addStack(carried, woodUnits, stoneUnits, oreUnits, foodPoints);
-                    woodUnits = totals[0];
-                    stoneUnits = totals[1];
-                    oreUnits = totals[2];
-                    foodPoints = totals[3];
+                    accumulate(totals, inventory.getItem(slot));
                 }
-                ItemStack held = villager.getMainHandItem();
-                seedUnits += countPlantingItems(held);
-                int[] heldTotals = addStack(held, woodUnits, stoneUnits, oreUnits, foodPoints);
-                woodUnits = heldTotals[0];
-                stoneUnits = heldTotals[1];
-                oreUnits = heldTotals[2];
-                foodPoints = heldTotals[3];
+                accumulate(totals, villager.getMainHandItem());
             }
         }
 
-        int matureCrops = countMatureCrops(level, center);
-        int plantableFarmland = countPlantableFarmland(level, center);
-        boolean treesAvailable = hasHarvestableTree(level, center);
+        CropScan crops = countCropFields(level, center);
+        boolean treesAvailable = treeSource != null ? treeSource.treesAvailable() : hasHarvestableTree(level, center);
         int pickaxes = VillageIndustry.countAvailablePickaxes(level, center);
+        boolean furnaceAvailable = VillageIndustry.hasFurnace(level, center);
+        Totals reserved = measureReserved(level, center, now);
         return new VillageResourceDemandModel.Stock(
-            adults, woodUnits, stoneUnits, oreUnits, foodPoints, matureCrops,
-            plantableFarmland, seedUnits, treesAvailable, pickaxes,
-            level.getBiome(center).is(BiomeTags.HAS_VILLAGE_DESERT));
+            adults, totals.wood, totals.stone, totals.ore, totals.food, crops.matureCrops(),
+            crops.plantableFarmland(), totals.seeds, treesAvailable, pickaxes,
+            level.getBiome(center).is(BiomeTags.HAS_VILLAGE_DESERT),
+            totals.fuel, totals.iron, totals.saplings, furnaceAvailable,
+            reserved.wood, reserved.stone, reserved.ore, reserved.food);
     }
 
-    private static int[] addStack(ItemStack stack, int wood, int stone, int ore, int food) {
-        if (stack == null || stack.isEmpty()) return new int[] {wood, stone, ore, food};
-        int count = stack.getCount();
-        Block block = Block.byItem(stack.getItem());
+    /**
+     * Sums the item quantities already committed to READY/CLAIMED/IN_PROGRESS/DELIVERING orders.
+     * These are accounting numbers only; the physical items stay where the reservation system put them.
+     */
+    private static Totals measureReserved(ServerLevel level, BlockPos center, long now) {
+        Totals reserved = new Totals();
+        Map<String, Integer> reservations = VillageWorkOrders.reservedItemCounts(level, center, null, now);
+        for (Map.Entry<String, Integer> entry : reservations.entrySet()) {
+            ResourceLocation id = ResourceLocation.tryParse(entry.getKey());
+            if (id == null) continue;
+            Item item = BuiltInRegistries.ITEM.get(id);
+            if (item == null || item == Items.AIR) continue;
+            accumulate(reserved, item, Math.max(0, entry.getValue()));
+        }
+        return reserved;
+    }
+
+    /** One mutable pass over a stack so storage, inventories and reservations share one classifier. */
+    private static void accumulate(Totals totals, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return;
+        accumulate(totals, stack.getItem(), stack.getCount());
+    }
+
+    private static void accumulate(Totals totals, Item item, int rawCount) {
+        if (item == null || item == Items.AIR || rawCount <= 0) return;
+        int count = rawCount;
+        Block block = Block.byItem(item);
         if (block != Blocks.AIR) {
             BlockState state = block.defaultBlockState();
-            if (state.is(BlockTags.LOGS)) wood += count * 4;
-            else if (state.is(BlockTags.PLANKS)) wood += count;
+            if (state.is(BlockTags.LOGS)) totals.wood += count * 4;
+            else if (state.is(BlockTags.PLANKS)) totals.wood += count;
+            if (state.is(BlockTags.SAPLINGS)) totals.saplings += count;
         }
 
-        if (stack.is(Items.COBBLESTONE) || stack.is(Items.COBBLED_DEEPSLATE)
-            || stack.is(Items.STONE) || stack.is(Items.ANDESITE) || stack.is(Items.DIORITE)
-            || stack.is(Items.GRANITE) || stack.is(Items.TUFF) || stack.is(Items.SANDSTONE)
-            || stack.is(Items.RED_SANDSTONE) || stack.is(Items.TERRACOTTA)
-            || stack.is(Items.STONE_BRICKS)) {
-            stone += count;
+        if (item == Items.COBBLESTONE || item == Items.COBBLED_DEEPSLATE
+            || item == Items.STONE || item == Items.ANDESITE || item == Items.DIORITE
+            || item == Items.GRANITE || item == Items.TUFF || item == Items.SANDSTONE
+            || item == Items.RED_SANDSTONE || item == Items.TERRACOTTA
+            || item == Items.STONE_BRICKS) {
+            totals.stone += count;
         }
 
-        if (stack.is(Items.RAW_IRON) || stack.is(Items.RAW_COPPER) || stack.is(Items.RAW_GOLD)
-            || stack.is(Items.REDSTONE) || stack.is(Items.LAPIS_LAZULI)
-            || stack.is(Items.DIAMOND) || stack.is(Items.EMERALD)
-            || stack.is(Items.IRON_INGOT) || stack.is(Items.COPPER_INGOT) || stack.is(Items.GOLD_INGOT)) {
-            ore += count;
+        if (item == Items.RAW_IRON || item == Items.RAW_COPPER || item == Items.RAW_GOLD
+            || item == Items.REDSTONE || item == Items.LAPIS_LAZULI
+            || item == Items.DIAMOND || item == Items.EMERALD
+            || item == Items.IRON_INGOT || item == Items.COPPER_INGOT || item == Items.GOLD_INGOT) {
+            totals.ore += count;
         }
 
-        if (stack.is(Items.BREAD)) food += count * 4;
-        else if (stack.is(Items.CARROT) || stack.is(Items.POTATO) || stack.is(Items.BEETROOT)) food += count;
-        else if (stack.is(Items.WHEAT)) food += count;
-        return new int[] {wood, stone, ore, food};
+        // Iron is tracked twice on purpose: the coarse bucket keeps the old targets working while
+        // the precise bucket lets a miner hunt the specific metal the village is missing.
+        if (item == Items.RAW_IRON || item == Items.IRON_INGOT) {
+            totals.iron += count;
+        }
+
+        if (item == Items.COAL || item == Items.CHARCOAL) {
+            totals.fuel += count;
+        }
+
+        if (item == Items.BREAD) totals.food += count * 4;
+        else if (item == Items.CARROT || item == Items.POTATO || item == Items.BEETROOT) totals.food += count;
+        else if (item == Items.WHEAT) totals.food += count;
+
+        if (item == Items.WHEAT_SEEDS || item == Items.BEETROOT_SEEDS
+            || item == Items.CARROT || item == Items.POTATO) {
+            totals.seeds += count;
+        }
     }
 
     private static boolean hasHarvestableTree(ServerLevel level, BlockPos center) {
         int radius = Math.min(12, LivingVillagesConfig.TREE_SEARCH_RADIUS_BLOCKS.get());
+        int scanned = 0;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -2; dy <= 16; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
+                    scanned++;
                     if (!level.hasChunkAt(pos) || !level.getBlockState(pos).is(BlockTags.LOGS)) continue;
                     int logs = 0;
                     int leaves = 0;
@@ -187,53 +262,55 @@ public final class VillageResourcePlanner {
                             }
                         }
                     }
-                    if (leaves >= 3) return true;
+                    if (leaves >= 3) {
+                        VillageScanStats.recordScan(scanned);
+                        return true;
+                    }
                 }
             }
         }
+        VillageScanStats.recordScan(scanned);
         return false;
     }
 
-    private static int countPlantableFarmland(ServerLevel level, BlockPos center) {
-        int count = 0;
+    /**
+     * Counts ripe crops and empty owned farmland in a single pass over the same volume.
+     * Both counters used to walk the whole village box separately, doubling the block reads.
+     * Candidate tiles are collected first and their resident-group membership is then decided in one
+     * batch, which resolves the village center group once instead of once per tile.
+     */
+    private static CropScan countCropFields(ServerLevel level, BlockPos center) {
         int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                for (int dy = -3; dy <= 3; dy++) {
-                    BlockPos cropPos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(cropPos) || !level.hasChunkAt(cropPos.below())) continue;
-                    if (!level.getBlockState(cropPos).isAir()
-                        || !level.getBlockState(cropPos.below()).is(Blocks.FARMLAND)
-                        || level.getMaxLocalRawBrightness(cropPos) < 8
-                        || !VillageArea.isBlockInResidentGroup(level, center, cropPos.below())) continue;
-                    count++;
-                }
-            }
-        }
-        return count;
-    }
-
-    private static int countPlantingItems(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return 0;
-        return stack.is(Items.WHEAT_SEEDS) || stack.is(Items.BEETROOT_SEEDS)
-            || stack.is(Items.CARROT) || stack.is(Items.POTATO) ? stack.getCount() : 0;
-    }
-
-    private static int countMatureCrops(ServerLevel level, BlockPos center) {
-        int count = 0;
-        int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
+        List<BlockPos> matureCandidates = new ArrayList<>();
+        List<BlockPos> plantableCandidates = new ArrayList<>();
+        int scanned = 0;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -3; dy <= 3; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
+                    scanned++;
                     if (!level.hasChunkAt(pos)) continue;
                     BlockState state = level.getBlockState(pos);
-                    if (state.getBlock() instanceof CropBlock crop && crop.isMaxAge(state)
-                        && VillageArea.isBlockInResidentGroup(level, center, pos)) count++;
+                    if (state.getBlock() instanceof CropBlock crop && crop.isMaxAge(state)) {
+                        matureCandidates.add(pos.immutable());
+                        continue;
+                    }
+                    if (!state.isAir() || !level.hasChunkAt(pos.below())) continue;
+                    BlockPos soil = pos.below();
+                    scanned++;
+                    if (level.getBlockState(soil).is(Blocks.FARMLAND)
+                        && level.getMaxLocalRawBrightness(pos) >= 8) {
+                        plantableCandidates.add(soil.immutable());
+                    }
                 }
             }
         }
-        return count;
+        VillageScanStats.recordScan(scanned);
+        // Membership is decided in one batch: every tile asks about the same village center, and each
+        // separate question costs two wide entity area queries.
+        return new CropScan(
+            VillageArea.countInResidentGroup(level, center, matureCandidates),
+            VillageArea.countInResidentGroup(level, center, plantableCandidates));
     }
 
     private static boolean isStorage(BlockState state) {
@@ -242,22 +319,54 @@ public final class VillageResourcePlanner {
 
     private static String describe(
             VillageResourceDemandModel.Stock stock, VillageResourceDemandModel.Plan plan) {
-        return "запасы: дерево=" + stock.woodUnits()
-            + ", камень=" + stock.stoneUnits()
-            + ", руда/металлы=" + stock.oreUnits()
-            + ", еда=" + stock.foodPoints()
-            + "; нехватка: дерево=" + plan.needsWood()
-            + ", камень=" + plan.needsStone()
-            + ", руда=" + plan.needsOre()
-            + ", еда=" + plan.needsFood()
-            + "; зрелые поля=" + stock.matureCrops()
-            + ", пустых грядок=" + stock.plantableFarmland()
-            + ", семян/посадочных клубней=" + stock.availableSeeds()
-            + "; деревья рядом=" + plan.treesAvailable()
-            + "; рабочие: лесорубы=" + plan.desiredLumberjacks()
-            + ", шахтёры=" + plan.desiredMiners()
-            + ", фермеры=" + plan.desiredFarmers();
+        StringBuilder builder = new StringBuilder();
+        builder.append("запасы: дерево=").append(stock.woodUnits())
+            .append(" (свободно ").append(plan.freeWoodUnits())
+            .append(", в заказах ").append(Math.max(0, stock.woodUnits() - plan.freeWoodUnits())).append(')')
+            .append(", камень=").append(stock.stoneUnits())
+            .append(" (свободно ").append(plan.freeStoneUnits()).append(')')
+            .append(", руда=").append(stock.oreUnits())
+            .append(" (свободно ").append(plan.freeOreUnits()).append(')')
+            .append(", еда=").append(stock.foodPoints())
+            .append(" (свободно ").append(plan.freeFoodPoints()).append(')')
+            .append("; топливо=").append(stock.fuelUnits()).append('/').append(plan.targetFuelUnits())
+            .append(", железо=").append(stock.ironUnits()).append('/').append(plan.targetIronUnits())
+            .append(", саженцы=").append(stock.saplings()).append('/').append(plan.targetSaplings())
+            .append("; нехватка: дерево=").append(plan.needsWood())
+            .append(", камень=").append(plan.needsStone())
+            .append(", руда=").append(plan.needsOre())
+            .append(", еда=").append(plan.needsFood())
+            .append(", топливо=").append(plan.needsFuel())
+            .append(", железо=").append(plan.needsIron())
+            .append(", саженцы=").append(plan.needsSaplings())
+            .append("; зрелые поля=").append(stock.matureCrops())
+            .append(", пустых грядок=").append(stock.plantableFarmland())
+            .append(", семян=").append(stock.availableSeeds())
+            .append("; деревья рядом=").append(plan.treesAvailable())
+            .append("; рабочие: лесорубы=").append(plan.desiredLumberjacks())
+            .append(", шахтёры=").append(plan.desiredMiners())
+            .append(", фермеры=").append(plan.desiredFarmers());
+        return builder.toString();
     }
 
-    private record CachedPlan(VillageResourceDemandModel.Plan plan, long expiresAtTick) {}
+    /** Mutable accumulator so one classifier serves storage, inventories and reservations. */
+    private static final class Totals {
+        private int wood;
+        private int stone;
+        private int ore;
+        private int food;
+        private int seeds;
+        private int fuel;
+        private int iron;
+        private int saplings;
+    }
+
+    private record CropScan(int matureCrops, int plantableFarmland) {}
+
+    /**
+     * @param treesAvailable     the tree answer carried over while it is still fresh
+     * @param treesExpiresAtTick when the forest must be rescanned, which outlives {@code expiresAtTick}
+     */
+    private record CachedPlan(VillageResourceDemandModel.Plan plan, long expiresAtTick,
+                              boolean treesAvailable, long treesExpiresAtTick) {}
 }

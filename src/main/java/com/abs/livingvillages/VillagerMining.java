@@ -44,8 +44,8 @@ import java.util.Set;
  */
 public final class VillagerMining {
     private static final String P = "livingvillages_mining_";
-    private static final String ACTIVE = P + "active";
-    private static final String ORE_X = P + "ore_x", ORE_Y = P + "ore_y", ORE_Z = P + "ore_z";
+    static final String ACTIVE = P + "active";
+    static final String ORE_X = P + "ore_x", ORE_Y = P + "ore_y", ORE_Z = P + "ore_z";
     private static final String STARTED = P + "started", NEXT_SEARCH = P + "next_search";
     private static final String LAST_ORDER = P + "last_order";
     private static final String HAS_ROUTE = P + "has_route";
@@ -139,7 +139,8 @@ public final class VillagerMining {
         com.abs.livingvillages.domain.VillageResourceDemandModel.Plan demand =
             VillageResourcePlanner.getPlan(level, home);
         Item requestedQuarryOutput = VillageWorkOrders.pendingQuarryOutputItem(level, home);
-        if (!demand.needsMining() && requestedQuarryOutput == Items.AIR) return;
+        boolean oreDemand = demand.needsOreWork();
+        if (!demand.needsMining() && !oreDemand && requestedQuarryOutput == Items.AIR) return;
 
         BlockPos target;
         int targetKind;
@@ -147,7 +148,7 @@ public final class VillagerMining {
             target = findNearestQuarryBlock(level, villager, pickaxe, requestedQuarryOutput);
             targetKind = TARGET_QUARRY;
         } else {
-            target = demand.needsOre() ? findNearestOre(level, villager, pickaxe) : null;
+            target = oreDemand ? findNearestOre(level, villager, pickaxe, preferredOres(demand)) : null;
             targetKind = TARGET_ORE;
             // Use visible stone only when the village stock is below its actual stone-material target.
             if (target == null && demand.needsStone()) {
@@ -293,10 +294,39 @@ public final class VillagerMining {
         resetProgress(data);
     }
 
-    private static BlockPos findNearestOre(ServerLevel level, Villager villager, ItemStack tool) {
+    /**
+     * Orders the ore search by the village's concrete deficit instead of treating all ores as one
+     * bucket: coal first while the furnace has no fuel, iron next while tool metal is missing.
+     * An empty list keeps the plain nearest-ore behaviour.
+     */
+    private static List<Block> preferredOres(
+            com.abs.livingvillages.domain.VillageResourceDemandModel.Plan demand) {
+        if (demand == null) return List.of();
+        List<Block> preferred = new ArrayList<>(4);
+        if (demand.needsFuel()) {
+            preferred.add(Blocks.COAL_ORE);
+            preferred.add(Blocks.DEEPSLATE_COAL_ORE);
+        }
+        if (demand.needsIron()) {
+            preferred.add(Blocks.IRON_ORE);
+            preferred.add(Blocks.DEEPSLATE_IRON_ORE);
+        }
+        return preferred;
+    }
+
+    /**
+     * Nearest ore this miner may open. Package-private as a GameTest seam: the search budget and the
+     * rival-miner rule are asserted in world, they are not observable from the tick handler.
+     */
+    static BlockPos findNearestOre(ServerLevel level, Villager villager, ItemStack tool,
+                                   List<Block> preferredOres) {
         int radius = LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get();
         BlockPos origin = villager.blockPosition();
-        List<BlockPos> candidates = new ArrayList<>();
+        List<BlockPos> wanted = new ArrayList<>();
+        List<BlockPos> others = new ArrayList<>();
+        // Resolved once per search: the same area was scanned again for every candidate block.
+        List<BlockPos> reserved = reservedOreTargets(level, villager);
+        int scanned = 0;
         int surfaceY = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
             origin.getX(), origin.getZ());
         // Surface workers keep the cheaper vanilla-like scan. Once a miner is actually underground,
@@ -309,55 +339,31 @@ public final class VillagerMining {
                 if (dx * dx + dz * dz > radius * radius) continue;
                 for (int y = minY; y <= maxY; y++) {
                     BlockPos pos = new BlockPos(origin.getX() + dx, y, origin.getZ() + dz);
+                    scanned++;
                     if (!level.hasChunkAt(pos)) continue;
                     BlockState state = level.getBlockState(pos);
-                    if (isOre(state) && toolCanMine(tool, state) && !isReservedByAnotherMiner(level, villager, pos)
+                    // Cheapest tests first: state, safety, an exposed face, then the ray-traced work
+                    // position, and finally the reservation list resolved before the loop.
+                    if (isOre(state) && toolCanMine(tool, state)
                         && isSafeMineTarget(level, villager, pos, state)
+                        && !isReservedByAnotherMiner(reserved, pos)
                         && hasExposedFace(level, pos)
                         && findWorkPosition(level, villager, pos) != null) {
-                        candidates.add(pos.immutable());
+                        boolean deficitOre = preferredOres != null && preferredOres.contains(state.getBlock());
+                        (deficitOre ? wanted : others).add(pos.immutable());
                     }
                 }
             }
         }
-        candidates.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
-        return candidates.isEmpty() ? null : candidates.get(0);
-    }
-
-    /** True while the settlement's stone/sandstone stock is below the amount needed for tools, a furnace, and structural expansion. */
-    private static boolean needsCobblestone(ServerLevel level, Villager miner) {
-        int stoneStock = 0;
-        var inventory = miner.getInventory();
-        for (int i = 0; i < inventory.getContainerSize(); i++) {
-            ItemStack stack = inventory.getItem(i);
-            if (isCountedQuarryMaterial(stack)) stoneStock += stack.getCount();
-        }
-        BlockPos origin = VillagerRoles.getHome(miner);
-        if (origin == null) origin = miner.blockPosition();
-        int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                for (int dy = -4; dy <= 4; dy++) {
-                    BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
-                        || !VillageRegistry.isStorageForVillage(level, origin, pos)
-                        || !VillageReservations.isStorageAvailable(level, pos, miner)) continue;
-                    if (!(level.getBlockEntity(pos) instanceof Container container)) continue;
-                    for (int slot = 0; slot < container.getContainerSize(); slot++) {
-                        ItemStack stack = container.getItem(slot);
-                        if (isCountedQuarryMaterial(stack)) stoneStock += stack.getCount();
-                    }
-                }
-            }
-        }
-        return stoneStock < 112;
-    }
-
-    private static boolean isCountedQuarryMaterial(ItemStack stack) {
-        if (stack.isEmpty()) return false;
-        return stack.is(Items.COBBLESTONE) || stack.is(Items.SANDSTONE)
-            || stack.is(Items.RED_SANDSTONE) || stack.is(Items.TERRACOTTA)
-            || stack.is(Items.STONE_BRICKS);
+        // The search reports what it read: it runs on its own retry timer per miner, so an unnoticed
+        // growth of the radius or of the vertical window would be visible in the budget counters.
+        VillageScanStats.recordScan(scanned);
+        Comparator<BlockPos> byDistance =
+            Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos)));
+        wanted.sort(byDistance);
+        others.sort(byDistance);
+        if (!wanted.isEmpty()) return wanted.get(0);
+        return others.isEmpty() ? null : others.get(0);
     }
 
     /** Quarry only exposed, natural-looking stone/sandstone blocks; the normal pickaxe, reach and drop rules still apply. */
@@ -367,17 +373,20 @@ public final class VillagerMining {
         int radius = Math.min(16, LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
+        List<BlockPos> reserved = reservedOreTargets(level, villager);
+        int scanned = 0;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 if (dx * dx + dz * dz > radius * radius) continue;
                 for (int dy = -4; dy <= 3; dy++) {
                     BlockPos pos = origin.offset(dx, dy, dz);
+                    scanned++;
                     if (!level.hasChunkAt(pos)) continue;
                     BlockState state = level.getBlockState(pos);
                     if (!isQuarryBlock(state) || !toolCanMine(tool, state)
                         || (requiredOutput != Items.AIR && !quarryBlockProduces(state, requiredOutput))
                         || !isSafeMineTarget(level, villager, pos, state)
-                        || isReservedByAnotherMiner(level, villager, pos)) continue;
+                        || isReservedByAnotherMiner(reserved, pos)) continue;
                     if (!hasExposedFace(level, pos)) continue;
                     if (findWorkPosition(level, villager, pos) != null) {
                         candidates.add(pos.immutable());
@@ -385,6 +394,7 @@ public final class VillagerMining {
                 }
             }
         }
+        VillageScanStats.recordScan(scanned);
         candidates.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
         return candidates.isEmpty() ? null : candidates.get(0);
     }
@@ -398,10 +408,13 @@ public final class VillagerMining {
         pending.add(start.immutable());
         while (!pending.isEmpty() && found.size() < MAX_ORE_VEIN_BLOCKS) {
             BlockPos pos = pending.removeFirst();
+            // Marked before the read: a position that is not part of the vein used to be re-enqueued by
+            // every neighbouring block of the vein and read again each time (up to 26 reads per position).
+            if (!visited.add(pos.asLong())) continue;
             if (Math.abs(pos.getX() - start.getX()) > 8 || Math.abs(pos.getZ() - start.getZ()) > 8
                 || Math.abs(pos.getY() - start.getY()) > 6 || !level.hasChunkAt(pos)) continue;
             BlockState state = level.getBlockState(pos);
-            if (state.getBlock() != targetBlock || !isOre(state) || !visited.add(pos.asLong())) continue;
+            if (state.getBlock() != targetBlock || !isOre(state)) continue;
             found.add(pos.asLong());
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dy = -1; dy <= 1; dy++) {
@@ -462,16 +475,31 @@ public final class VillagerMining {
             || state.is(Blocks.TERRACOTTA);
     }
 
-    private static boolean isReservedByAnotherMiner(ServerLevel level, Villager self, BlockPos candidate) {
-        AABB area = new AABB(self.blockPosition()).inflate(
-            LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get() + 4.0D, 24.0D,
-            LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get() + 4.0D);
+    /**
+     * Active extraction targets of the other miners, resolved once per search.
+     *
+     * <p>This used to be a per-candidate question: a vein with twenty exposed ores paid twenty entity
+     * scans of the same area inside one search, and none of them was reported to
+     * {@link VillageScanStats}. The area, the filter and the answer are unchanged.</p>
+     */
+    private static List<BlockPos> reservedOreTargets(ServerLevel level, Villager self) {
+        int radius = LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get();
+        AABB area = new AABB(self.blockPosition()).inflate(radius + 4.0D, 24.0D, radius + 4.0D);
+        List<BlockPos> reserved = new ArrayList<>(4);
         for (Villager other : level.getEntitiesOfClass(Villager.class, area,
             v -> v != self && v.isAlive() && VillagerRoles.isMiner(v))) {
             CompoundTag data = other.getPersistentData();
             if (!data.getBoolean(ACTIVE) || !data.contains(ORE_X) || !data.contains(ORE_Y) || !data.contains(ORE_Z)) continue;
-            BlockPos reserved = targetOre(data);
-            if (reserved.distSqr(candidate) <= 36.0D) return true;
+            reserved.add(targetOre(data));
+        }
+        VillageScanStats.recordEntityAreaScan();
+        return reserved;
+    }
+
+    /** True when another miner already holds an extraction target within six blocks of the candidate. */
+    private static boolean isReservedByAnotherMiner(List<BlockPos> reserved, BlockPos candidate) {
+        for (BlockPos other : reserved) {
+            if (other.distSqr(candidate) <= 36.0D) return true;
         }
         return false;
     }
@@ -536,27 +564,23 @@ public final class VillagerMining {
 
         int radius = Math.min(12, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
-        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
-        if (ownershipCenter == null) ownershipCenter = origin;
+        BlockPos home = VillagerRoles.getHome(villager);
+        // Captured by the storage predicate, so it is bound once and never reassigned.
+        final BlockPos ownershipCenter = home == null ? origin : home;
         BlockPos bestStoragePos = null;
         int bestStorageSlot = -1;
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                for (int dy = -4; dy <= 4; dy++) {
-                    BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
-                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
-                        || !VillageReservations.isStorageAvailable(level, pos, villager)
-                        || !(level.getBlockEntity(pos) instanceof Container container)) continue;
-                    for (int slot = 0; slot < container.getContainerSize(); slot++) {
-                        int tier = pickaxeTier(container.getItem(slot));
-                        if (tier > bestTier) {
-                            bestTier = tier;
-                            bestStoragePos = pos.immutable();
-                            bestStorageSlot = slot;
-                            bestInventorySlot = -1;
-                        }
-                    }
+        // Same box as the old nested loops (25x25x9 = 5 625 positions at the default radius), but in
+        // ring order and reported once: among pickaxes of the same tier the nearest storage now wins.
+        for (BlockPos pos : VillageScanRings.collectInBox(origin, radius, 4, 4,
+            candidate -> isAvailableToolStorage(level, ownershipCenter, villager, candidate))) {
+            if (!(level.getBlockEntity(pos) instanceof Container container)) continue;
+            for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                int tier = pickaxeTier(container.getItem(slot));
+                if (tier > bestTier) {
+                    bestTier = tier;
+                    bestStoragePos = pos.immutable();
+                    bestStorageSlot = slot;
+                    bestInventorySlot = -1;
                 }
             }
         }
@@ -610,6 +634,14 @@ public final class VillagerMining {
         return isPickaxe(held) ? held : ItemStack.EMPTY;
     }
 
+
+    /** One tool-storage candidate: loaded, a real container, owned by the settlement, not reserved. */
+    private static boolean isAvailableToolStorage(ServerLevel level, BlockPos ownershipCenter,
+                                                  Villager villager, BlockPos pos) {
+        return level.hasChunkAt(pos) && isStorage(level.getBlockState(pos))
+            && VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
+            && VillageReservations.isStorageAvailable(level, pos, villager);
+    }
 
     /** Checks that the villager inventory has capacity before moving an existing tool from storage. */
     private static boolean inventoryCanFit(Container inventory, ItemStack output) {
@@ -725,28 +757,11 @@ public final class VillagerMining {
         return hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target);
     }
 
-    private static void storeOrDrop(Villager villager, ServerLevel level, BlockPos pos, ItemStack stack) {
+    /** Real drops go into the worker's inventory as the same stack; only the rest hits the ground. */
+    static void storeOrDrop(Villager villager, ServerLevel level, BlockPos pos, ItemStack stack) {
         if (stack.isEmpty()) return;
-        var inventory = villager.getInventory();
-        for (int pass = 0; pass < 2 && !stack.isEmpty(); pass++) {
-            for (int slot = 0; slot < inventory.getContainerSize() && !stack.isEmpty(); slot++) {
-                ItemStack existing = inventory.getItem(slot);
-                if (pass == 0) {
-                    if (existing.isEmpty() || !ItemStack.isSameItemSameComponents(existing, stack)) continue;
-                    int room = Math.min(existing.getMaxStackSize(), inventory.getMaxStackSize()) - existing.getCount();
-                    if (room > 0) {
-                        int moved = Math.min(room, stack.getCount());
-                        existing.grow(moved);
-                        stack.shrink(moved);
-                    }
-                } else if (existing.isEmpty()) {
-                    int moved = Math.min(stack.getCount(), Math.min(stack.getMaxStackSize(), inventory.getMaxStackSize()));
-                    inventory.setItem(slot, stack.split(moved));
-                }
-            }
-        }
-        inventory.setChanged();
-        if (!stack.isEmpty()) Block.popResource(level, pos, stack);
+        ItemStack rejected = VillageItemTransfers.insertReal(villager.getInventory(), stack);
+        if (!rejected.isEmpty()) Block.popResource(level, pos, rejected);
     }
 
     private static BlockPos targetOre(CompoundTag data) {

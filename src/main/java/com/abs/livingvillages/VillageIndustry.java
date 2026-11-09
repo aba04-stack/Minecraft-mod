@@ -24,9 +24,12 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.WeakHashMap;
 import java.util.function.Predicate;
 
 /**
@@ -52,6 +55,24 @@ public final class VillageIndustry {
         Items.MANGROVE_PLANKS, Items.CHERRY_PLANKS, Items.BAMBOO_PLANKS, Items.CRIMSON_PLANKS,
         Items.WARPED_PLANKS, Items.STICK, Items.OAK_LOG, Items.SPRUCE_LOG, Items.BIRCH_LOG,
         Items.JUNGLE_LOG, Items.ACACIA_LOG, Items.DARK_OAK_LOG, Items.MANGROVE_LOG, Items.CHERRY_LOG);
+
+    /** How long a resolved workshop/furnace presence answer stays valid, in ticks (5 s). */
+    private static final long WORK_BLOCK_CACHE_TICKS = 100L;
+    /** Cached presence entries are dropped per settlement once this many are held for one level. */
+    private static final int MAX_CACHED_SETTLEMENTS = 64;
+    private static final Map<ServerLevel, Map<UUID, CachedPresence>> CRAFTING_TABLE_CACHE = new WeakHashMap<>();
+    private static final Map<ServerLevel, Map<UUID, CachedPresence>> FURNACE_CACHE = new WeakHashMap<>();
+
+    /**
+     * One resolved presence answer for one settlement.
+     *
+     * @param present       whether the block was found inside the village radius
+     * @param expiresAtTick game time from which the answer must be re-scanned
+     */
+    private record CachedPresence(boolean present, long expiresAtTick) {}
+
+    /** Pickaxe and sword supply resolved in a single storage pass. */
+    public record AvailableTools(int pickaxes, int swords) {}
 
     private VillageIndustry() {}
 
@@ -199,17 +220,105 @@ public final class VillageIndustry {
     }
 
     public static boolean hasCraftingTable(ServerLevel level, BlockPos center) {
-        return hasBlock(level, center, Blocks.CRAFTING_TABLE, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
+        return cachedPresence(level, center, Blocks.CRAFTING_TABLE, CRAFTING_TABLE_CACHE);
+    }
+
+    /** A real furnace in the village makes fuel demand meaningful for the resource planner. */
+    public static boolean hasFurnace(ServerLevel level, BlockPos center) {
+        return cachedPresence(level, center, Blocks.FURNACE, FURNACE_CACHE);
+    }
+
+    /**
+     * Resolves one workstation question and remembers the answer for {@link #WORK_BLOCK_CACHE_TICKS}.
+     *
+     * <p>Role assignment asks for a crafting table every second and the resource planner asks for a
+     * furnace, both over a village-radius box. A ring scan answers "present" after a few hundred block
+     * reads, but "absent" is only known after the whole box has been read — which is exactly the state
+     * of a young settlement. Caching bounds that worst case to one full box per settlement per five
+     * seconds instead of one per second. Each block type keeps its own entry, so asking about a
+     * workshop never pays for the furnace scan.</p>
+     *
+     * <p>Settlements whose identity is not resolved are never cached, and an entry is dropped as soon as
+     * the settlement places such a block itself ({@link #invalidateWorkBlocks}). A workstation placed or
+     * removed by a player becomes visible within one cache interval.</p>
+     */
+    private static boolean cachedPresence(ServerLevel level, BlockPos center, Block block,
+                                          Map<ServerLevel, Map<UUID, CachedPresence>> cache) {
+        if (level == null || center == null) return false;
+        int radius = LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get();
+        UUID villageId = VillageRegistry.villageId(level, center);
+        if (villageId == null) return hasBlock(level, center, block, radius);
+        long now = level.getGameTime();
+        Map<UUID, CachedPresence> byVillage = cache.computeIfAbsent(level, ignored -> new HashMap<>());
+        CachedPresence cached = byVillage.get(villageId);
+        if (cached != null && now < cached.expiresAtTick()) return cached.present();
+        boolean present = hasBlock(level, center, block, radius);
+        byVillage.put(villageId, new CachedPresence(present, now + WORK_BLOCK_CACHE_TICKS));
+        if (byVillage.size() > MAX_CACHED_SETTLEMENTS) {
+            byVillage.values().removeIf(entry -> now >= entry.expiresAtTick());
+        }
+        return present;
+    }
+
+    /** Drops the cached workstation answers of the settlement owning {@code center}, so it rescans. */
+    public static void invalidateWorkBlocks(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return;
+        UUID villageId = VillageRegistry.villageId(level, center);
+        dropPresence(CRAFTING_TABLE_CACHE, level, villageId);
+        dropPresence(FURNACE_CACHE, level, villageId);
+    }
+
+    private static void dropPresence(Map<ServerLevel, Map<UUID, CachedPresence>> cache,
+                                     ServerLevel level, UUID villageId) {
+        Map<UUID, CachedPresence> byVillage = cache.get(level);
+        if (byVillage == null || byVillage.isEmpty()) return;
+        if (villageId == null) byVillage.clear();
+        else byVillage.remove(villageId);
     }
 
     public static int countAvailablePickaxes(ServerLevel level, BlockPos center) {
-        return countTools(level, center, VillageIndustry::isPickaxe,
-            villager -> isUnassignedAvailableAdult(villager) || VillagerRoles.isMiner(villager));
+        return countAvailableTools(level, center).pickaxes();
     }
 
     public static int countAvailableSwords(ServerLevel level, BlockPos center) {
-        return countTools(level, center, VillageIndustry::isSword,
-            villager -> isUnassignedAvailableAdult(villager) || VillagerRoles.isGuard(villager));
+        return countAvailableTools(level, center).swords();
+    }
+
+    /**
+     * Counts the pickaxes and swords a settlement can actually put to work, in a single storage pass.
+     *
+     * <p>Role assignment needs both numbers every second. Counting them one at a time walked the whole
+     * storage box twice and re-read every villager inventory twice. Sharing the pass halves the reads
+     * and keeps both totals exactly as they were: the same storages, the same villager eligibility
+     * rules, the same stack counts.</p>
+     */
+    public static AvailableTools countAvailableTools(ServerLevel level, BlockPos center) {
+        int pickaxes = 0;
+        int swords = 0;
+        for (StorageRef ref : findStorages(level, center, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) {
+            Container container = ref.container();
+            for (int i = 0; i < container.getContainerSize(); i++) {
+                ItemStack stack = container.getItem(i);
+                if (isPickaxe(stack)) pickaxes += stack.getCount();
+                if (isSword(stack)) swords += stack.getCount();
+            }
+        }
+        for (Villager villager : VillageArea.findVillagers(level, center)) {
+            // A tool in an unrelated worker's pockets is not a village-wide tool supply.
+            boolean freeAdult = isUnassignedAvailableAdult(villager);
+            boolean minerSupply = freeAdult || VillagerRoles.isMiner(villager);
+            boolean guardSupply = freeAdult || VillagerRoles.isGuard(villager);
+            if (!minerSupply && !guardSupply) continue;
+            ItemStack held = villager.getMainHandItem();
+            if (minerSupply && isPickaxe(held)) pickaxes += held.getCount();
+            if (guardSupply && isSword(held)) swords += held.getCount();
+            for (int i = 0; i < villager.getInventory().getContainerSize(); i++) {
+                ItemStack stack = villager.getInventory().getItem(i);
+                if (minerSupply && isPickaxe(stack)) pickaxes += stack.getCount();
+                if (guardSupply && isSword(stack)) swords += stack.getCount();
+            }
+        }
+        return new AvailableTools(pickaxes, swords);
     }
 
     /** Do not assign a specialist unless that specific villager can reach a real tool or storage containing one. */
@@ -229,13 +338,40 @@ public final class VillageIndustry {
         }
         if (!(villager.level() instanceof ServerLevel level)) return false;
         int radius = Math.min(maxRadius, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
-        for (StorageRef ref : findStorages(level, villager.blockPosition(), radius)) {
-            Container container = ref.container();
-            for (int i = 0; i < container.getContainerSize(); i++) {
-                if (predicate.test(container.getItem(i))) return true;
+        return hasStorageItemNear(level, villager.blockPosition(), radius, predicate);
+    }
+
+    /**
+     * True when an available village storage within {@code radius} of {@code origin} holds a matching
+     * stack.
+     *
+     * <p>Storages are visited ring by ring and the search stops at the first match, so the common case
+     * — a chest beside the worker — costs a handful of block reads. Collecting every storage with
+     * {@code findStorages} first walked the whole box for each candidate villager, once for pickaxes
+     * and once for swords, every second.</p>
+     */
+    private static boolean hasStorageItemNear(ServerLevel level, BlockPos origin, int radius,
+                                              Predicate<ItemStack> predicate) {
+        int scanRadius = Math.min(radius, 24);
+        int[] scanned = new int[1];
+        boolean found = VillageScanRings.walk(scanRadius, (dx, dz) -> {
+            for (int dy = -4; dy <= 4; dy++) {
+                BlockPos pos = origin.offset(dx, dy, dz);
+                scanned[0]++;
+                if (!level.hasChunkAt(pos)) continue;
+                BlockState state = level.getBlockState(pos);
+                if (!isStorage(state)
+                    || !VillageRegistry.isStorageForVillage(level, origin, pos)
+                    || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
+                if (!(level.getBlockEntity(pos) instanceof Container container)) continue;
+                for (int i = 0; i < container.getContainerSize(); i++) {
+                    if (predicate.test(container.getItem(i))) return true;
+                }
             }
-        }
-        return false;
+            return false;
+        });
+        VillageScanStats.recordScan(scanned[0]);
+        return found;
     }
 
     private static boolean isUnassignedAvailableAdult(Villager villager) {
@@ -249,28 +385,6 @@ public final class VillageIndustry {
             && !data.getBoolean("livingvillages_treework_replant_active")
             && !data.getBoolean("livingvillages_logistics_active")
             && !data.getBoolean("livingvillages_autonomy_target_active");
-    }
-
-    private static int countTools(ServerLevel level, BlockPos center, Predicate<ItemStack> predicate,
-                                  Predicate<Villager> workerCanUseTool) {
-        int total = 0;
-        for (StorageRef ref : findStorages(level, center, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get())) {
-            Container container = ref.container();
-            for (int i = 0; i < container.getContainerSize(); i++) {
-                ItemStack stack = container.getItem(i);
-                if (predicate.test(stack)) total += stack.getCount();
-            }
-        }
-        for (Villager villager : VillageArea.findVillagers(level, center)) {
-            // A tool in an unrelated worker's pockets is not a village-wide tool supply.
-            if (!workerCanUseTool.test(villager)) continue;
-            if (predicate.test(villager.getMainHandItem())) total += villager.getMainHandItem().getCount();
-            for (int i = 0; i < villager.getInventory().getContainerSize(); i++) {
-                ItemStack stack = villager.getInventory().getItem(i);
-                if (predicate.test(stack)) total += stack.getCount();
-            }
-        }
-        return total;
     }
 
     private static boolean isPickaxe(ItemStack stack) {
@@ -353,6 +467,9 @@ public final class VillageIndustry {
                     return false;
                 }
                 VillageRegistry.isWorkBlockForVillage(level, center, site);
+                // The settlement just answered its own question: role assignment must see the workshop
+                // on the next pass instead of waiting for the presence cache to expire.
+                invalidateWorkBlocks(level, center);
                 return true;
             }
         }
@@ -514,6 +631,7 @@ public final class VillageIndustry {
             }
             if (level.setBlock(site, Blocks.FURNACE.defaultBlockState(), 3)) {
                 VillageRegistry.isWorkBlockForVillage(level, center, site);
+                invalidateWorkBlocks(level, center);
                 return true;
             }
             insertIntoContainer(container, new ItemStack(Items.COBBLESTONE, 8));
@@ -627,36 +745,27 @@ public final class VillageIndustry {
             || data.getBoolean(VillageCraftingJobs.ACTIVE_KEY);
     }
 
+    /**
+     * Presence of a workstation inside the village box, resolved ring by ring so a nearby answer costs
+     * a few hundred block reads instead of the whole volume.
+     */
     private static boolean hasBlock(ServerLevel level, BlockPos center, Block block, int radius) {
-        return findNearestBlock(level, center, block, radius) != null;
+        return VillageScanRings.hasOwned(level, center, block, radius, 8, 8);
     }
 
+    /** Nearest workstation inside the village box; the ring walk stops once no ring can beat it. */
     private static BlockPos findNearestBlock(ServerLevel level, BlockPos center, Block block, int radius) {
-        BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                for (int dy = -8; dy <= 8; dy++) {
-                    BlockPos pos = center.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos)) continue;
-                    net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
-                    if (!state.is(block)) continue;
-                    if (VillageRegistry.isWorkBlockState(state)
-                        && !VillageRegistry.isWorkBlockForVillage(level, center, pos)) continue;
-                    double distance = pos.distSqr(center);
-                    if (distance < bestDistance) { bestDistance = distance; best = pos.immutable(); }
-                }
-            }
-        }
-        return best;
+        return VillageScanRings.nearestOwned(level, center, block, radius, 8, 8);
     }
 
     private static List<BlockPos> findBlocks(ServerLevel level, BlockPos center, Block block, int radius) {
         List<BlockPos> found = new ArrayList<>();
+        int scanned = 0;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
+                    scanned++;
                     if (!level.hasChunkAt(pos)) continue;
                     net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
                     if (!state.is(block)) continue;
@@ -666,6 +775,7 @@ public final class VillageIndustry {
                 }
             }
         }
+        VillageScanStats.recordScan(scanned);
         found.sort(Comparator.comparingDouble(pos -> pos.distSqr(center)));
         return found;
     }
@@ -872,34 +982,48 @@ public final class VillageIndustry {
         if (plan.needsFood() && plan.availableSeeds() == 0 && plan.matureCrops() == 0) {
             return "Старт: для фермы нужны 24 семени одного вида, мотыга, ведро воды и компостер.";
         }
+        if (plan.needsFuel()) {
+            return "Дефицит: нет угля или древесного угля — плавка встанет, пока шахтёр не добудет настоящее топливо.";
+        }
+        if (plan.needsIron()) {
+            return "Дефицит: нет железа — кирки, мечи и ножницы требуют настоящих слитков.";
+        }
+        if (plan.needsSaplings()) {
+            return "Дефицит: нет саженцев — после вырубки лес не восстановится сам.";
+        }
         return "Старт: общий склад и верстак готовы; жители используют только настоящие ресурсы.";
     }
 
+    /** Ring-ordered: a storage next to the center answers the question after a few block reads. */
     private static boolean hasStorageBlock(ServerLevel level, BlockPos center, int radius) {
         if (level == null || center == null) return false;
         int scanRadius = Math.min(radius, 24);
-        for (int dx = -scanRadius; dx <= scanRadius; dx++) {
-            for (int dz = -scanRadius; dz <= scanRadius; dz++) {
-                for (int dy = -4; dy <= 4; dy++) {
-                    BlockPos pos = center.offset(dx, dy, dz);
-                    if (level.hasChunkAt(pos)
-                        && isStorage(level.getBlockState(pos))
-                        && VillageRegistry.isStorageForVillage(level, center, pos)) {
-                        return true;
-                    }
+        int[] scanned = new int[1];
+        boolean found = VillageScanRings.walk(scanRadius, (dx, dz) -> {
+            for (int dy = -4; dy <= 4; dy++) {
+                BlockPos pos = center.offset(dx, dy, dz);
+                scanned[0]++;
+                if (level.hasChunkAt(pos)
+                    && isStorage(level.getBlockState(pos))
+                    && VillageRegistry.isStorageForVillage(level, center, pos)) {
+                    return true;
                 }
             }
-        }
-        return false;
+            return false;
+        });
+        VillageScanStats.recordScan(scanned[0]);
+        return found;
     }
 
     private static List<StorageRef> findStorages(ServerLevel level, BlockPos center, int radius) {
         List<StorageRef> refs = new ArrayList<>();
         int scanRadius = Math.min(radius, 24);
+        int scanned = 0;
         for (int dx = -scanRadius; dx <= scanRadius; dx++) {
             for (int dz = -scanRadius; dz <= scanRadius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos pos = center.offset(dx, dy, dz);
+                    scanned++;
                     if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
                         || !VillageRegistry.isStorageForVillage(level, center, pos)
                         || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
@@ -908,6 +1032,7 @@ public final class VillageIndustry {
                 }
             }
         }
+        VillageScanStats.recordScan(scanned);
         refs.sort(Comparator.comparingDouble(ref -> ref.pos().distSqr(center)));
         return refs;
     }

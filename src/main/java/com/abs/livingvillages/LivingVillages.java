@@ -33,8 +33,11 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.function.Predicate;
 import com.abs.livingvillages.domain.VillageWorkOrderModel;
 
@@ -618,19 +621,25 @@ public final class LivingVillages {
     }
 
     static int countFarmland(ServerLevel level, BlockPos center) {
-        int count = 0;
         // Farm projects search no farther than 28 blocks from the village center. Include that
         // complete reach even when the configured resident radius is smaller.
         int radius = Math.max(28, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
         BlockPos min = center.offset(-radius, -8, -radius);
         BlockPos max = center.offset(radius, 8, radius);
+        List<BlockPos> candidates = new ArrayList<>();
+        int scanned = 0;
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
             // Never force-load terrain, and do not count a neighbor settlement's farmland.
+            scanned++;
             if (!level.hasChunkAt(pos)) continue;
             if (!level.getBlockState(pos).is(Blocks.FARMLAND)) continue;
-            if (VillageArea.isBlockInResidentGroup(level, center, pos)) count++;
+            candidates.add(pos.immutable());
         }
-        return count;
+        VillageScanStats.recordScan(scanned);
+        // Ownership of every tile is one and the same question about this village center, and each
+        // separate ask costs two entity area queries over a wide box. Deciding them in one batch keeps
+        // the counted result identical while resolving the center group once per scan.
+        return VillageArea.countInResidentGroup(level, center, candidates);
     }
 
     private BlockPos findFarmSite(ServerLevel level, BlockPos center) {
@@ -903,12 +912,24 @@ public final class LivingVillages {
 
     private static void rememberActiveArea(List<ActiveArea> checked, ServerLevel level, List<Villager> villagers) {
         if (villagers.isEmpty()) return;
-        checked.add(new ActiveArea(level, villagers.stream().map(v -> v.getUUID().toString()).toList()));
+        Set<UUID> residentIds = new HashSet<>(Math.max(8, villagers.size() * 2));
+        for (Villager villager : villagers) residentIds.add(villager.getUUID());
+        checked.add(new ActiveArea(level, residentIds));
     }
 
-    private record ActiveArea(ServerLevel level, List<String> residentIds) {
+    /**
+     * Already-processed resident group, keyed by villager identity.
+     *
+     * <p>Overlap used to be tested against a {@code List<String>} of UUID text, which allocated a string
+     * per villager per comparison and scanned the list linearly. The deduplication decision is the same:
+     * two candidate centers describe one settlement when they share at least one resident.</p>
+     */
+    private record ActiveArea(ServerLevel level, Set<UUID> residentIds) {
         private boolean overlaps(List<Villager> villagers) {
-            return villagers.stream().anyMatch(v -> residentIds.contains(v.getUUID().toString()));
+            for (Villager villager : villagers) {
+                if (residentIds.contains(villager.getUUID())) return true;
+            }
+            return false;
         }
     }
 

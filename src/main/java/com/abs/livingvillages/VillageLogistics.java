@@ -24,7 +24,6 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -158,27 +157,48 @@ public final class VillageLogistics {
     /**
      * Returns null when no materialized pending demand exists (legacy stockpiling mode),
      * or an exact shortage map for OPEN/WAITING orders.
+     *
+     * <p>The board hands out an immutable snapshot ({@code Map.copyOf}), while the pickup loop
+     * decrements whatever it actually collected. Mutating the snapshot itself threw
+     * {@code UnsupportedOperationException} from inside the entity tick event, which is a server
+     * crash the first time a courier picked up a drop a pending order was really waiting for.</p>
      */
     private static Map<String, Integer> pendingMaterialDeficits(Villager courier, ServerLevel level) {
         BlockPos center = VillagerRoles.getHome(courier);
         if (center == null) center = courier.blockPosition();
-        return VillageWorkOrders.pendingMaterialPickupDeficits(level, center);
+        Map<String, Integer> deficits = VillageWorkOrders.pendingMaterialPickupDeficits(level, center);
+        return deficits == null ? null : new HashMap<>(deficits);
     }
 
-    private static void collectNearbyMaterials(
+    /**
+     * Collects loose materials this settlement's pending orders are still waiting for, and returns how
+     * many items really moved into the courier's inventory.
+     *
+     * <p>Visible for in-world tests: the courier route is driven by an entity tick event, which a
+     * GameTest cannot fire directly.</p>
+     */
+    public static int collectPendingMaterials(Villager villager, ServerLevel level) {
+        if (villager == null || level == null) return 0;
+        return collectNearbyMaterials(villager, level, pendingMaterialDeficits(villager, level));
+    }
+
+    private static int collectNearbyMaterials(
         Villager villager,
         ServerLevel level,
         Map<String, Integer> materialDeficits
     ) {
         AABB area = villager.getBoundingBox().inflate(PICKUP_RADIUS, 1.5D, PICKUP_RADIUS);
+        // The delay check runs after the cheap item-kind test so only relevant drops pay for it.
         List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, area,
             item -> item.isAlive() && isRawResource(item.getItem())
-                && villager.distanceToSqr(item) <= (double) PICKUP_RADIUS * PICKUP_RADIUS);
+                && villager.distanceToSqr(item) <= (double) PICKUP_RADIUS * PICKUP_RADIUS
+                && pickupDelayHasExpired(item));
         drops.sort(Comparator
             .comparingInt((ItemEntity entity) -> materialDeficits == null ? 0
                 : -materialDeficits.getOrDefault(BuiltInRegistries.ITEM.getKey(entity.getItem().getItem()).toString(), 0))
             .thenComparingDouble(villager::distanceToSqr));
 
+        int collected = 0;
         for (ItemEntity entity : drops) {
             if (!entity.isAlive()) continue;
             ItemStack entityStack = entity.getItem();
@@ -196,37 +216,73 @@ public final class VillageLogistics {
 
             entityStack.shrink(moved);
             if (entityStack.isEmpty()) entity.discard();
+            collected += moved;
             if (materialDeficits != null) materialDeficits.put(itemId, Math.max(0, requested - moved));
             villager.getInventory().setChanged();
         }
+        return collected;
     }
 
+    /**
+     * Respects the vanilla pickup delay: a player gets 40 ticks to take a dropped stack back, and this
+     * mod's own food handoff delays its drops by 10 ticks. A courier must wait its turn like everybody
+     * else, otherwise loose resources vanish from under the player's cursor.
+     *
+     * <p>{@code ItemEntity} keeps the delay in a private field and these mappings publish no getter for
+     * it (only {@code setPickUpDelay}/{@code setNoPickUpDelay}), so the value is read from the entity's
+     * own save data, where vanilla writes it under {@code PickupDelay}. The probe costs one small
+     * compound tag per candidate drop and never touches the world.</p>
+     */
+    private static boolean pickupDelayHasExpired(ItemEntity entity) {
+        CompoundTag probe = new CompoundTag();
+        entity.saveWithoutId(probe);
+        return probe.getShort("PickupDelay") <= 0;
+    }
+
+    /**
+     * Nearest settlement storage this courier may deliver to, with a safe place to stand next to it.
+     *
+     * <p>The candidate box is the same one the previous scan covered - {@code radius} horizontally and
+     * four blocks vertically around the courier - but the walk goes outward in rings and stops at the
+     * first storage that is owned, reserved for this courier, has room and has a safe stand. Collecting
+     * every candidate first used to read all 33x33x9 = 9,801 positions even when the chest was two
+     * blocks away. Between exactly equidistant storages the chosen one may differ from the old sorted
+     * order; a courier treats them as interchangeable.</p>
+     */
     private static StorageTarget findNearestStorageWithRoom(Villager villager, ServerLevel level) {
         int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
         BlockPos origin = villager.blockPosition();
-        BlockPos ownershipCenter = VillagerRoles.getHome(villager);
-        if (ownershipCenter == null) ownershipCenter = origin;
-        List<BlockPos> storagePositions = new ArrayList<>();
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                for (int dy = -4; dy <= 4; dy++) {
-                    BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
-                        || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
-                        || !VillageReservations.isStorageAvailable(level, pos, villager)) continue;
-                    if (!(level.getBlockEntity(pos) instanceof Container container) || !hasAnySpace(villager, container)) continue;
-                    storagePositions.add(pos.immutable());
+        BlockPos home = VillagerRoles.getHome(villager);
+        // Captured by the scan predicate below, so it is bound once and never reassigned.
+        final BlockPos ownershipCenter = home == null ? origin : home;
+        BlockPos[] standOut = new BlockPos[1];
+        BlockPos storage = VillageScanRings.nearestInBox(origin, origin, radius, 4, 4, pos -> {
+            if (!level.hasChunkAt(pos) || !isStorage(level.getBlockState(pos))
+                || !VillageRegistry.isStorageForVillage(level, ownershipCenter, pos)
+                || !VillageReservations.isStorageAvailable(level, pos, villager)) return false;
+            if (!(level.getBlockEntity(pos) instanceof Container container) || !hasAnySpace(villager, container)) {
+                return false;
+            }
+            for (Direction direction : HORIZONTAL) {
+                BlockPos stand = pos.relative(direction);
+                if (isSafeStand(level, stand)) {
+                    standOut[0] = stand.immutable();
+                    return true;
                 }
             }
-        }
-        storagePositions.sort(Comparator.comparingDouble(pos -> villager.distanceToSqr(Vec3.atCenterOf(pos))));
-        for (BlockPos storage : storagePositions) {
-            for (Direction direction : HORIZONTAL) {
-                BlockPos stand = storage.relative(direction);
-                if (isSafeStand(level, stand)) return new StorageTarget(storage, stand.immutable());
-            }
-        }
-        return null;
+            return false;
+        });
+        return storage == null || standOut[0] == null ? null : new StorageTarget(storage, standOut[0]);
+    }
+
+    /**
+     * The storage a courier would deliver to, or {@code null}. Visible for in-world tests: the delivery
+     * route itself is driven by an entity tick event, which a GameTest cannot fire directly.
+     */
+    static BlockPos findCourierStorage(Villager villager, ServerLevel level) {
+        if (villager == null || level == null) return null;
+        StorageTarget target = findNearestStorageWithRoom(villager, level);
+        return target == null ? null : target.storage();
     }
 
     private static boolean hasAnySpace(Villager villager, Container container) {
@@ -246,6 +302,9 @@ public final class VillageLogistics {
                 BlockPos center = VillagerRoles.getHome(villager);
                 if (center == null) center = villager.blockPosition();
                 VillageWorkOrders.invalidateMaterialDemandCache(level, center);
+                // A real delivery changes what the village owns, so quotas must see it at once
+                // instead of waiting for the next cached planner refresh.
+                VillageResourcePlanner.invalidate(level, center);
             }
             VillagerProgression.recordCompletedWork(
                 villager,

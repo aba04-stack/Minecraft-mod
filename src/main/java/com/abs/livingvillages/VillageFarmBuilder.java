@@ -508,13 +508,8 @@ public final class VillageFarmBuilder {
             int needed = Math.max(0, requiredTotal - countItem(inventory, item));
             int amount = Math.min(needed, Math.min(countItem(storage, item), inventoryCapacityFor(inventory, item)));
             if (amount > 0) {
-                int removed = removeItem(storage, item, amount);
-                if (removed > 0) {
-                    ItemStack remainder = inventory.addItem(new ItemStack(item, removed));
-                    if (!remainder.isEmpty()) rollbackOrDrop(worker, level, storage, remainder);
-                    inventory.setChanged();
-                    storage.setChanged();
-                }
+                // Real stacks: a named or enchanted item taken from the village chest keeps its data.
+                VillageItemTransfers.moveRealItems(storage, inventory, item, amount, worker);
             }
             clearOwnedRoute(worker, data);
             data.putLong(NEXT_ACTION, now + 5L);
@@ -550,13 +545,8 @@ public final class VillageFarmBuilder {
             }
             if (!atRouteTarget(worker, routeStand(data), data, now)) return;
             if (countItem(storage, hoeItem) > 0 && inventoryCanFit(worker.getInventory(), new ItemStack(hoeItem, 1))) {
-                int removed = removeItem(storage, hoeItem, 1);
-                if (removed == 1) {
-                    ItemStack remainder = worker.getInventory().addItem(new ItemStack(hoeItem));
-                    if (!remainder.isEmpty()) rollbackOrDrop(worker, level, storage, remainder);
-                    worker.getInventory().setChanged();
-                    storage.setChanged();
-                }
+                // A worn hoe stays worn: taking a tool out of the chest may not repair it out of nothing.
+                VillageItemTransfers.moveRealItems(storage, worker.getInventory(), hoeItem, 1, worker);
             }
             clearOwnedRoute(worker, data);
             data.putLong(NEXT_ACTION, now + 5L);
@@ -1248,16 +1238,6 @@ public final class VillageFarmBuilder {
             }
         }
         return before - offered.getCount();
-    }
-
-    private static void rollbackOrDrop(Villager worker, ServerLevel level, Container storage, ItemStack remainder) {
-        ItemStack returned = remainder.copy();
-        int inserted = insert(storage, returned);
-        if (inserted < remainder.getCount()) {
-            ItemStack left = new ItemStack(remainder.getItem(), remainder.getCount() - inserted);
-            worker.spawnAtLocation(left);
-        }
-        storage.setChanged();
     }
 
     private static void addOrDrop(Villager worker, ServerLevel level, Item item, BlockPos pos) {

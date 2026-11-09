@@ -17,7 +17,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
 
@@ -30,6 +29,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
+import java.util.function.Predicate;
 
 /**
  * Persistent village identity and ownership of physical infrastructure.
@@ -109,15 +109,26 @@ public final class VillageRegistry extends SavedData {
         return found;
     }
 
-    /** A query center is evaluated at most once per game tick. */
-    public static UUID villageId(ServerLevel level, BlockPos center) {
-        if (level == null || center == null) return null;
+    /** Asset kinds, so a refusal for one ownership map can never suppress another kind. */
+    private static final long ASSET_STORAGE = 1L;
+    private static final long ASSET_BED = 2L;
+    private static final long ASSET_WORK_BLOCK = 3L;
+
+    /** Per-tick identity scratch space: resolved centers and refused asset claims. */
+    private static IdentityCache identityCacheFor(ServerLevel level) {
         long now = level.getGameTime();
         IdentityCache cache = ID_CACHE.get(level);
         if (cache == null || cache.gameTime != now) {
             cache = new IdentityCache(now);
             ID_CACHE.put(level, cache);
         }
+        return cache;
+    }
+
+    /** A query center is evaluated at most once per game tick. */
+    public static UUID villageId(ServerLevel level, BlockPos center) {
+        if (level == null || center == null) return null;
+        IdentityCache cache = identityCacheFor(level);
         long centerKey = center.asLong();
         CachedId cached = cache.ids.get(centerKey);
         if (cached != null) return cached.id();
@@ -280,7 +291,7 @@ public final class VillageRegistry extends SavedData {
             removeStaleOwner(registry, storage, registry.storageOwners);
             return false;
         }
-        return claimAsset(level, groupCenter, storage, registry.storageOwners);
+        return claimAsset(level, groupCenter, storage, registry.storageOwners, ASSET_STORAGE);
     }
 
     /** Bed-foot ownership API for housing and population checks. */
@@ -292,7 +303,7 @@ public final class VillageRegistry extends SavedData {
             removeStaleOwner(registry, bedFoot, registry.bedOwners);
             return false;
         }
-        return claimAsset(level, groupCenter, bedFoot, registry.bedOwners);
+        return claimAsset(level, groupCenter, bedFoot, registry.bedOwners, ASSET_BED);
     }
 
     /** Workstation ownership API for production and crafting scans. */
@@ -303,21 +314,43 @@ public final class VillageRegistry extends SavedData {
             removeStaleOwner(registry, workBlock, registry.workBlockOwners);
             return false;
         }
-        return claimAsset(level, groupCenter, workBlock, registry.workBlockOwners);
+        return claimAsset(level, groupCenter, workBlock, registry.workBlockOwners, ASSET_WORK_BLOCK);
     }
 
     private static boolean claimAsset(ServerLevel level, BlockPos groupCenter, BlockPos location,
-                                      Map<Long, UUID> ownership) {
+                                      Map<Long, UUID> ownership, long assetKind) {
         UUID villageId = villageId(level, groupCenter);
         if (villageId == null) return false;
         VillageRegistry registry = get(level);
         long key = location.asLong();
         UUID existing = ownership.get(key);
         if (existing != null) return existing.equals(villageId);
-        if (!VillageArea.isBlockInResidentGroup(level, groupCenter, location)) return false;
+        // A refusal is remembered until the next tick. Deciding membership costs two resident-group
+        // entity area queries over a wide box, while storage, tool, planner and bed scans ask about the
+        // same unclaimed asset several times per tick. Only refusals are remembered: a successful claim
+        // is answered from the ownership map afterwards, and an asset whose claim was cleared during the
+        // same tick (a player replacing a chest) must stay claimable immediately.
+        IdentityCache cache = identityCacheFor(level);
+        long refusalKey = claimRefusalKey(key, groupCenter, assetKind, villageId);
+        if (cache.claimRefusals.contains(refusalKey)) return false;
+        if (!VillageArea.isBlockInResidentGroup(level, groupCenter, location)) {
+            cache.claimRefusals.add(refusalKey);
+            return false;
+        }
         ownership.put(key, villageId);
         registry.setDirty();
         return true;
+    }
+
+    /**
+     * Distinguishes refusals of the same block for different group centers, asset kinds (storage, bed,
+     * workstation — separate ownership maps sharing block positions) and resolved settlement identities,
+     * so a refusal can never leak into a different question.
+     */
+    private static long claimRefusalKey(long locationKey, BlockPos groupCenter, long assetKind, UUID villageId) {
+        long mixed = locationKey * 0x9E3779B97F4A7C15L + groupCenter.asLong();
+        mixed ^= assetKind * 0x517CC1B727220A95L;
+        return mixed ^ (villageId.getMostSignificantBits() + 31L * villageId.getLeastSignificantBits());
     }
 
     private static void removeStaleOwner(VillageRegistry registry, BlockPos location, Map<Long, UUID> ownership) {
@@ -948,11 +981,14 @@ public final class VillageRegistry extends SavedData {
                 Container from = findNearestOwnedStorageWithItem(level, new BlockPos(fromX, fromY, fromZ), item, count);
                 List<Container> dests = findAvailableOwnedStorages(level, new BlockPos(toX, toY, toZ));
                 if (from == null || dests.isEmpty() || !canFitItemInContainer(dests.get(0), item, count)) return false;
-                int removed = removeItemFromContainer(from, item, count);
-                if (removed != count) return false;
-                insertItemIntoContainer(dests.get(0), new ItemStack(item, removed));
-                from.setChanged();
-                dests.get(0).setChanged();
+                Container to = dests.get(0);
+                int moved = VillageItemTransfers.moveRealItems(from, to, item, count, null);
+                if (moved != count) {
+                    // The port contract is transactional: a partial move is rolled back as real stacks,
+                    // so no item keeps a component set it never had and none disappears.
+                    if (moved > 0) VillageItemTransfers.moveRealItems(to, from, item, moved, null);
+                    return false;
+                }
                 return true;
             }
         };
@@ -1128,15 +1164,21 @@ public final class VillageRegistry extends SavedData {
         return result.smeltedCount();
     }
 
+    /**
+     * True when the settlement owns a furnace or blast furnace close to its center.
+     *
+     * <p>Rings outward with an exit at the first owned furnace. The previous nested walk answered
+     * "there is no furnace" only after reading all 33x33x9 = 9 801 positions of the box and never
+     * reported that cost, which is what rule 1 of {@code docs/PERFORMANCE_BUDGETS.md} forbids.</p>
+     */
     private static boolean hasOwnedFurnaceNear(ServerLevel level, BlockPos center) {
         int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
-        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -4, -radius), center.offset(radius, 4, radius))) {
-            if (!level.hasChunkAt(pos)) continue;
+        return VillageScanRings.nearestInBox(center, center, radius, 4, 4, pos -> {
+            if (!level.hasChunkAt(pos)) return false;
             BlockState state = level.getBlockState(pos);
-            if (!state.is(Blocks.FURNACE) && !state.is(Blocks.BLAST_FURNACE)) continue;
-            if (isWorkBlockForVillage(level, center, pos)) return true;
-        }
-        return false;
+            if (!state.is(Blocks.FURNACE) && !state.is(Blocks.BLAST_FURNACE)) return false;
+            return isWorkBlockForVillage(level, center, pos);
+        }) != null;
     }
 
     private static int availableRoomForItem(Container container, Item item) {
@@ -1150,25 +1192,54 @@ public final class VillageRegistry extends SavedData {
         return room;
     }
 
+    /**
+     * All settlement storages an outside agent or a snapshot may use, nearest first.
+     *
+     * <p>A snapshot has to read the whole box, so the walk collects every match instead of stopping
+     * early - but it walks rings, which already yields "nearest first" and removes the sort that used
+     * to follow the collection. The box is unchanged: {@code radius} horizontally and four blocks
+     * vertically around the ownership center.</p>
+     */
     private static List<Container> findAvailableOwnedStorages(ServerLevel level, BlockPos center) {
-        int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
-        List<BlockPos> positions = new ArrayList<>();
-        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -4, -radius), center.offset(radius, 4, radius))) {
-            if (!level.hasChunkAt(pos)) continue;
-            BlockState state = level.getBlockState(pos);
-            if (!state.is(Blocks.CHEST) && !state.is(Blocks.TRAPPED_CHEST) && !state.is(Blocks.BARREL)) continue;
-            if (!isStorageForVillage(level, center, pos) || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
-            positions.add(pos.immutable());
-        }
-        positions.sort(Comparator.comparingDouble(pos -> pos.distSqr(center)));
-        List<Container> containers = new ArrayList<>(positions.size());
-        for (BlockPos pos : positions) {
-            BlockEntity be = level.getBlockEntity(pos);
-            if (be instanceof Container container) {
+        List<Container> containers = new ArrayList<>();
+        for (BlockPos pos : VillageScanRings.collectInBox(center, storageLookupRadius(), 4, 4,
+            candidate -> isAvailableOwnedStorage(level, center, candidate))) {
+            if (level.getBlockEntity(pos) instanceof Container container) {
                 containers.add(container);
             }
         }
         return containers;
+    }
+
+    private static int storageLookupRadius() {
+        return Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+    }
+
+    /** One storage candidate: loaded, a real container block, owned by the settlement, not reserved. */
+    private static boolean isAvailableOwnedStorage(ServerLevel level, BlockPos center, BlockPos pos) {
+        if (!level.hasChunkAt(pos)) return false;
+        BlockState state = level.getBlockState(pos);
+        if (!state.is(Blocks.CHEST) && !state.is(Blocks.TRAPPED_CHEST) && !state.is(Blocks.BARREL)) return false;
+        return isStorageForVillage(level, center, pos) && VillageReservations.isStorageAvailable(level, pos, null);
+    }
+
+    /**
+     * Nearest settlement storage that {@code usable} accepts, or {@code null}.
+     *
+     * <p>Rings outward from the ownership center with an exit at the first usable storage: the old code
+     * collected all candidates of the 33x33x9 box and sorted them to pick the first match, paying
+     * 9 801 reads even when the answer was the chest next to the villager.</p>
+     */
+    private static Container nearestAvailableOwnedStorage(ServerLevel level, BlockPos center,
+                                                          Predicate<Container> usable) {
+        Container[] found = new Container[1];
+        VillageScanRings.nearestInBox(center, center, storageLookupRadius(), 4, 4, pos -> {
+            if (!isAvailableOwnedStorage(level, center, pos)) return false;
+            if (!(level.getBlockEntity(pos) instanceof Container container) || !usable.test(container)) return false;
+            found[0] = container;
+            return true;
+        });
+        return found[0];
     }
 
     /**
@@ -1193,22 +1264,14 @@ public final class VillageRegistry extends SavedData {
     }
 
     private static Container findNearestOwnedStorageWithItem(ServerLevel level, BlockPos center, Item item, int minCount) {
-        for (Container container : findAvailableOwnedStorages(level, center)) {
-            if (countItemInContainer(container, item) >= minCount) {
-                return container;
-            }
-        }
-        return null;
+        return nearestAvailableOwnedStorage(level, center,
+            container -> countItemInContainer(container, item) >= minCount);
     }
 
     private static Container findNearestOwnedStorageForSmelting(ServerLevel level, BlockPos center) {
-        for (Container container : findAvailableOwnedStorages(level, center)) {
-            if (countItemInContainer(container, Items.RAW_IRON) > 0
-                && countItemInContainer(container, Items.COAL) > 0) {
-                return container;
-            }
-        }
-        return null;
+        return nearestAvailableOwnedStorage(level, center,
+            container -> countItemInContainer(container, Items.RAW_IRON) > 0
+                && countItemInContainer(container, Items.COAL) > 0);
     }
 
     private static int countItemInContainer(Container container, Item item) {
@@ -1341,6 +1404,8 @@ public final class VillageRegistry extends SavedData {
         private final long gameTime;
         private final Map<Long, CachedId> ids = new HashMap<>();
         private final Map<UUID, List<IdentitySignature>> groupsByVillage = new HashMap<>();
+        /** Assets already refused membership this tick, keyed by {@link #claimRefusalKey}. */
+        private final Set<Long> claimRefusals = new HashSet<>();
 
         private IdentityCache(long gameTime) { this.gameTime = gameTime; }
 

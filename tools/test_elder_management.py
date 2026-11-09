@@ -27,5 +27,15 @@ assert 'livingvillages.elder.order_house' in client and 'livingvillages.elder.or
 assert 'VillagerNameplates::onVillagerTick' in main, "profession labels must be synchronized by the server"
 assert 'define("show_villager_profession_names", true)' in (java / "LivingVillagesConfig.java").read_text(encoding="utf-8")
 assert 'VillageIndustry.describeStartupStatus' in elder, "elder panel must explain the current settlement bootstrap blocker"
-assert 'font.split(notice, PANEL_WIDTH - 40)' in client, "long startup diagnostics must not cover management buttons"
-print("ELDER MANAGEMENT PASSED: right-click panel, server-validated actions, profession nameplates, bounded startup diagnostics")
+assert 'font.split(noticeComponent(), PANEL_WIDTH - 40)' in client, "long startup diagnostics must not cover management buttons"
+assert 'NOTICE_LINES_PER_PAGE = 2' in client, "the summary must stay inside its two text lines per page"
+assert 'line < NOTICE_LINES_PER_PAGE && firstLine + line < noticeLines.size()' in client, (
+    "paged summary rendering must never draw outside the reserved status area"
+)
+assert 'rotateNoticePage(pages)' in client and 'livingvillages.elder.notice_page' in client, (
+    "a long summary must rotate through pages and tell the player which page is visible"
+)
+assert 'public boolean mouseClicked(double mouseX, double mouseY, int button)' in client, (
+    "the player must be able to page the summary by clicking it without adding an eighth widget"
+)
+print("ELDER MANAGEMENT PASSED: right-click panel, server-validated actions, profession nameplates, paged bounded startup diagnostics")
