@@ -811,7 +811,8 @@ public final class VillageLivestock {
         }
 
         ItemStack shears = firstShears(herder.getInventory());
-        UUID villageId = VillageRegistry.villageId(level, center);
+        // Ownership is re-checked inside shearManagedSheep; resolving the settlement identity here too
+        // was a dead lookup on every shearing attempt.
         boolean sheared = shears != null && shearManagedSheep(level, target, shears, center);
         if (sheared) {
             collectNearbyWool(herder, level, target);

@@ -262,6 +262,36 @@ assert "            if (path != null && path.canReach()) return stand;" in LIVES
 )
 assert "if (isSafeStand(level, stand)) stands.add(stand.immutable());" in LIVESTOCK
 
+# 11. Registry storage lookups: the whole-box snapshot walks rings and reports; nearest lookups exit early.
+REGISTRY = (JAVA / "VillageRegistry.java").read_text(encoding="utf-8")
+assert "static List<BlockPos> collectInBox(BlockPos center, int radius, int downReach, int upReach," in RINGS, (
+    "a snapshot that needs every storage must still walk rings and report its cost"
+)
+assert "VillageScanRings.collectInBox(center, storageLookupRadius(), 4, 4," in REGISTRY, (
+    "the settlement storage snapshot must use the shared ring walk instead of its own nested loops"
+)
+assert "BlockPos.betweenClosed(center.offset(-radius, -4, -radius), center.offset(radius, 4, radius))" not in REGISTRY, (
+    "an unreported full-box walk may not come back into the registry"
+)
+assert "positions.sort(Comparator.comparingDouble(pos -> pos.distSqr(center)));" not in REGISTRY, (
+    "ring order already yields nearest first; collecting and sorting all storages is wasted work"
+)
+assert "VillageScanRings.nearestInBox(center, center, storageLookupRadius(), 4, 4, pos -> {" in REGISTRY, (
+    "a nearest-storage lookup must stop at the first usable storage"
+)
+assert REGISTRY.count("nearestAvailableOwnedStorage(level, center,") == 2, (
+    "both nearest-storage lookups (an item amount, a smelting pair) must exit early"
+)
+assert "for (Container container : findAvailableOwnedStorages(level, center)) {\n            if (countItemInContainer(container, item) >= minCount) {" not in REGISTRY, (
+    "the item lookup must not walk every storage of the box to pick the first usable one"
+)
+assert "for (Container container : findAvailableOwnedStorages(level, center)) {" in REGISTRY, (
+    "the stock snapshot legitimately needs every storage and must keep walking them all"
+)
+assert "// Ownership is re-checked inside shearManagedSheep" in LIVESTOCK, (
+    "a shearing attempt must not resolve the settlement identity twice"
+)
+
 print("SCAN BUDGETS PASSED: ring-ordered early-exit scans, bounded presence caches, shared tool and "
       "crop passes, membership refusal cache, per-tick settlement scan quota, bounded storage searches, "
-      "deterministic GameTest budgets")
+      "ring-ordered registry storage lookups, deterministic GameTest budgets")

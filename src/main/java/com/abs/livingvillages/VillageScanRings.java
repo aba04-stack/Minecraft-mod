@@ -5,6 +5,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Predicate;
 
 /**
@@ -134,6 +136,35 @@ final class VillageScanRings {
         });
         VillageScanStats.recordScan(scanned[0]);
         return found[0];
+    }
+
+    /**
+     * Every position inside the box around {@code center} that {@code accept} allows, in ring order.
+     *
+     * <p>Some queries genuinely need all matches - a stock snapshot sums every settlement storage - so
+     * no early exit is possible. Ring order still means "nearest first", therefore a caller that takes
+     * the first usable entry gets a nearest one without collecting and sorting afterwards. The visited
+     * set is exactly the box the plain nested loops covered, including the same vertical reach.</p>
+     */
+    static List<BlockPos> collectInBox(BlockPos center, int radius, int downReach, int upReach,
+                                       Predicate<BlockPos> accept) {
+        if (center == null || accept == null || radius < 0) return List.of();
+        int minY = center.getY() - downReach;
+        int maxY = center.getY() + upReach;
+        List<BlockPos> found = new ArrayList<>();
+        int[] scanned = new int[1];
+        walk(radius, (dx, dz) -> {
+            int x = center.getX() + dx;
+            int z = center.getZ() + dz;
+            for (int y = minY; y <= maxY; y++) {
+                BlockPos pos = new BlockPos(x, y, z);
+                scanned[0]++;
+                if (accept.test(pos)) found.add(pos.immutable());
+            }
+            return false;
+        });
+        VillageScanStats.recordScan(scanned[0]);
+        return found;
     }
 
     /**

@@ -17,7 +17,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
 
@@ -30,6 +29,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
+import java.util.function.Predicate;
 
 /**
  * Persistent village identity and ownership of physical infrastructure.
@@ -1164,15 +1164,21 @@ public final class VillageRegistry extends SavedData {
         return result.smeltedCount();
     }
 
+    /**
+     * True when the settlement owns a furnace or blast furnace close to its center.
+     *
+     * <p>Rings outward with an exit at the first owned furnace. The previous nested walk answered
+     * "there is no furnace" only after reading all 33x33x9 = 9 801 positions of the box and never
+     * reported that cost, which is what rule 1 of {@code docs/PERFORMANCE_BUDGETS.md} forbids.</p>
+     */
     private static boolean hasOwnedFurnaceNear(ServerLevel level, BlockPos center) {
         int radius = Math.min(16, LivingVillagesConfig.VILLAGE_RADIUS_BLOCKS.get());
-        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -4, -radius), center.offset(radius, 4, radius))) {
-            if (!level.hasChunkAt(pos)) continue;
+        return VillageScanRings.nearestInBox(center, center, radius, 4, 4, pos -> {
+            if (!level.hasChunkAt(pos)) return false;
             BlockState state = level.getBlockState(pos);
-            if (!state.is(Blocks.FURNACE) && !state.is(Blocks.BLAST_FURNACE)) continue;
-            if (isWorkBlockForVillage(level, center, pos)) return true;
-        }
-        return false;
+            if (!state.is(Blocks.FURNACE) && !state.is(Blocks.BLAST_FURNACE)) return false;
+            return isWorkBlockForVillage(level, center, pos);
+        }) != null;
     }
 
     private static int availableRoomForItem(Container container, Item item) {
@@ -1186,25 +1192,54 @@ public final class VillageRegistry extends SavedData {
         return room;
     }
 
+    /**
+     * All settlement storages an outside agent or a snapshot may use, nearest first.
+     *
+     * <p>A snapshot has to read the whole box, so the walk collects every match instead of stopping
+     * early - but it walks rings, which already yields "nearest first" and removes the sort that used
+     * to follow the collection. The box is unchanged: {@code radius} horizontally and four blocks
+     * vertically around the ownership center.</p>
+     */
     private static List<Container> findAvailableOwnedStorages(ServerLevel level, BlockPos center) {
-        int radius = Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
-        List<BlockPos> positions = new ArrayList<>();
-        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-radius, -4, -radius), center.offset(radius, 4, radius))) {
-            if (!level.hasChunkAt(pos)) continue;
-            BlockState state = level.getBlockState(pos);
-            if (!state.is(Blocks.CHEST) && !state.is(Blocks.TRAPPED_CHEST) && !state.is(Blocks.BARREL)) continue;
-            if (!isStorageForVillage(level, center, pos) || !VillageReservations.isStorageAvailable(level, pos, null)) continue;
-            positions.add(pos.immutable());
-        }
-        positions.sort(Comparator.comparingDouble(pos -> pos.distSqr(center)));
-        List<Container> containers = new ArrayList<>(positions.size());
-        for (BlockPos pos : positions) {
-            BlockEntity be = level.getBlockEntity(pos);
-            if (be instanceof Container container) {
+        List<Container> containers = new ArrayList<>();
+        for (BlockPos pos : VillageScanRings.collectInBox(center, storageLookupRadius(), 4, 4,
+            candidate -> isAvailableOwnedStorage(level, center, candidate))) {
+            if (level.getBlockEntity(pos) instanceof Container container) {
                 containers.add(container);
             }
         }
         return containers;
+    }
+
+    private static int storageLookupRadius() {
+        return Math.min(16, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+    }
+
+    /** One storage candidate: loaded, a real container block, owned by the settlement, not reserved. */
+    private static boolean isAvailableOwnedStorage(ServerLevel level, BlockPos center, BlockPos pos) {
+        if (!level.hasChunkAt(pos)) return false;
+        BlockState state = level.getBlockState(pos);
+        if (!state.is(Blocks.CHEST) && !state.is(Blocks.TRAPPED_CHEST) && !state.is(Blocks.BARREL)) return false;
+        return isStorageForVillage(level, center, pos) && VillageReservations.isStorageAvailable(level, pos, null);
+    }
+
+    /**
+     * Nearest settlement storage that {@code usable} accepts, or {@code null}.
+     *
+     * <p>Rings outward from the ownership center with an exit at the first usable storage: the old code
+     * collected all candidates of the 33x33x9 box and sorted them to pick the first match, paying
+     * 9 801 reads even when the answer was the chest next to the villager.</p>
+     */
+    private static Container nearestAvailableOwnedStorage(ServerLevel level, BlockPos center,
+                                                          Predicate<Container> usable) {
+        Container[] found = new Container[1];
+        VillageScanRings.nearestInBox(center, center, storageLookupRadius(), 4, 4, pos -> {
+            if (!isAvailableOwnedStorage(level, center, pos)) return false;
+            if (!(level.getBlockEntity(pos) instanceof Container container) || !usable.test(container)) return false;
+            found[0] = container;
+            return true;
+        });
+        return found[0];
     }
 
     /**
@@ -1229,22 +1264,14 @@ public final class VillageRegistry extends SavedData {
     }
 
     private static Container findNearestOwnedStorageWithItem(ServerLevel level, BlockPos center, Item item, int minCount) {
-        for (Container container : findAvailableOwnedStorages(level, center)) {
-            if (countItemInContainer(container, item) >= minCount) {
-                return container;
-            }
-        }
-        return null;
+        return nearestAvailableOwnedStorage(level, center,
+            container -> countItemInContainer(container, item) >= minCount);
     }
 
     private static Container findNearestOwnedStorageForSmelting(ServerLevel level, BlockPos center) {
-        for (Container container : findAvailableOwnedStorages(level, center)) {
-            if (countItemInContainer(container, Items.RAW_IRON) > 0
-                && countItemInContainer(container, Items.COAL) > 0) {
-                return container;
-            }
-        }
-        return null;
+        return nearestAvailableOwnedStorage(level, center,
+            container -> countItemInContainer(container, Items.RAW_IRON) > 0
+                && countItemInContainer(container, Items.COAL) > 0);
     }
 
     private static int countItemInContainer(Container container, Item item) {
