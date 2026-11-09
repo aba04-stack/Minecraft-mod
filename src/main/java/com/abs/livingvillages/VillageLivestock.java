@@ -873,6 +873,15 @@ public final class VillageLivestock {
             || !(sheep.level() instanceof ServerLevel level)) return;
         if (!LivingVillagesConfig.ENABLE_VILLAGE_LIVESTOCK.get()) return;
 
+        CompoundTag sheepData = sheep.getPersistentData();
+        long now = level.getGameTime();
+        // The 20-tick lure throttle used to be the very last check, behind an entity query with a
+        // predicate over every nearby villager, a resident-group resolve, the pen geometry
+        // (isInsideVillagePen and isInsideExistingFencePen) and a line-of-sight raytrace. A sheep that
+        // is already following a fresh lure order needs none of it, and nothing above this line writes
+        // to the world, so answering early changes no decision - it only skips the work.
+        if (now - sheepData.getLong(SHEEP_LAST_LURE_TICK) < 20L) return;
+
         AABB area = sheep.getBoundingBox().inflate(10.0D, 4.0D, 10.0D);
         List<Villager> herders = level.getEntitiesOfClass(Villager.class, area,
             villager -> isCurrentHerdTarget(villager, sheep));
@@ -882,9 +891,7 @@ public final class VillageLivestock {
         if (!isCurrentHerdTarget(herder, sheep)) return;
         BlockPos center = ownershipCenter(herder);
         UUID villageId = VillageRegistry.villageId(level, center);
-        String owner = sheep.getPersistentData().getString(SHEEP_OWNER_KEY);
-        CompoundTag sheepData = sheep.getPersistentData();
-        long now = level.getGameTime();
+        String owner = sheepData.getString(SHEEP_OWNER_KEY);
         String lureOwner = sheepData.getString(SHEEP_LURE_OWNER);
         long lastLure = sheepData.getLong(SHEEP_LAST_LURE_TICK);
         // Herding never overrides the animal controller's danger response, parental protection,
@@ -901,7 +908,6 @@ public final class VillageLivestock {
             || sheep.distanceToSqr(herder) > SHEEP_LURE_RADIUS_SQR
             || !canSeeSheep(level, sheep, herder)) return;
 
-        if (now - lastLure < 20L) return;
         sheep.getNavigation().moveTo(herder, SHEEP_FOLLOW_SPEED);
         sheep.getPersistentData().putLong(SHEEP_LAST_LURE_TICK, now);
         sheep.getPersistentData().putString(SHEEP_LURE_OWNER, villageId.toString());

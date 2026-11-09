@@ -292,6 +292,19 @@ assert "// Ownership is re-checked inside shearManagedSheep" in LIVESTOCK, (
     "a shearing attempt must not resolve the settlement identity twice"
 )
 
+# 12. A decision that is already made must not sit behind entity queries, world geometry and a raytrace.
+THROTTLE = "if (now - sheepData.getLong(SHEEP_LAST_LURE_TICK) < 20L) return;"
+ENTITY_QUERY = "AABB area = sheep.getBoundingBox().inflate(10.0D, 4.0D, 10.0D);"
+assert THROTTLE in LIVESTOCK, "the sheep lure throttle must stay, it is what bounds the work per animal"
+assert LIVESTOCK.index(THROTTLE) < LIVESTOCK.index(ENTITY_QUERY), (
+    "the 20-tick lure throttle must come before the entity query, the pen geometry and the raytrace"
+)
+assert "if (now - lastLure < 20L) return;" not in LIVESTOCK, (
+    "the late duplicate of the same throttle must be gone"
+)
+assert LIVESTOCK.index("if (isSafeStand(level, stand)) stands.add(stand.immutable());") > 0
+
 print("SCAN BUDGETS PASSED: ring-ordered early-exit scans, bounded presence caches, shared tool and "
       "crop passes, membership refusal cache, per-tick settlement scan quota, bounded storage searches, "
-      "ring-ordered registry storage lookups, deterministic GameTest budgets")
+      "ring-ordered registry storage lookups, cheap throttles before expensive reads, "
+      "deterministic GameTest budgets")
