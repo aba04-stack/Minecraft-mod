@@ -426,17 +426,10 @@ public final class VillageCraftingJobs {
         int available = countItem(container, missing.item());
         int amount = Math.min(needed, available);
         if (amount > 0 && inventoryCanFit(villager.getInventory(), new ItemStack(missing.item(), amount))) {
-            int removed = removeItem(container, missing.item(), amount);
-            if (removed > 0) {
-                ItemStack incoming = new ItemStack(missing.item(), removed);
-                ItemStack remainder = villager.getInventory().addItem(incoming);
-                if (!remainder.isEmpty()) {
-                    // Defensive rollback: a race or changed inventory must not delete real resources.
-                    if (!insert(container, remainder.copy())) villager.spawnAtLocation(remainder);
-                }
-                villager.getInventory().setChanged();
-                container.setChanged();
-            }
+            // Real stacks: an ingredient taken from storage arrives with its damage and components, so
+            // an aborted order cannot leave the crafter holding a repaired or renamed-free copy, and
+            // whatever the crafter cannot carry goes back into the same storage as the same stack.
+            VillageItemTransfers.moveRealItems(container, villager.getInventory(), missing.item(), amount, villager);
         }
         clearOwnedRoute(villager, data);
     }
@@ -549,16 +542,11 @@ public final class VillageCraftingJobs {
             return;
         }
 
-        int removed = removeItem(villager.getInventory(), recipe.output(), recipe.outputCount());
-        if (removed != recipe.outputCount()) return;
-        ItemStack actualOutput = new ItemStack(recipe.output(), removed);
-        ItemStack remainder = insertStack(container, actualOutput);
-        if (!remainder.isEmpty()) {
-            ItemStack back = villager.getInventory().addItem(remainder);
-            if (!back.isEmpty()) villager.spawnAtLocation(back);
-        }
-        villager.getInventory().setChanged();
-        container.setChanged();
+        // Real stacks in both directions: the output may have been picked up from the world as a named
+        // item, and a delivery the storage only partly accepted must not be reported as a finished order.
+        int delivered = VillageItemTransfers.moveRealItems(villager.getInventory(), container,
+            recipe.output(), recipe.outputCount(), villager);
+        if (delivered != recipe.outputCount()) return;
         VillagerProgression.recordCompletedWork(
             villager,
             com.abs.livingvillages.domain.VillagerProgressionModel.ROLE_CRAFTSMAN,
@@ -1111,30 +1099,6 @@ public final class VillageCraftingJobs {
         }
         container.setChanged();
         return amount - remaining;
-    }
-
-    private static boolean insert(Container container, ItemStack offered) {
-        return insertStack(container, offered).isEmpty();
-    }
-
-    private static ItemStack insertStack(Container container, ItemStack offered) {
-        ItemStack remainder = offered.copy();
-        for (int pass = 0; pass < 2 && !remainder.isEmpty(); pass++) {
-            for (int i = 0; i < container.getContainerSize() && !remainder.isEmpty(); i++) {
-                if (!container.canPlaceItem(i, remainder)) continue;
-                ItemStack existing = container.getItem(i);
-                if (pass == 0) {
-                    if (existing.isEmpty() || !ItemStack.isSameItemSameComponents(existing, remainder)) continue;
-                    int capacity = Math.min(existing.getMaxStackSize(), container.getMaxStackSize()) - existing.getCount();
-                    int moved = Math.min(Math.max(0, capacity), remainder.getCount());
-                    if (moved > 0) { existing.grow(moved); remainder.shrink(moved); container.setChanged(); }
-                } else if (existing.isEmpty()) {
-                    int moved = Math.min(remainder.getCount(), Math.min(remainder.getMaxStackSize(), container.getMaxStackSize()));
-                    if (moved > 0) { container.setItem(i, remainder.split(moved)); container.setChanged(); }
-                }
-            }
-        }
-        return remainder;
     }
 
     private static boolean canInsert(Container container, ItemStack offered) {

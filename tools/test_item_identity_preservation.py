@@ -24,6 +24,8 @@ assert "ItemStack stillOut = insertReal(source, rejected);" in helper, (
 )
 assert "new ItemStack(item," not in helper, "the shared transfer helper must never rebuild a stack"
 
+# Consumption stays count-based on purpose: the recipe destroys the ingredient, so there is no stack
+# left to keep data on. Everything that MOVES an item between containers must go through the helper.
 CALL_SITES = {
     "VillageLivestock.java": ("VillageItemTransfers.moveRealItems(storage, worker.getInventory(), item, amount, worker);",),
     "VillageFarmBuilder.java": (
@@ -32,6 +34,14 @@ CALL_SITES = {
     ),
     "VillageBuilder.java": ("VillageItemTransfers.moveRealItems(storage, inventory, item, amount, villager);",),
     "VillageRegistry.java": ("int moved = VillageItemTransfers.moveRealItems(from, to, item, count, null);",),
+    "VillageCraftingJobs.java": (
+        "VillageItemTransfers.moveRealItems(container, villager.getInventory(), missing.item(), amount, villager);",
+        "int delivered = VillageItemTransfers.moveRealItems(villager.getInventory(), container,",
+    ),
+    "VillagerAutonomy.java": (
+        "movedTotal += VillageItemTransfers.moveRealItems(storage, inventory, item, limit - movedTotal, villager);",
+        "ItemStack rejected = VillageItemTransfers.insertReal(destination, taken);",
+    ),
 }
 for name, required in CALL_SITES.items():
     text = (JAVA / name).read_text(encoding="utf-8")
@@ -50,6 +60,37 @@ for name in ("VillageLivestock.java", "VillageFarmBuilder.java", "VillageBuilder
         f"{name} loses stack components when a worker takes a tool from a storage"
     )
 
+crafting = (JAVA / "VillageCraftingJobs.java").read_text(encoding="utf-8")
+assert "int removed = removeItem(container, missing.item(), amount);" not in crafting, (
+    "the crafter must not rebuild an ingredient withdrawn from storage out of a count"
+)
+assert "ItemStack actualOutput = new ItemStack(recipe.output(), removed);" not in crafting, (
+    "the crafted output must be delivered as the real stack the worker carries"
+)
+assert "private static ItemStack insertStack(Container container, ItemStack offered) {" not in crafting, (
+    "the private copy of the insert must be gone once the shared helper owns every transfer"
+)
+assert "int removed = removeItem(villager.getInventory(), ingredient.item(), ingredient.count());" in crafting, (
+    "consuming a recipe ingredient stays count-based: the recipe destroys it, there is no data to keep"
+)
+
+autonomy = (JAVA / "VillagerAutonomy.java").read_text(encoding="utf-8")
+assert "private static int insertInto(Container destination, ItemStack source, int limit) {" not in autonomy, (
+    "the component-blind insert must be gone: it merged stacks vanilla would never merge"
+)
+assert "destination.setItem(slot, new ItemStack(source.getItem(), moved));" not in autonomy, (
+    "depositing surplus food must not rebuild the stack and drop its components"
+)
+assert "if (existing.isEmpty() || existing.getItem() != source.getItem()" not in autonomy, (
+    "merging by item alone ignores components; the shared insertReal compares components"
+)
+assert "int moved = withdrawPlantingItems(villager, container, 16);" in autonomy
+
+tests = (JAVA / "VillageReservationGameTests.java").read_text(encoding="utf-8")
+assert "public static void realStackInsertsNeverMergeDifferentComponents(GameTestHelper helper) {" in tests, (
+    "the component rule needs an in-world regression test, not only a static one"
+)
+
 registry = (JAVA / "VillageRegistry.java").read_text(encoding="utf-8")
 assert "insertItemIntoContainer(dests.get(0), new ItemStack(item, removed));" not in registry, (
     "the storage port must not rebuild transferred items from a count"
@@ -57,4 +98,5 @@ assert "insertItemIntoContainer(dests.get(0), new ItemStack(item, removed));" no
 assert "if (moved > 0) VillageItemTransfers.moveRealItems(to, from, item, moved, null);" in registry, (
     "a partial port transfer must be rolled back so the port stays transactional"
 )
-print("ITEM IDENTITY PRESERVATION PASSED: worker transfers move real stacks with their damage and components")
+print("ITEM IDENTITY PRESERVATION PASSED: every container transfer moves real stacks with their "
+      "damage and components; only recipe consumption stays count-based")

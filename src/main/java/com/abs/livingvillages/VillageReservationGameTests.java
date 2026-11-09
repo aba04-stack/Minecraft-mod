@@ -2460,6 +2460,61 @@ public final class VillageReservationGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "insert_components")
+    public static void realStackInsertsNeverMergeDifferentComponents(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 8; x++) {
+            level.setBlock(helper.absolutePos(new BlockPos(x, 0, 1)), Blocks.STONE.defaultBlockState(), 3);
+        }
+        helper.setBlock(new BlockPos(2, 1, 1), Blocks.CHEST);
+        helper.setBlock(new BlockPos(4, 1, 1), Blocks.CHEST);
+        BlockPos sourcePos = helper.absolutePos(new BlockPos(2, 1, 1));
+        BlockPos storagePos = helper.absolutePos(new BlockPos(4, 1, 1));
+        helper.assertTrue(level.getBlockEntity(sourcePos) instanceof Container
+                && level.getBlockEntity(storagePos) instanceof Container,
+            "Both fixture chests must be real containers before a transfer can be measured.");
+        Container source = (Container) level.getBlockEntity(sourcePos);
+        Container storage = (Container) level.getBlockEntity(storagePos);
+
+        // What a player leaves in the village: named seeds to plant and a named wheat stack in storage.
+        ItemStack namedWheat = new ItemStack(Items.WHEAT, 32);
+        namedWheat.set(DataComponents.CUSTOM_NAME, Component.literal("Пшеница старосты"));
+        storage.setItem(0, namedWheat.copy());
+        ItemStack namedSeeds = new ItemStack(Items.WHEAT_SEEDS, 24);
+        namedSeeds.set(DataComponents.CUSTOM_NAME, Component.literal("Семена на посев"));
+        source.setItem(0, namedSeeds.copy());
+        storage.setChanged();
+        source.setChanged();
+
+        int planted = VillageItemTransfers.moveRealItems(source, storage, Items.WHEAT_SEEDS, 16, null);
+        helper.assertTrue(planted == 16, "Sixteen real seeds must move from the source chest into the storage.");
+        ItemStack arrived = ItemStack.EMPTY;
+        for (int slot = 0; slot < storage.getContainerSize(); slot++) {
+            if (storage.getItem(slot).is(Items.WHEAT_SEEDS)) arrived = storage.getItem(slot);
+        }
+        helper.assertTrue(Component.literal("Семена на посев").equals(arrived.get(DataComponents.CUSTOM_NAME)),
+            "Planting items must keep their components: they used to be rebuilt as a plain stack.");
+        helper.assertTrue(Component.literal("Пшеница старосты").equals(storage.getItem(0).get(DataComponents.CUSTOM_NAME))
+                && storage.getItem(0).getCount() == 32,
+            "A named stack already in the storage must keep its name and count.");
+
+        // The same rule for a plain insert: vanilla never merges stacks with different components.
+        ItemStack rejected = VillageItemTransfers.insertReal(storage, new ItemStack(Items.WHEAT, 32));
+        helper.assertTrue(rejected.isEmpty(), "The plain wheat must fit into a free slot of the chest.");
+        helper.assertTrue(storage.getItem(0).getCount() == 32
+                && Component.literal("Пшеница старосты").equals(storage.getItem(0).get(DataComponents.CUSTOM_NAME)),
+            "Inserting plain wheat may not grow or rename the stored named stack.");
+        int plainSlots = 0;
+        for (int slot = 0; slot < storage.getContainerSize(); slot++) {
+            ItemStack stack = storage.getItem(slot);
+            if (stack.is(Items.WHEAT) && !stack.has(DataComponents.CUSTOM_NAME)) plainSlots++;
+        }
+        helper.assertTrue(plainSlots == 1,
+            "Plain wheat must land in its own slot instead of being merged into the named stack.");
+
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 20, batch = "scan_budget_storage")
     public static void nearbyDeliveryStorageIsFoundWithoutWalkingTheWholeStorageBox(GameTestHelper helper) {
         var level = helper.getLevel();
