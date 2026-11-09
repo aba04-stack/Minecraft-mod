@@ -1002,29 +1002,11 @@ public final class VillagerTreeWork {
         }
     }
 
+    /** Real drops go into the worker's inventory as the same stack; only the rest hits the ground. */
     private static void storeOrDrop(Villager villager, ServerLevel level, BlockPos pos, ItemStack stack) {
         if (stack.isEmpty()) return;
-        var inventory = villager.getInventory();
-        for (int pass = 0; pass < 2 && !stack.isEmpty(); pass++) {
-            for (int slot = 0; slot < inventory.getContainerSize() && !stack.isEmpty(); slot++) {
-                ItemStack existing = inventory.getItem(slot);
-                if (pass == 0) {
-                    if (existing.isEmpty() || !ItemStack.isSameItemSameComponents(existing, stack)) continue;
-                    int room = Math.min(existing.getMaxStackSize(), inventory.getMaxStackSize()) - existing.getCount();
-                    if (room > 0) {
-                        int moved = Math.min(room, stack.getCount());
-                        existing.grow(moved);
-                        stack.shrink(moved);
-                    }
-                } else {
-                    if (!existing.isEmpty()) continue;
-                    int moved = Math.min(stack.getCount(), Math.min(stack.getMaxStackSize(), inventory.getMaxStackSize()));
-                    inventory.setItem(slot, stack.split(moved));
-                }
-            }
-        }
-        inventory.setChanged();
-        if (!stack.isEmpty()) Block.popResource(level, pos, stack);
+        ItemStack rejected = VillageItemTransfers.insertReal(villager.getInventory(), stack);
+        if (!rejected.isEmpty()) Block.popResource(level, pos, rejected);
     }
 
     private static BlockPos targetLog(CompoundTag data) {

@@ -42,6 +42,18 @@ CALL_SITES = {
         "movedTotal += VillageItemTransfers.moveRealItems(storage, inventory, item, limit - movedTotal, villager);",
         "ItemStack rejected = VillageItemTransfers.insertReal(destination, taken);",
     ),
+    "VillagerMining.java": (
+        "ItemStack rejected = VillageItemTransfers.insertReal(villager.getInventory(), stack);",
+        "if (!rejected.isEmpty()) Block.popResource(level, pos, rejected);",
+    ),
+    "VillagerTreeWork.java": (
+        "ItemStack rejected = VillageItemTransfers.insertReal(villager.getInventory(), stack);",
+    ),
+    "VillagerCaveSupport.java": (
+        "ItemStack taken = storage.removeItem(slot, requested);",
+        "ItemStack rejected = VillageItemTransfers.insertReal(inventory, taken);",
+        "ItemStack back = VillageItemTransfers.insertReal(storage, rejected);",
+    ),
 }
 for name, required in CALL_SITES.items():
     text = (JAVA / name).read_text(encoding="utf-8")
@@ -86,9 +98,29 @@ assert "if (existing.isEmpty() || existing.getItem() != source.getItem()" not in
 )
 assert "int moved = withdrawPlantingItems(villager, container, 16);" in autonomy
 
+for name in ("VillagerMining.java", "VillagerTreeWork.java"):
+    text = (JAVA / name).read_text(encoding="utf-8")
+    assert "for (int pass = 0; pass < 2 && !stack.isEmpty(); pass++)" not in text, (
+        f"{name} must not keep its own copy of the two-pass insert; the shared helper owns it"
+    )
+
+cave = (JAVA / "VillagerCaveSupport.java").read_text(encoding="utf-8")
+assert "ItemStack offered = new ItemStack(Items.TORCH, requested);" not in cave, (
+    "a torch restock must move the stored stack, never a rebuilt one"
+)
+assert "int moved = requested - remainder.getCount();" not in cave, (
+    "counting what a rebuilt stack did not accept is how stack data used to be lost"
+)
+
 tests = (JAVA / "VillageReservationGameTests.java").read_text(encoding="utf-8")
 assert "public static void realStackInsertsNeverMergeDifferentComponents(GameTestHelper helper) {" in tests, (
     "the component rule needs an in-world regression test, not only a static one"
+)
+assert "public static void minerStoresRealDropsWithoutMergingDifferentComponents(GameTestHelper helper) {" in tests, (
+    "the miner's own deposit path needs an in-world regression test as well"
+)
+assert "public static void torchRestockKeepsTheStorageReserveTheStackNameAndReportsItsBox(GameTestHelper helper) {" in tests, (
+    "the torch restock needs an in-world test for its reserve and its stack identity"
 )
 
 registry = (JAVA / "VillageRegistry.java").read_text(encoding="utf-8")
@@ -99,4 +131,4 @@ assert "if (moved > 0) VillageItemTransfers.moveRealItems(to, from, item, moved,
     "a partial port transfer must be rolled back so the port stays transactional"
 )
 print("ITEM IDENTITY PRESERVATION PASSED: every container transfer moves real stacks with their "
-      "damage and components; only recipe consumption stays count-based")
+      "damage and components, mining and cave deposits included; only recipe consumption stays count-based")

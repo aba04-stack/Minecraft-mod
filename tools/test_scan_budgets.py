@@ -304,7 +304,51 @@ assert "if (now - lastLure < 20L) return;" not in LIVESTOCK, (
 )
 assert LIVESTOCK.index("if (isSafeStand(level, stand)) stands.add(stand.immutable());") > 0
 
+# 13. Miner and cave support: one reservation lookup per search, reported boxes, one read per position.
+MINING = (JAVA / "VillagerMining.java").read_text(encoding="utf-8")
+CAVE = (JAVA / "VillagerCaveSupport.java").read_text(encoding="utf-8")
+
+assert MINING.count("List<BlockPos> reserved = reservedOreTargets(level, villager);") == 2, (
+    "both miner searches must resolve the other miners' targets once per search"
+)
+assert MINING.count("level.getEntitiesOfClass(Villager.class, area,") == 1, (
+    "the entity area query belongs to the shared lookup, never to a per-candidate question"
+)
+assert "VillageScanStats.recordEntityAreaScan();" in MINING, (
+    "an entity area scan over a village-sized box must be counted like every other scan"
+)
+assert "isReservedByAnotherMiner(reserved, pos)" in MINING and "!isReservedByAnotherMiner(level" not in MINING, (
+    "the reservation answer must come from the list resolved before the loop"
+)
+SEARCH_START = MINING.index("static BlockPos findNearestOre")
+SEARCH = MINING[SEARCH_START:MINING.index("findNearestQuarryBlock", SEARCH_START)]
+assert (SEARCH.index("isSafeMineTarget(level, villager, pos, state)")
+        < SEARCH.index("!isReservedByAnotherMiner(reserved, pos)")
+        < SEARCH.index("hasExposedFace(level, pos)")
+        < SEARCH.index("findWorkPosition(level, villager, pos)")), (
+    "cheapest tests first: the ray-traced work position may only run for a candidate that survived "
+    "the state, safety, reservation and exposure checks"
+)
+assert MINING.count("VillageScanStats.recordScan(scanned);") == 2, (
+    "both miner searches run on their own retry timer and must report what they read"
+)
+assert "if (!visited.add(pos.asLong())) continue;" in MINING, (
+    "the vein snapshot must mark a position before reading it, not only when it matches the vein"
+)
+assert "|| !isOre(state) || !visited.add(pos.asLong())) continue;" not in MINING, (
+    "marking only matching positions lets every neighbour re-read the same non-vein block"
+)
+assert "needsCobblestone" not in MINING and "isCountedQuarryMaterial" not in MINING, (
+    "dead code that walks a 33x33x9 box unreported must not come back"
+)
+assert "VillageScanRings.collectInBox(origin, radius, 4, 4," in MINING, (
+    "the pickaxe search must use the shared ring walk and report its box"
+)
+assert "VillageScanRings.collectInBox(center, radius, 4, 4," in CAVE, (
+    "the torch restock must use the shared ring walk and report its box"
+)
+
 print("SCAN BUDGETS PASSED: ring-ordered early-exit scans, bounded presence caches, shared tool and "
       "crop passes, membership refusal cache, per-tick settlement scan quota, bounded storage searches, "
       "ring-ordered registry storage lookups, cheap throttles before expensive reads, "
-      "deterministic GameTest budgets")
+      "one miner reservation lookup per search, deterministic GameTest budgets")

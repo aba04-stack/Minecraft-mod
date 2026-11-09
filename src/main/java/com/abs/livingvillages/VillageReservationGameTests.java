@@ -3525,6 +3525,158 @@ public final class VillageReservationGameTests {
         });
     }
 
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "miner_search_budget")
+    public static void minerOreSearchResolvesRivalTargetsOnceAndStillHonoursThem(GameTestHelper helper) {
+        var level = helper.getLevel();
+        for (int x = 0; x <= 11; x++) {
+            for (int z = 0; z <= 3; z++) {
+                helper.setBlock(x, 0, z, Blocks.STONE);
+                helper.setBlock(x, 1, z, Blocks.AIR);
+                helper.setBlock(x, 2, z, Blocks.AIR);
+            }
+        }
+        // Eight exposed iron ores in one row: every one of them used to pay its own entity area scan
+        // while the search asked "is another miner already working here?".
+        List<BlockPos> ores = new ArrayList<>();
+        for (int x = 2; x <= 9; x++) {
+            helper.setBlock(x, 1, 2, Blocks.IRON_ORE);
+            ores.add(helper.absolutePos(new BlockPos(x, 1, 2)));
+        }
+        Villager miner = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        miner.setNoAi(true);
+        miner.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_MINER);
+        ItemStack pickaxe = new ItemStack(Items.IRON_PICKAXE);
+
+        BlockPos[] nearest = new BlockPos[1];
+        VillageScanStats.ScanReport report = VillageScanStats.measure(
+            () -> nearest[0] = VillagerMining.findNearestOre(level, miner, pickaxe, null));
+        helper.assertTrue(report.entityAreaScans() == 1,
+            "One ore search must resolve the other miners once, not once per exposed ore; got "
+                + report.entityAreaScans() + " entity area scans for eight candidates.");
+        helper.assertTrue(report.blockPositions() > 0,
+            "The miner search must report the positions it reads, it runs on its own retry timer.");
+        helper.assertTrue(nearest[0] != null && nearest[0].equals(ores.get(0)),
+            "The shared reservation lookup must still return the nearest mineable ore, got " + nearest[0] + ".");
+
+        // A rival miner holding the nearest ore also keeps every ore within six blocks of it.
+        Villager rival = helper.spawn(EntityType.VILLAGER, 6, 1, 1);
+        rival.setNoAi(true);
+        CompoundTag rivalData = rival.getPersistentData();
+        rivalData.putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_MINER);
+        rivalData.putBoolean(VillagerMining.ACTIVE, true);
+        rivalData.putInt(VillagerMining.ORE_X, nearest[0].getX());
+        rivalData.putInt(VillagerMining.ORE_Y, nearest[0].getY());
+        rivalData.putInt(VillagerMining.ORE_Z, nearest[0].getZ());
+
+        BlockPos[] afterRival = new BlockPos[1];
+        VillageScanStats.ScanReport rivalReport = VillageScanStats.measure(
+            () -> afterRival[0] = VillagerMining.findNearestOre(level, miner, pickaxe, null));
+        helper.assertTrue(rivalReport.entityAreaScans() == 1,
+            "The rival lookup must stay a single entity area scan, got " + rivalReport.entityAreaScans() + ".");
+        helper.assertTrue(afterRival[0] != null && afterRival[0].equals(ores.get(7)),
+            "Only the ore farther than six blocks from the rival's target may be taken, got " + afterRival[0] + ".");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "miner_store_identity")
+    public static void minerStoresRealDropsWithoutMergingDifferentComponents(GameTestHelper helper) {
+        placeFloor(helper);
+        Villager miner = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        miner.setNoAi(true);
+        var inventory = miner.getInventory();
+        int lastSlot = inventory.getContainerSize() - 1;
+        ItemStack elderOre = new ItemStack(Items.IRON_ORE, 64);
+        elderOre.set(DataComponents.CUSTOM_NAME, Component.literal("Руда старосты"));
+        inventory.setItem(0, elderOre);
+        for (int slot = 1; slot < lastSlot; slot++) {
+            inventory.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+        }
+        helper.assertTrue(inventory.getItem(lastSlot).isEmpty(),
+            "The fixture must leave exactly one free inventory slot.");
+
+        ItemStack minedOre = new ItemStack(Items.IRON_ORE, 10);
+        minedOre.set(DataComponents.CUSTOM_NAME, Component.literal("Руда шахтёра"));
+        VillagerMining.storeOrDrop(miner, helper.getLevel(), miner.blockPosition(), minedOre);
+
+        ItemStack stored = inventory.getItem(lastSlot);
+        helper.assertTrue(stored.getCount() == 10
+                && Component.literal("Руда шахтёра").equals(stored.get(DataComponents.CUSTOM_NAME)),
+            "A mined stack must be stored as itself, with its own name, in the free slot.");
+        helper.assertTrue(inventory.getItem(0).getCount() == 64
+                && Component.literal("Руда старосты").equals(inventory.getItem(0).get(DataComponents.CUSTOM_NAME)),
+            "Storing a differently named ore must never merge into the elder's named stack.");
+
+        // Same name, same components: vanilla merges, and only what does not fit hits the ground as the
+        // very same stack instead of being rebuilt out of a count.
+        int room = 64 - stored.getCount();
+        ItemStack overflow = new ItemStack(Items.IRON_ORE, room + 32);
+        overflow.set(DataComponents.CUSTOM_NAME, Component.literal("Руда шахтёра"));
+        VillagerMining.storeOrDrop(miner, helper.getLevel(), miner.blockPosition(), overflow);
+        List<ItemEntity> dropped = helper.getLevel().getEntitiesOfClass(ItemEntity.class,
+            new AABB(miner.blockPosition()).inflate(3.0D));
+        helper.assertTrue(dropped.size() == 1 && dropped.get(0).getItem().getCount() == 32
+                && Component.literal("Руда шахтёра").equals(dropped.get(0).getItem().get(DataComponents.CUSTOM_NAME)),
+            "What the miner cannot carry must hit the ground as the same named stack, got " + dropped.size()
+                + " drops.");
+        helper.assertTrue(inventory.getItem(lastSlot).getCount() == 64
+                && inventory.getItem(0).getCount() == 64,
+            "The merge must fill the matching stack to its limit and leave every other stack alone.");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 20, batch = "torch_restock")
+    public static void torchRestockKeepsTheStorageReserveTheStackNameAndReportsItsBox(GameTestHelper helper) {
+        placeFloor(helper);
+        BlockPos chestRelative = new BlockPos(1, 1, 1);
+        helper.setBlock(chestRelative, Blocks.CHEST);
+        BlockPos chest = helper.absolutePos(chestRelative);
+        helper.assertTrue(helper.getLevel().getBlockEntity(chest) instanceof Container,
+            "The fixture chest must be a real container.");
+        Container storage = (Container) helper.getLevel().getBlockEntity(chest);
+        ItemStack torches = new ItemStack(Items.TORCH, 20);
+        torches.set(DataComponents.CUSTOM_NAME, Component.literal("Факелы стражи"));
+        storage.setItem(0, torches);
+        storage.setChanged();
+
+        Villager guard = helper.spawn(EntityType.VILLAGER, 0, 1, 2);
+        guard.setNoAi(true);
+        CompoundTag data = guard.getPersistentData();
+        data.putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_GUARD);
+        BlockPos home = helper.absolutePos(new BlockPos(0, 1, 2));
+        data.putInt(VillagerRoles.HOME_X, home.getX());
+        data.putInt(VillagerRoles.HOME_Y, home.getY());
+        data.putInt(VillagerRoles.HOME_Z, home.getZ());
+        helper.assertTrue(VillageRegistry.isStorageForVillage(helper.getLevel(), home, chest),
+            "The fixture chest must belong to the guard's settlement before the restock runs.");
+
+        int radius = Math.min(12, LivingVillagesConfig.RESOURCE_CHEST_RADIUS_BLOCKS.get());
+        long box = (long) (2 * radius + 1) * (2 * radius + 1) * 9L;
+        VillageScanStats.ScanReport report = VillageScanStats.measure(
+            () -> VillagerCaveSupport.restockTorches(guard, helper.getLevel(), data, 0L));
+        helper.assertTrue(report.blockPositions() == box,
+            "One torch restock must report the whole box it walks exactly once: expected " + box
+                + ", got " + report.blockPositions() + ".");
+
+        int carried = 0;
+        for (int slot = 0; slot < guard.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = guard.getInventory().getItem(slot);
+            if (!stack.is(Items.TORCH)) continue;
+            carried += stack.getCount();
+            helper.assertTrue(Component.literal("Факелы стражи").equals(stack.get(DataComponents.CUSTOM_NAME)),
+                "Taken torches must keep the components of the stored stack.");
+        }
+        helper.assertTrue(carried == 12 && storage.getItem(0).getCount() == 8,
+            "The worker must stop at sixteen torches and the storage must keep its reserve of eight;"
+                + " carried " + carried + ", left " + storage.getItem(0).getCount() + ".");
+        helper.assertTrue(Component.literal("Факелы стражи").equals(storage.getItem(0).get(DataComponents.CUSTOM_NAME)),
+            "The reserve left in the chest must stay the same named stack.");
+        helper.assertTrue(helper.getLevel().getEntitiesOfClass(ItemEntity.class, new AABB(home).inflate(4.0D)).isEmpty(),
+            "A restock that fits into the worker's inventory must not drop torches on the ground.");
+        helper.assertTrue(data.getLong("livingvillages_cave_next_torch_restock") == 400L,
+            "The restock must schedule its next attempt 400 ticks ahead.");
+        helper.succeed();
+    }
+
     private static int countItem(Container container, Item item) {
         if (container == null || item == null) return 0;
         int total = 0;
