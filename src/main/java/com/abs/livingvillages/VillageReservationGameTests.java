@@ -3528,38 +3528,48 @@ public final class VillageReservationGameTests {
     @GameTest(template = "empty", timeoutTicks = 20, batch = "miner_search_budget")
     public static void minerOreSearchResolvesRivalTargetsOnceAndStillHonoursThem(GameTestHelper helper) {
         var level = helper.getLevel();
-        for (int x = 0; x <= 11; x++) {
+        // The fixture is built for the default search radius of eight blocks: the row reaches seven
+        // blocks to each side of the miner, so the outermost ore is still inside the search circle
+        // (the circle culls columns by dx*dx + dz*dz, not by a square box).
+        int searchRadius = LivingVillagesConfig.MINER_SEARCH_RADIUS_BLOCKS.get();
+        helper.assertTrue(searchRadius >= 7,
+            "This fixture needs a miner search radius of at least seven blocks, got " + searchRadius + ".");
+        for (int x = 0; x <= 14; x++) {
             for (int z = 0; z <= 3; z++) {
                 helper.setBlock(x, 0, z, Blocks.STONE);
                 helper.setBlock(x, 1, z, Blocks.AIR);
                 helper.setBlock(x, 2, z, Blocks.AIR);
             }
         }
-        // Eight exposed iron ores in one row: every one of them used to pay its own entity area scan
-        // while the search asked "is another miner already working here?".
+        // Thirteen exposed iron ores in one row: every one of them used to pay its own entity area
+        // scan while the search asked "is another miner already working here?".
         List<BlockPos> ores = new ArrayList<>();
-        for (int x = 2; x <= 9; x++) {
-            helper.setBlock(x, 1, 2, Blocks.IRON_ORE);
-            ores.add(helper.absolutePos(new BlockPos(x, 1, 2)));
+        for (int x = 1; x <= 13; x++) {
+            helper.setBlock(x, 1, 1, Blocks.IRON_ORE);
+            ores.add(helper.absolutePos(new BlockPos(x, 1, 1)));
         }
-        Villager miner = helper.spawn(EntityType.VILLAGER, 1, 1, 1);
+        Villager miner = helper.spawn(EntityType.VILLAGER, 6, 1, 3);
         miner.setNoAi(true);
         miner.getPersistentData().putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_MINER);
         ItemStack pickaxe = new ItemStack(Items.IRON_PICKAXE);
+        BlockPos ownRow = ores.get(5);
+        helper.assertTrue(ownRow.getX() == miner.blockPosition().getX(),
+            "The fixture must put the miner opposite the middle ore of the row.");
 
         BlockPos[] nearest = new BlockPos[1];
         VillageScanStats.ScanReport report = VillageScanStats.measure(
             () -> nearest[0] = VillagerMining.findNearestOre(level, miner, pickaxe, null));
         helper.assertTrue(report.entityAreaScans() == 1,
             "One ore search must resolve the other miners once, not once per exposed ore; got "
-                + report.entityAreaScans() + " entity area scans for eight candidates.");
+                + report.entityAreaScans() + " entity area scans for thirteen candidates.");
         helper.assertTrue(report.blockPositions() > 0,
             "The miner search must report the positions it reads, it runs on its own retry timer.");
-        helper.assertTrue(nearest[0] != null && nearest[0].equals(ores.get(0)),
+        helper.assertTrue(nearest[0] != null && nearest[0].equals(ownRow),
             "The shared reservation lookup must still return the nearest mineable ore, got " + nearest[0] + ".");
 
-        // A rival miner holding the nearest ore also keeps every ore within six blocks of it.
-        Villager rival = helper.spawn(EntityType.VILLAGER, 6, 1, 1);
+        // A rival miner holding the nearest ore also keeps every ore within six blocks of it, so only
+        // the far end of the row, seven blocks away, stays available.
+        Villager rival = helper.spawn(EntityType.VILLAGER, 6, 1, 2);
         rival.setNoAi(true);
         CompoundTag rivalData = rival.getPersistentData();
         rivalData.putString(VillagerRoles.ROLE_KEY, VillagerRoles.ROLE_MINER);
@@ -3573,8 +3583,9 @@ public final class VillageReservationGameTests {
             () -> afterRival[0] = VillagerMining.findNearestOre(level, miner, pickaxe, null));
         helper.assertTrue(rivalReport.entityAreaScans() == 1,
             "The rival lookup must stay a single entity area scan, got " + rivalReport.entityAreaScans() + ".");
-        helper.assertTrue(afterRival[0] != null && afterRival[0].equals(ores.get(7)),
-            "Only the ore farther than six blocks from the rival's target may be taken, got " + afterRival[0] + ".");
+        helper.assertTrue(afterRival[0] != null && afterRival[0].equals(ores.get(12)),
+            "Only the ore farther than six blocks from the rival's target may be taken, got " + afterRival[0]
+                + " while the row ends at " + ores.get(12) + ".");
         helper.succeed();
     }
 
